@@ -1,21 +1,33 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { parseJsoncV1 } from "./jsonc.ts";
-import { decodeBrandV1 } from "../../core/contracts/brand.ts";
 import {
-  PROFILE_DIRECTORY_V1,
-  REPO_ROOT_V1,
+  decodeBrandV1,
+  isBuiltInAuthPackageIdV1,
+  type AuthPackageSettingV1,
+  type BuiltInAuthPackageIdV1,
+} from "@frockbot/core/contracts";
+import {
+  PACKAGE_ROOT_V1,
   type DeploymentProfileV1,
   type DeploymentWorkerV1,
 } from "./profile.ts";
 
-/** The deployables, and where each one's tracked template lives. */
+/**
+ * The deployables, and where each one's tracked template lives, relative to
+ * the directory this package sits in: `apps/` in the FrockBot repository.
+ *
+ * Only the app Worker is `@frockbot/cloudflare` itself, and so the only one a
+ * consumer's `node_modules` carries. The others are read from beside it when
+ * they are there, which they are in a FrockBot checkout; a profile outside it
+ * that names one is refused with the reason (see `readTemplateV1`).
+ */
 export const DEPLOYABLE_WORKERS_V1 = {
-  app: { directory: "apps/cloudflare" },
-  computerHost: { directory: "apps/computer-host" },
-  appletBuild: { directory: "apps/applet-build" },
-  marketing: { directory: "apps/marketing" },
-  adminPortal: { directory: "apps/admin-portal" },
+  app: { directory: "cloudflare" },
+  computerHost: { directory: "computer-host" },
+  appletBuild: { directory: "applet-build" },
+  marketing: { directory: "marketing" },
+  adminPortal: { directory: "admin-portal" },
 } as const;
 
 export type DeployableWorkerV1 = keyof typeof DEPLOYABLE_WORKERS_V1;
@@ -55,29 +67,28 @@ export const PUBLISHED_IMAGE_REGISTRY_V1 = "docker.io/timoconnellaus";
  *
  * `apps/cloudflare/package.json` maps it to the better-auth chooser, which is
  * what `wrangler dev`, every suite and the hosted deploy resolve. An `access`
- * profile's generated config aliases it to the other chooser, so the build a
- * deployment ships is decided by its own config and neither bundle carries the
- * Package it did not choose. A bare specifier rather than a relative path
- * because esbuild — which is what wrangler's `alias` reaches — refuses to alias
- * a relative import.
+ * profile's generated config aliases it to the other chooser, and a profile
+ * that names a chooser by path — a white-label's own Package (ADR 0038 §3) —
+ * aliases it to that file, so the build a deployment ships is decided by its
+ * own config and no bundle carries a Package it did not choose. A bare
+ * specifier rather than a relative path because esbuild — which is what
+ * wrangler's `alias` reaches — refuses to alias a relative import.
  */
 const AUTH_PACKAGE_ALIAS_V1 = "#auth-package";
 
 /** The build the tracked source already resolves to, so no alias is written. */
 const TRACKED_AUTH_PACKAGE_V1 = "better-auth";
 
-/** The chooser each auth Package's build resolves that specifier to. */
-export const AUTH_PACKAGE_CHOOSERS_V1: Record<
-  DeploymentProfileV1["authPackage"],
-  string
-> = {
-  "better-auth": "./src/auth-package.ts",
-  access: "./src/auth-package.access.ts",
-};
+/** The chooser each built-in auth Package's build resolves that specifier to. */
+export const AUTH_PACKAGE_CHOOSERS_V1: Record<BuiltInAuthPackageIdV1, string> =
+  {
+    "better-auth": "./src/auth-package.ts",
+    access: "./src/auth-package.access.ts",
+  };
 
 /**
  * The specifier the Worker imports its brand through
- * ([ADR 0038](../../docs/adr/0038-white-label-deployments.md)).
+ * ([ADR 0038](../../../docs/adr/0038-white-label-deployments.md)).
  *
  * The same shape as `#auth-package`: `apps/cloudflare/package.json` maps it to
  * FrockBot's brand, and a profile that names its own brand module gets an
@@ -116,13 +127,12 @@ export interface GenerateOptionsV1 {
    */
   applicationHash?: string;
   /**
-   * Where the profile file lives, which a `brand` path is relative to.
-   * `deployments/`, except in tests.
+   * Where the profile file lives, which a `brand`, `webClient` or auth
+   * Package path is relative to.
    */
-  profileDirectory?: string;
-  /** Where `.deployment/<name>/` is rooted. The repository, except in tests. */
-  outputRoot?: string;
-  repoRoot?: string;
+  profileDirectory: string;
+  /** Where `<name>/<worker>/wrangler.jsonc` is written: a `.deployment/`. */
+  outputRoot: string;
 }
 
 export interface GeneratedConfigV1 {
@@ -181,9 +191,15 @@ export function profileWorkersV1(
   );
 }
 
-function readTemplateV1(repoRoot: string, worker: DeployableWorkerV1) {
-  const directory = join(repoRoot, DEPLOYABLE_WORKERS_V1[worker].directory);
+function readTemplateV1(workersRoot: string, worker: DeployableWorkerV1) {
+  const directory = join(workersRoot, DEPLOYABLE_WORKERS_V1[worker].directory);
   const file = join(directory, "wrangler.jsonc");
+  if (!existsSync(file)) {
+    throw new Error(
+      `${worker} has no tracked wrangler config at ${file}. Only the app Worker is published as @frockbot/cloudflare; ` +
+        "deploy the other Workers from a FrockBot checkout of the same release.",
+    );
+  }
   const config = parseJsoncV1(readFileSync(file, "utf8"), file);
   if (typeof config !== "object" || config === null || Array.isArray(config)) {
     throw new Error(`${file} is not a wrangler config`);
@@ -292,7 +308,7 @@ function bindingNamed(
  */
 export function profileBrandModuleV1(
   profile: DeploymentProfileV1,
-  profileDirectory: string = PROFILE_DIRECTORY_V1,
+  profileDirectory: string,
 ): string | undefined {
   return profile.brand === undefined
     ? undefined
@@ -307,7 +323,7 @@ export function profileBrandModuleV1(
  */
 export async function validateProfileBrandV1(
   profile: DeploymentProfileV1,
-  profileDirectory: string = PROFILE_DIRECTORY_V1,
+  profileDirectory: string,
 ): Promise<void> {
   const module = profileBrandModuleV1(profile, profileDirectory);
   if (module === undefined) return;
@@ -322,6 +338,118 @@ export async function validateProfileBrandV1(
   if (!existsSync(icon)) {
     throw new Error(
       `The brand at ${module} names the icon ${icon}, which does not exist`,
+    );
+  }
+}
+
+/**
+ * The chooser module a profile names by path, as an absolute path, or
+ * undefined for a built-in Package.
+ */
+export function profileAuthChooserV1(
+  profile: DeploymentProfileV1,
+  profileDirectory: string,
+): string | undefined {
+  return isBuiltInAuthPackageIdV1(profile.authPackage)
+    ? undefined
+    : resolve(profileDirectory, profile.authPackage);
+}
+
+/** The shape of a chooser module, as far as the generator reads one. */
+interface LoadedAuthChooserV1 {
+  AUTH_PACKAGE_V1?: {
+    id?: unknown;
+    required?: readonly AuthPackageSettingV1[];
+    nativeTokenSecret?: { name?: unknown };
+  };
+}
+
+/**
+ * What the production-secrets check requires of a deploy's auth Package, for
+ * a profile whose Package is not one this package ships: the chooser's own
+ * name and the secrets its profile says it needs. Undefined for a built-in
+ * Package, whose requirements the manifest already knows.
+ */
+export async function profileAuthPackageV1(
+  profile: DeploymentProfileV1,
+  profileDirectory: string,
+): Promise<
+  { id: string; required: readonly AuthPackageSettingV1[] } | undefined
+> {
+  const chooser = profileAuthChooserV1(profile, profileDirectory);
+  if (chooser === undefined) return undefined;
+  const id = (await loadAuthChooserV1(profile, chooser)).id;
+  return { id, required: profile.authEnvironment?.secrets ?? [] };
+}
+
+async function loadAuthChooserV1(
+  profile: DeploymentProfileV1,
+  chooser: string,
+): Promise<{ id: string; required: readonly AuthPackageSettingV1[] }> {
+  if (!existsSync(chooser)) {
+    throw new Error(
+      `Profile "${profile.name}" names the auth Package ${profile.authPackage}, and there is no ${chooser}`,
+    );
+  }
+  const build = ((await import(chooser)) as LoadedAuthChooserV1)
+    .AUTH_PACKAGE_V1;
+  if (
+    typeof build !== "object" ||
+    build === null ||
+    typeof build.id !== "string" ||
+    !Array.isArray(build.required)
+  ) {
+    throw new Error(
+      `${chooser} exports no AUTH_PACKAGE_V1 with an id and its required settings; an auth Package chooser exports what apps/cloudflare/src/auth-package.ts does`,
+    );
+  }
+  return { id: build.id, required: build.required };
+}
+
+/**
+ * Load the chooser a profile names by path and hold it to its profile: it
+ * must name itself something other than the two Packages this repository
+ * ships, and the settings it requires must be exactly the ones the profile
+ * says where to find — as secrets the release checks and deploys, or as vars
+ * the config carries. A setting in neither would reach production unset, and
+ * the Package would answer 503 to every sign-in.
+ */
+export async function validateProfileAuthPackageV1(
+  profile: DeploymentProfileV1,
+  profileDirectory: string,
+): Promise<void> {
+  const chooser = profileAuthChooserV1(profile, profileDirectory);
+  if (chooser === undefined) return;
+  const build = await loadAuthChooserV1(profile, chooser);
+  if (isBuiltInAuthPackageIdV1(build.id)) {
+    throw new Error(
+      `${chooser} names itself "${build.id}", which is one of the Packages @frockbot/cloudflare ships; an external Package names itself`,
+    );
+  }
+  const environment = profile.authEnvironment ?? {};
+  const secrets = (environment.secrets ?? []).map((secret) => secret.name);
+  const vars = Object.keys(environment.vars ?? {});
+  const both = secrets.filter((name) => vars.includes(name));
+  if (both.length > 0) {
+    throw new Error(
+      `Profile "${profile.name}" names ${both.join(", ")} as both a secret and a var`,
+    );
+  }
+  const named = new Set([...secrets, ...vars]);
+  const required = new Set(build.required.map((setting) => setting.name));
+  const unnamed = [...required].filter((name) => !named.has(name));
+  const unread = [...named].filter((name) => !required.has(name));
+  if (unnamed.length > 0 || unread.length > 0) {
+    throw new Error(
+      [
+        `Profile "${profile.name}"'s authEnvironment must name exactly what ${chooser} requires.`,
+        ...(unnamed.length > 0
+          ? [`Required and not named: ${unnamed.join(", ")}.`]
+          : []),
+        ...(unread.length > 0
+          ? [`Named and not required: ${unread.join(", ")}.`]
+          : []),
+      ].join(" "),
     );
   }
 }
@@ -345,6 +473,7 @@ function identityVarsV1(
     vars.ACCESS_AUD = profile.access.aud;
   }
   if (profile.email) vars.EMAIL_DOMAIN = profile.email.domain;
+  Object.assign(vars, profile.authEnvironment?.vars ?? {});
   // A string rather than a JSON var, so it is read and decoded exactly like
   // every other setting the Worker takes (`native-auth.ts`).
   if (profile.nativeApps) vars.NATIVE_APPS = JSON.stringify(profile.nativeApps);
@@ -378,14 +507,15 @@ export function generateWorkerConfigV1(
   worker: DeployableWorkerV1,
   options: GenerateOptionsV1,
 ): GeneratedConfigV1 {
-  const { profile } = options;
-  const repoRoot = options.repoRoot ?? REPO_ROOT_V1;
-  const outputRoot = options.outputRoot ?? join(repoRoot, ".deployment");
+  const { profile, outputRoot } = options;
+  // The directory this package sits in, where `DEPLOYABLE_WORKERS_V1` names
+  // each template.
+  const workersRoot = join(PACKAGE_ROOT_V1, "..");
   const entry = profile.workers?.[worker];
   if (!entry) {
     throw new Error(`Profile "${profile.name}" does not deploy ${worker}`);
   }
-  const template = readTemplateV1(repoRoot, worker);
+  const template = readTemplateV1(workersRoot, worker);
   const config = structuredClone(template.config);
   const resources = resourceNamesV1(profile);
 
@@ -436,12 +566,16 @@ export function generateWorkerConfigV1(
 
   const authDatabase = bindingNamed(asArray(config.d1_databases), "AUTH_DB");
   if (authDatabase) {
-    if (profile.authPackage === "access") {
+    const databaseId = options.d1DatabaseId ?? profile.d1DatabaseId;
+    if (
+      profile.authPackage === "access" ||
+      (profile.authPackage !== "better-auth" && databaseId === undefined)
+    ) {
       // The Access Package stores nothing, so the deployment has no database to
-      // bind and the installer creates none.
+      // bind and the installer creates none. A white-label's Package gets the
+      // `AUTH_DB` binding only when its profile names a database for it.
       delete config.d1_databases;
     } else {
-      const databaseId = options.d1DatabaseId ?? profile.d1DatabaseId;
       if (!databaseId) {
         throw new Error(
           `Profile "${profile.name}" builds better-auth but names no d1DatabaseId; pass --d1-database-id when the deploy creates it`,
@@ -453,13 +587,33 @@ export function generateWorkerConfigV1(
   }
 
   if (worker === "app" && profile.authPackage !== TRACKED_AUTH_PACKAGE_V1) {
-    // Only when the profile builds the other Package: the tracked source
+    // Only when the profile builds another Package: the tracked source
     // already resolves `#auth-package` to the default chooser, so the hosted
     // and staging configs stay byte-for-byte what production runs and the
     // equivalence gate has nothing new to approve.
+    const external = profileAuthChooserV1(profile, options.profileDirectory);
     config.alias = {
       ...((config.alias as Record<string, unknown>) ?? {}),
-      [AUTH_PACKAGE_ALIAS_V1]: AUTH_PACKAGE_CHOOSERS_V1[profile.authPackage],
+      // Written relative to the template, like the brand below, and rewritten
+      // with every other path once the output directory is known.
+      [AUTH_PACKAGE_ALIAS_V1]:
+        external === undefined
+          ? AUTH_PACKAGE_CHOOSERS_V1[
+              profile.authPackage as BuiltInAuthPackageIdV1
+            ]
+          : relative(template.directory, external),
+    };
+  }
+
+  if (worker === "app" && profile.webClient !== undefined) {
+    // The white-label's own client, staged by `build-flutter-web.ts` from its
+    // own application; rewritten from the template's directory below.
+    config.assets = {
+      ...((config.assets as Record<string, unknown>) ?? {}),
+      directory: relative(
+        template.directory,
+        resolve(options.profileDirectory, profile.webClient),
+      ),
     };
   }
 
@@ -526,7 +680,7 @@ export function writeGeneratedConfigsV1(
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(
       file,
-      `// Generated by \`bun run deployment:config ${profileName}\`. Not tracked.\n` +
+      `// Generated by \`frockbot-deployment-config ${profileName}\`. Not tracked.\n` +
         `// Deployment identity comes from \`deployments/${profileName}.json\`; everything\n` +
         `// else is the tracked wrangler config this was derived from.\n` +
         `${JSON.stringify(config, null, 2)}\n`,

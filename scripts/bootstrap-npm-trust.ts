@@ -30,6 +30,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { PUBLISHED_WORKSPACES_V1 } from "./npm-publish.ts";
 
 export const REPOSITORY = "timoconnellaus/frockbot";
 export const WORKFLOW_FILE = "release.yml";
@@ -46,14 +47,13 @@ export type WorkspacePackage = {
 /**
  * Every publishable workspace, in a stable order.
  *
- * The Plugin SDK is the only workspace a release publishes: nothing else in
- * this repository has a consumer off it.
+ * The ones a release publishes (`scripts/npm-publish.ts`): the Plugin SDK,
+ * and every workspace the Worker's graph reaches, which a white-label
+ * installs (ADR 0038 §5).
  */
 export function readWorkspacePackages(root: string): WorkspacePackage[] {
-  const directories = [join("applets", "sdk")];
-
   const packages: WorkspacePackage[] = [];
-  for (const directory of directories) {
+  for (const directory of PUBLISHED_WORKSPACES_V1) {
     const manifestPath = join(root, directory, "package.json");
     let manifest: { name?: string };
     try {

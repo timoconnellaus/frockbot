@@ -15,13 +15,23 @@ writes `.deployment/<profile>/<worker>/wrangler.jsonc`, which is what every
 `wrangler deploy -c`, `wrangler d1 migrations apply -c` and `wrangler r2 object
 put -c` in `release.yml` and `main.yml` takes. `.deployment/` is git-ignored.
 
-`deployments/profile.schema.json` is the contract. `ajv` refuses a profile that
-does not meet it, so a missing account or a malformed hostname fails before a
-config is written rather than during a deploy. The TypeScript type is generated
-from the same document: `scripts/generate-deployment-profile-schema.ts` writes
-`profile-schema.generated.ts` as `FromSchema` with `parseIfThenElseKeywords`, so
-an Access profile that names no Access application is invalid at the type as
-well. `bun run typecheck` fails when that file is stale.
+The generator is `@frockbot/cloudflare`'s, published with the Worker, and its
+bin is `frockbot-deployment-config` (`cli.ts`, run by Bun).
+`bun run deployment:config` is that bin over this repository's own
+`deployments/` and `.deployment/`, wherever it is run from; a white-label runs
+the bin itself, from its own repository (see [White-label](#white-label)).
+
+`profile.schema.json`, beside the generator, is the contract. `ajv` refuses a
+profile that does not meet it, so a missing account or a malformed hostname
+fails before a config is written rather than during a deploy. The TypeScript
+type is generated from the same document:
+`scripts/generate-deployment-profile-schema.ts` writes
+`profile-schema.generated.ts` as `FromSchema` with `parseIfThenElseKeywords`,
+and `profile.ts` spells out the three auth Package cases on top of it, because
+`FromSchema` reads a path-or-name `authPackage` as a plain `string` — so an
+Access profile that names no Access application, or a chooser path with no
+`authEnvironment`, is invalid at the type as well. `bun run typecheck` fails
+when the generated file is stale.
 
 Two values are flags rather than profile fields, because whoever deploys resolves
 them in the same run: `--d1-database-id` for a disposable stage that creates its
@@ -83,15 +93,19 @@ The tracked file, with identity applied:
 | `vars` without identity                   | plus the identity vars below                                                                              |
 | `containers[].image` a Dockerfile path    | the published image, when the profile's `images.source` is `registry`                                     |
 | no `send_email`                           | the app Worker's `SEND_EMAIL` sender, when the profile names an `email` domain (below)                    |
-| no `alias`                                | `#auth-package` for an `access` profile, `#brand` for a profile that names a `brand` (below)              |
+| no `alias`                                | `#auth-package` for an `access` profile or a chooser path, `#brand` for a profile that names a `brand`    |
 | `env.development`, `env.e2e`              | dropped — a named environment in a deployed config is a second Worker                                     |
+
+`assets.directory` becomes the profile's `webClient`, relative to the profile,
+when it names one: a white-label's own staged client (below).
 
 The identity vars the app Worker gains: `NATIVE_SLICE_2_AUTH` (the profile's
 `nativeAuth` list, comma-joined),
 `FROCK_AI_GATEWAY_ID`, `FROCK_AI_ACCOUNT_ID`, `FROCK_AI_AUTO_ROUTE`, `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD` when the profile
 builds the Access auth Package, and `EMAIL_DOMAIN` when it names an `email`
 domain (below), and `NATIVE_APPS` — the profile's `nativeApps` as JSON — when it
-names the signed apps its association files list. `FROCK_AI_ACCOUNT_ID` is what selects the compat
+names the signed apps its association files list, and the `authEnvironment.vars`
+of a profile whose auth Package is its own (below). `FROCK_AI_ACCOUNT_ID` is what selects the compat
 HTTP transport, the only one that accepts a `dynamic/<route>` model
 (cloudflare/ai#617); a profile with no `aiGateway` takes the `AI` binding, where
 Auto resolves to a concrete Workers AI model instead.
@@ -117,7 +131,7 @@ What a person sees — the product's name, the built-in model's name, the
 homepage outbound requests point back to, the icon and page logo, the palettes
 behind the named looks and whether What's New is served — is a `BrandV1`
 (`core/contracts/brand.ts`), chosen at build time the way the auth Package is
-([ADR 0038](../../docs/adr/0038-white-label-deployments.md)). The Worker imports
+([ADR 0038](../../../docs/adr/0038-white-label-deployments.md)). The Worker imports
 it through `#brand`, which `apps/cloudflare/package.json` maps to FrockBot's own,
 `apps/cloudflare/src/brand.ts`, and hands it to app code as data. A profile that
 names another module, relative to the profile file:
@@ -139,7 +153,10 @@ bun run apps/cloudflare/build-artifact.ts --brand deployments/wallet-pal/brand.t
 ```
 
 Without `--brand` it resolves `#brand` through the package import, which is
-FrockBot's.
+FrockBot's. Its icon, `src/brand-icon.png`, is a copy of
+`assets/marketing/app-icon/frockbot-icon-64.png` kept inside the package so the
+published default builds too; `src/brand.test.ts` holds the two to the same
+bytes.
 
 Where a deployment runs and which native apps sign in to it are the profile's
 (`nativeApps`), not the brand's.
@@ -199,7 +216,7 @@ and sends no email. What the domain needs in Cloudflare, once per deployment:
    quota, which the Limit Increase Request Form raises; past it a send is
    refused with `E_DAILY_LIMIT_EXCEEDED` and nothing leaves.
 4. **The profile.** Add `email`, and for `hosted` update
-   `fixtures/hosted/app.wrangler.jsonc` in the same commit — the equivalence
+   `scripts/deployment-config/fixtures/hosted/app.wrangler.jsonc` in the same commit — the equivalence
    gate below exists to make exactly that visible. Until the deploy lands the
    Worker has no domain: it refuses every message and sends none.
 5. **Check it.** In the app, choose a username under Account → Email
@@ -216,7 +233,7 @@ nothing is sent, and the addresses start working again when it comes back.
 
 ## The equivalence gate
 
-`fixtures/hosted/` holds the five wrangler configs exactly as production and
+`scripts/deployment-config/fixtures/hosted/` holds the five wrangler configs exactly as production and
 staging ran them before identity moved out. `scripts/deployment-config.test.ts`
 generates `hosted` and `staging` and proves the result is still those files,
 comments, key order and path spelling aside — because a Worker name, Durable
@@ -318,3 +335,80 @@ not an installer asset: `bun run setup` does not download it, and a deployer
 who wants the phone app builds it against their own origin (`docs/app-updates.md`).
 
 [image-management]: https://developers.cloudflare.com/containers/image-management/
+
+## White-label
+
+A white-label product is its own repository that installs FrockBot's packages at
+a release version ([ADR 0038](../../../docs/adr/0038-white-label-deployments.md)).
+Every workspace the Worker's graph reaches is published by `release.yml`'s
+`publish-npm` job at the tag's version — `@frockbot/core`, `app`, `providers`,
+`computer`, `frock-compose`, `applets` and this package, `@frockbot/cloudflare`
+— listed once in `scripts/npm-publish.ts`, which rewrites every `workspace:*`
+between them to that exact version. Pin the same exact version of each.
+
+Its repository holds a profile, a brand module, its own auth Package and its own
+thin Flutter application:
+
+```json
+{
+  "schemaVersion": 1,
+  "name": "wallet-pal",
+  "accountId": "…",
+  "prefix": "wallet-pal",
+  "authPackage": "../auth/chooser.ts",
+  "authEnvironment": {
+    "secrets": [{ "name": "SIGN_IN_SECRET", "why": "Signs every session." }],
+    "vars": { "SIGN_IN_APP": "…" }
+  },
+  "brand": "../brand/brand.ts",
+  "webClient": "../client/web",
+  "workers": { "app": { "hostnames": ["app.wallet-pal.example"] } }
+}
+```
+
+- **`authPackage` by path** names a chooser module the white-label wrote: it
+  exports `AUTH_PACKAGE_V1: AuthPackageBuildV1<AuthPackageEnvironmentV1>` and
+  the `AuthPackageEnvironmentV1` type, from nothing but
+  `@frockbot/core/contracts`, as `src/auth-package.ts` does. The generator
+  aliases `#auth-package` to it, imports it, refuses one that names itself
+  `better-auth` or `access`, and refuses a profile whose `authEnvironment` does
+  not name exactly the settings the chooser's `required` lists — each as a
+  secret the deploy carries or a var the config carries. It binds `AUTH_DB` only
+  when the profile names a `d1DatabaseId`.
+- **Secrets.** The production-secrets manifest (`src/production-secrets.ts`)
+  cannot import a chooser it was not built with, so the profile's
+  `authEnvironment.secrets` are what it requires in place of a built-in
+  Package's:
+
+  ```
+  frockbot-deployment-config secrets wallet-pal check
+  frockbot-deployment-config secrets wallet-pal write-secrets-file secrets.json
+  wrangler deploy -c .deployment/wallet-pal/app/wrangler.jsonc --secrets-file secrets.json
+  ```
+
+- **The client** is built from the white-label's own application, and the
+  artifact with its brand:
+
+  ```
+  bun node_modules/@frockbot/cloudflare/build-flutter-web.ts --app . --dist dist
+  bun node_modules/@frockbot/cloudflare/build-artifact.ts --brand brand/brand.ts --dist dist
+  ```
+
+  `webClient` then names `dist/web` relative to the profile, and
+  `dist/artifacts/foundation-v1.mjs` goes into the artifacts bucket under its own
+  sha256, which `--application-hash` names.
+
+- **Only the app Worker is in the package.** The Computer host and the Plugin
+  build service are deployed from a FrockBot checkout of the same release,
+  whose profile may pull the images `publish-images` pushes; a profile outside
+  this repository that names them is refused with that reason.
+
+`scripts/white-label-fixture/` is such a repository in miniature, with a STUB
+auth Package, and `bun run build:white-label` (`scripts/white-label-fixture.ts`)
+is the gate that proves the packages are consumable: it packs every published
+workspace exactly as the release does, installs the tarballs with npm into a
+scratch consumer, typechecks its chooser and brand with stock TypeScript, runs
+the bin, the secrets check and the artifact build, and runs `wrangler deploy
+--dry-run`, checking that the bundle carries its chooser and brand and neither
+better-auth nor FrockBot's brand. It runs with the build category and in
+`main.yml`'s `Validate` job.

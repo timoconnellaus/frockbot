@@ -1,6 +1,6 @@
 // The hosted deployment's administrative surface. No deployment identity: the
 // account, the Worker name, the hostname and the app Worker this binds belong to
-// `deployments/<profile>.json`, and `scripts/deployment-config.ts` joins the two
+// `deployments/<profile>.json`, and `bun run deployment:config` joins the two
 // into the config `wrangler deploy -c` takes (ADR 0028).
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",

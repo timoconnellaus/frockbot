@@ -1,6 +1,6 @@
 // Bindings, migrations and the container application. No deployment
 // identity: the account and the Worker name belong to
-// `deployments/<profile>.json`, and `scripts/deployment-config.ts` joins the
+// `deployments/<profile>.json`, and `bun run deployment:config` joins the
 // two into the config `wrangler deploy -c` takes (ADR 0028).
 {
   "$schema": "./node_modules/wrangler/config-schema.json",

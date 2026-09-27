@@ -1,7 +1,8 @@
 {
   "name": "@frockbot/frock-compose",
   "version": "0.0.1",
-  "private": true,
+  "private": false,
+  "license": "MIT",
   "type": "module",
   "description": "The FrockBot Plugin worker host: loads a User's Plugins as one Dynamic Worker behind a generated index.",
   "exports": {
@@ -19,5 +20,23 @@
   "devDependencies": {
     "@types/bun": "1.4.2",
     "typescript": "^7.0.2"
+  },
+  "files": [
+    "**/*.ts",
+    "README.md",
+    "!**/*.test.ts",
+    "!**/*.type-test.ts",
+    "!**/tsconfig*.json"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/timoconnellaus/frockbot.git",
+    "directory": "frock-compose"
+  },
+  "frockbot": {
+    "npm": true
   }
 }

@@ -23,7 +23,7 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { REPO_ROOT_V1 } from "./deployment-config/profile.ts";
+import { REPO_ROOT_V1 } from "./deployment-config/repository.ts";
 import {
   MissingAnswerV1,
   createDefaultingAskerV1,

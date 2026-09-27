@@ -41,11 +41,25 @@ describe("npm trusted publishing bootstrap", () => {
   test("every publishable workspace is covered", () => {
     const packages = readWorkspacePackages(root);
     expect(packages.length).toBeGreaterThan(0);
-    // Each entry is a real scoped package rooted at its own directory.
+    // Each entry is a real scoped package rooted at its own directory, and
+    // every one a white-label's Worker needs is among them (ADR 0038 §5).
     for (const entry of packages) {
       expect(entry.name.startsWith("@frockbot/")).toBe(true);
-      expect(entry.directory).toBe("applets/sdk");
     }
+    expect(packages.map((entry) => entry.name).sort()).toEqual([
+      "@frockbot/app",
+      "@frockbot/applet-sdk",
+      "@frockbot/applets",
+      "@frockbot/cloudflare",
+      "@frockbot/computer",
+      "@frockbot/core",
+      "@frockbot/frock-compose",
+      "@frockbot/providers",
+    ]);
+    expect(
+      packages.find((entry) => entry.name === "@frockbot/cloudflare")
+        ?.directory,
+    ).toBe("apps/cloudflare");
     const names = packages.map((entry) => entry.name);
     expect(new Set(names).size).toBe(names.length);
   });

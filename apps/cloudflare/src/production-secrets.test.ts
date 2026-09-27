@@ -128,6 +128,33 @@ describe("the production secrets manifest", () => {
     ).toEqual([]);
   });
 
+  test("requires a white-label's own Package's secrets, and no built-in's", () => {
+    // ADR 0038 §3: the manifest cannot import a chooser it was not built with,
+    // so the profile names what that Package needs and the check is handed it.
+    const external = {
+      id: "stub-sign-in",
+      required: [{ name: "STUB_SIGN_IN_SECRET", why: "Signs every session." }],
+    };
+    const carried = deployedSecretNamesV1(external);
+    expect(carried).toContain("STUB_SIGN_IN_SECRET");
+    expect(carried).toContain("JEV_API_KEY");
+    for (const build of [BETTER_AUTH_PACKAGE_V1, ACCESS_AUTH_PACKAGE_V1]) {
+      for (const setting of build.required) {
+        expect(carried).not.toContain(setting.name);
+      }
+    }
+    const complete = Object.fromEntries(carried.map((name) => [name, "set"]));
+    expect(productionSecretsReportV1(complete, undefined, external).ok).toBe(
+      true,
+    );
+    const { STUB_SIGN_IN_SECRET: _missing, ...rest } = complete;
+    expect(
+      productionSecretsReportV1(rest, undefined, external).failures,
+    ).toEqual([
+      "Missing production configuration: STUB_SIGN_IN_SECRET — Signs every session. Add it to the repository's production environment, then re-run this release.",
+    ]);
+  });
+
   test("is carried by the release workflow's deploy step", () => {
     // The deploy is the only thing that writes a secret, so a name the deploy
     // step does not receive is a value frozen at whatever production last

@@ -3,13 +3,59 @@ import { join } from "node:path";
 import Ajv from "ajv";
 import {
   DEPLOYMENT_PROFILE_SCHEMA_V1,
-  type DeploymentProfileV1,
+  type DeploymentProfileV1 as GeneratedDeploymentProfileV1,
 } from "./profile-schema.generated.ts";
 
-export const REPO_ROOT_V1 = join(import.meta.dirname, "..", "..");
-export const PROFILE_DIRECTORY_V1 = join(REPO_ROOT_V1, "deployments");
+/**
+ * `@frockbot/cloudflare` itself: where the app Worker's tracked wrangler config
+ * is, in this repository and in a consumer's `node_modules` alike.
+ */
+export const PACKAGE_ROOT_V1 = join(import.meta.dirname, "..");
 
-export { DEPLOYMENT_PROFILE_SCHEMA_V1, type DeploymentProfileV1 };
+/** The profile contract, shipped beside the generator that enforces it. */
+export const PROFILE_SCHEMA_FILE_V1 = join(
+  import.meta.dirname,
+  "profile.schema.json",
+);
+
+export { DEPLOYMENT_PROFILE_SCHEMA_V1 };
+
+type ProfileWithoutAuthV1 = Omit<
+  GeneratedDeploymentProfileV1,
+  "authPackage" | "access" | "authEnvironment"
+>;
+type AccessApplicationV1 = NonNullable<GeneratedDeploymentProfileV1["access"]>;
+type AuthEnvironmentShapeV1 = NonNullable<
+  GeneratedDeploymentProfileV1["authEnvironment"]
+>;
+
+/**
+ * A deployment profile, as the schema admits one.
+ *
+ * `FromSchema` of the schema, with the auth Package's three cases spelled out:
+ * `authPackage` may be a path, which `FromSchema` can only read as `string`,
+ * and a `string` cannot exclude `"access"` — so the generated type alone would
+ * let an Access profile name no Access application. The schema's `allOf` says
+ * the same thing to ajv, which is what refuses a profile file.
+ */
+export type DeploymentProfileV1 = ProfileWithoutAuthV1 &
+  (
+    | {
+        authPackage: "better-auth";
+        access?: AccessApplicationV1;
+        authEnvironment?: never;
+      }
+    | {
+        authPackage: "access";
+        access: AccessApplicationV1;
+        authEnvironment?: never;
+      }
+    | {
+        authPackage: `./${string}` | `../${string}`;
+        access?: AccessApplicationV1;
+        authEnvironment: AuthEnvironmentShapeV1;
+      }
+  );
 
 export type DeploymentWorkerV1 = NonNullable<
   NonNullable<DeploymentProfileV1["workers"]>["app"]
@@ -36,7 +82,7 @@ export function deploymentRegionV1(value: string): DeploymentRegionV1 {
  */
 export function validateProfileV1(value: unknown, what: string): void {
   const schema: unknown = JSON.parse(
-    readFileSync(join(PROFILE_DIRECTORY_V1, "profile.schema.json"), "utf8"),
+    readFileSync(PROFILE_SCHEMA_FILE_V1, "utf8"),
   );
   // Ajv ships a CommonJS default export; under this project's ESM resolution
   // the constructor is one property in.
@@ -51,11 +97,15 @@ export function validateProfileV1(value: unknown, what: string): void {
   throw new Error(`${what} is not a deployment profile: ${detail}`);
 }
 
-export function loadProfileV1(name: string): DeploymentProfileV1 {
+/** `<profileDirectory>/<name>.json`, validated against the schema. */
+export function loadProfileV1(
+  name: string,
+  profileDirectory: string,
+): DeploymentProfileV1 {
   if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
     throw new Error(`"${name}" is not a profile name`);
   }
-  const file = join(PROFILE_DIRECTORY_V1, `${name}.json`);
+  const file = join(profileDirectory, `${name}.json`);
   let source: string;
   try {
     source = readFileSync(file, "utf8");

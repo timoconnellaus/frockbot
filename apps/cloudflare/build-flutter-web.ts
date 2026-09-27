@@ -15,6 +15,15 @@
  * document names is content-addressed and can be served `immutable`. The
  * document itself is rendered by the application artifact, which reads the
  * same hash from `dist/flutter-web.json`.
+ *
+ *   bun build-flutter-web.ts [--app <directory>] [--dist <directory>]
+ *
+ * `--app` is the Flutter application to build — `apps/native` by default, and
+ * a white-label's own thin application, carrying its own client brand, when it
+ * builds from the published package ([ADR 0038](../../docs/adr/0038-white-label-deployments.md)
+ * §4). `--dist` is where the client is staged: `<dist>/web` is what the Worker
+ * uploads and `<dist>/flutter-web.json` is what `build-artifact.ts --dist`
+ * reads, this package's own `dist` by default.
  */
 import { createHash } from "node:crypto";
 import {
@@ -29,12 +38,25 @@ import {
 } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readNativeMetadata } from "../../scripts/native-metadata.ts";
+import { releaseVersion } from "./release-version.ts";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
-const nativeRoot = resolve(root, "../native");
+
+/** The value after `flag`, or undefined when the flag is absent. */
+function flagValue(flag: string): string | undefined {
+  const index = process.argv.indexOf(flag);
+  if (index === -1) return undefined;
+  const value = process.argv[index + 1];
+  if (!value || value.startsWith("--"))
+    throw new Error(`${flag} names nothing`);
+  return value;
+}
+
+const nativeRoot = resolve(flagValue("--app") ?? resolve(root, "../native"));
+const dist = resolve(flagValue("--dist") ?? resolve(root, "dist"));
 const flutterOut = resolve(nativeRoot, "build/web");
-const assetsRoot = resolve(root, "dist/web");
+const assetsRoot = resolve(dist, "web");
+const clientManifest = resolve(dist, "flutter-web.json");
 const payloadPrefix = "_flutter";
 
 /**
@@ -119,7 +141,7 @@ async function riveWasmVersion(): Promise<string> {
   );
   if (!entry?.rootUri?.startsWith("file:")) {
     throw new Error(
-      "apps/native/.dart_tool/package_config.json does not resolve rive_native " +
+      `${relative(root, resolve(nativeRoot, ".dart_tool/package_config.json"))} does not resolve rive_native ` +
         "to a file: root.",
     );
   }
@@ -339,10 +361,9 @@ async function sourceFingerprint(defines: string[]): Promise<string> {
  */
 async function stagedIsCurrent(fingerprint: string): Promise<boolean> {
   if (process.env.FROCKBOT_FORCE_CLIENT_BUILD) return false;
-  const manifest = await readFile(
-    resolve(root, "dist/flutter-web.json"),
-    "utf8",
-  ).catch(() => undefined);
+  const manifest = await readFile(clientManifest, "utf8").catch(
+    () => undefined,
+  );
   if (!manifest) return false;
   let parsed: { sourceHash?: unknown; buildHash?: unknown; files?: unknown };
   try {
@@ -389,10 +410,9 @@ function flutter(...args: string[]): void {
 // has to be read out of the resolved `rive_native` before the build, because
 // the build is what carries the URL it produces.
 flutter("pub", "get");
-const nativeMetadata = await readNativeMetadata(resolve(root, "../.."));
 const riveVersion = await riveWasmVersion();
 // The tag `release.yml` builds is the app's version; any other build has none.
-const release = nativeMetadata.release;
+const release = releaseVersion(process.env.FROCKBOT_RELEASE)?.release;
 const defines = [
   ...(release ? [`--dart-define=FROCKBOT_RELEASE=${release}`] : []),
   `--dart-define=RIVE_NATIVE_WASM_HOST=/rive/${riveVersion}/`,
@@ -478,7 +498,7 @@ await writeFile(
     `${riveHost}*\n  cache-control: public, max-age=31536000, immutable\n`,
 );
 await writeFile(
-  resolve(root, "dist/flutter-web.json"),
+  clientManifest,
   `${JSON.stringify({ schemaVersion: 1, buildHash, sourceHash: fingerprint, files: [...files, ...fallbackFonts] }, null, 2)}\n`,
 );
 

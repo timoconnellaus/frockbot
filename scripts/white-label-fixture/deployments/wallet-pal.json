@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "name": "wallet-pal",
+  "accountId": "0123456789abcdef0123456789abcdef",
+  "prefix": "wallet-pal",
+  "authPackage": "../auth/chooser.ts",
+  "authEnvironment": {
+    "secrets": [
+      {
+        "name": "WALLET_PAL_SIGN_IN_SECRET",
+        "why": "Signs every Wallet Pal session, and the native door's codes."
+      }
+    ],
+    "vars": { "WALLET_PAL_SIGN_IN_APP": "wallet-pal-fixture" }
+  },
+  "brand": "../brand/brand.ts",
+  "webClient": "../web",
+  "workers": { "app": {} }
+}

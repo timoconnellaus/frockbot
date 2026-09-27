@@ -1,7 +1,8 @@
 {
   "name": "@frockbot/app",
   "version": "0.0.1",
-  "private": true,
+  "private": false,
+  "license": "MIT",
   "type": "module",
   "exports": {
     "./account/deletion": "./account/deletion.ts",
@@ -368,5 +369,24 @@
     "@types/bun": "1.4.2",
     "@types/node": "26.6.2",
     "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2"
+  },
+  "files": [
+    "**/*.ts",
+    "**/*.js",
+    "**/*.json",
+    "!**/*.test.ts",
+    "!**/*.type-test.ts",
+    "!**/tsconfig*.json"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/timoconnellaus/frockbot.git",
+    "directory": "app"
+  },
+  "frockbot": {
+    "npm": true
   }
 }
