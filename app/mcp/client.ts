@@ -67,7 +67,7 @@ export interface McpAuthChallengeV1 {
 /** The server refused the request for want of a credential it accepts. */
 export class McpUnauthorizedError extends Error {
   constructor(readonly challenge: McpAuthChallengeV1 = {}) {
-    super("The server asked for a credential FrockBot does not hold.");
+    super("The server asked for a credential this connection does not hold.");
     this.name = "McpUnauthorizedError";
   }
 }
@@ -105,8 +105,6 @@ const MAX_DESCRIPTION = 4_000;
 /** The tool names MCP recommends, and the only ones a namespace can hold. */
 const TOOL_NAME = /^[A-Za-z0-9_.-]{1,128}$/;
 
-const CLIENT_INFO = { name: "FrockBot", version: "1.0.0" } as const;
-
 /** Invalid request, unknown method and invalid params: nothing was run. */
 const REFUSAL_CODES = new Set([-32600, -32601, -32602]);
 
@@ -140,7 +138,11 @@ export function classifyMcpServerUrlV1(
  * classified before it is sent; 307 and 308 are followed because they keep
  * the method and body, every other redirect is refused.
  */
-export function guardedMcpFetchV1(base: McpFetchV1): McpFetchV1 {
+export function guardedMcpFetchV1(
+  base: McpFetchV1,
+  /** The product, which a refused redirect is explained in. */
+  productName: string,
+): McpFetchV1 {
   return async (input, init = {}) => {
     let url = typeof input === "string" ? input : input.href;
     for (let hop = 0; ; hop += 1) {
@@ -168,7 +170,7 @@ export function guardedMcpFetchV1(base: McpFetchV1): McpFetchV1 {
         hop >= MAX_REDIRECTS
       ) {
         throw new McpUnreachableError(
-          "The server redirected somewhere FrockBot does not follow.",
+          `The server redirected somewhere ${productName} does not follow.`,
         );
       }
       url = new URL(location, verdict.url).href;
@@ -201,6 +203,8 @@ function boundedResponse(response: Response, maxBytes: number): Response {
 }
 
 export interface McpSessionOptionsV1 {
+  /** Who the client says it is to the server: the product. */
+  productName: string;
   url: string;
   /** Known from an earlier handshake; absent tries streamable HTTP, then SSE. */
   transport?: McpTransportV1;
@@ -303,7 +307,10 @@ async function connect(
   options: McpSessionOptionsV1,
   fetcher: McpFetchV1,
 ): Promise<Client> {
-  const client = new Client(CLIENT_INFO, { listMaxPages: LIST_MAX_PAGES });
+  const client = new Client(
+    { name: options.productName, version: "1.0.0" },
+    { listMaxPages: LIST_MAX_PAGES },
+  );
   try {
     await client.connect(transportFor(kind, options, fetcher), {
       timeout: MCP_HANDSHAKE_TIMEOUT_MS_V1,
@@ -326,6 +333,7 @@ export async function withMcpSessionV1<T>(
 ): Promise<T> {
   const guarded = guardedMcpFetchV1(
     options.fetch ?? ((input, init) => globalThis.fetch(input, init)),
+    options.productName,
   );
   // The transport reports a refused credential without the response, and the
   // response is what says where signing in starts.

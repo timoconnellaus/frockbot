@@ -13,6 +13,7 @@ import {
   memoryUserCompositionV1,
 } from "@frockbot/app/composition/user.fixture";
 import { foundationShellApplicationV1 } from "./runtime.js";
+import { TEST_BRAND_V1 } from "@frockbot/app/testkit";
 
 class MemoryStorage {
   readonly values = new Map<string, unknown>();
@@ -230,7 +231,7 @@ describe("Bot recovery on this application", () => {
     }) as typeof fetch;
     const host = () =>
       createShellBotBackendContribution({
-        ...foundationShellApplicationV1,
+        ...foundationShellApplicationV1(TEST_BRAND_V1),
         turnSupervisor: createFakeTurnSupervisorV1(),
         state: { storage } as unknown as DurableObjectState,
         env: {

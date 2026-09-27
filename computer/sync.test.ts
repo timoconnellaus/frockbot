@@ -134,6 +134,7 @@ async function runTurn(
   await runtime.mount(
     createComputerAgentFeature({
       userId: "user-1",
+      productName: "FrockBot",
       defaultProviderId: "recording",
     }),
   );

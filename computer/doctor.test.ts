@@ -85,6 +85,7 @@ async function mount(provider: FakeComputerHostV1) {
   await harness.mount(
     createComputerAgentFeature({
       userId: "user-1",
+      productName: "FrockBot",
       defaultProviderId: "fixture",
       writer: { sessionId: "session-1", turnId: "run-9", runId: "run-9" },
     }),

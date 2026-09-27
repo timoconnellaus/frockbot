@@ -6,9 +6,12 @@ import {
   createFoundationHostedRuntimePackages,
   createFoundationModelRuntimePackage,
   foundationBaseRuntimePackagesV1,
-  FOUNDATION_PACKAGE_CATALOG_V1,
+  foundationPackageCatalogV1,
 } from "./runtime.js";
 import { foundationDefaultPackageIds } from "./user.js";
+import { TEST_BRAND_V1 } from "@frockbot/app/testkit";
+
+const FOUNDATION_PACKAGE_CATALOG_V1 = foundationPackageCatalogV1(TEST_BRAND_V1);
 
 describe("foundation application", () => {
   test("lists every Package this deployment ships, once", () => {
@@ -59,7 +62,9 @@ describe("foundation application", () => {
   });
 
   test("seeds a default-disabled Package and its dependencies", () => {
-    const packageIds = foundationDefaultPackageIds();
+    const packageIds = foundationDefaultPackageIds(
+      FOUNDATION_PACKAGE_CATALOG_V1,
+    );
 
     expect(packageIds.has("provider-ollama-cloud")).toBe(true);
     expect(packageIds.has("settings")).toBe(true);
@@ -97,6 +102,7 @@ describe("foundation application", () => {
         leaseCredential: () => Promise.reject(new Error("not executed")),
         settleCredential: () => Promise.resolve(),
       },
+      TEST_BRAND_V1,
     );
 
     expect(runtimePackage.id).toBe("provider-ollama-cloud");
@@ -126,6 +132,7 @@ describe("foundation application", () => {
           leaseCredential: () => Promise.reject(new Error("not executed")),
           settleCredential: () => Promise.resolve(),
         },
+        TEST_BRAND_V1,
       ),
     ).toThrow('Bot model provider "foundation" is unavailable');
   });
@@ -158,6 +165,7 @@ describe("foundation application", () => {
         runFrockAiChatCompletion: () =>
           Promise.reject(new Error("not executed")),
       },
+      TEST_BRAND_V1,
     );
 
     expect(runtimePackage.id).toBe("provider-flock-ai");
@@ -166,7 +174,7 @@ describe("foundation application", () => {
   test("mounts five features on every Turn, whatever the host", () => {
     // Memory is absent: like Skills, it mounts only for a Turn whose Memory
     // roots the host can reach, so it is never a base feature.
-    expect(foundationBaseRuntimePackagesV1()).toHaveLength(5);
+    expect(foundationBaseRuntimePackagesV1(TEST_BRAND_V1)).toHaveLength(5);
   });
 
   test("names the Packages the platform owns rather than the User", () => {
@@ -205,6 +213,7 @@ describe("foundation application", () => {
   test("resolves declared backend and enabled runtime Contributions through host seams", async () => {
     const backend = await createFoundationBackendContributions({
       backendHost: "gateway",
+      brand: TEST_BRAND_V1,
       listBots: () =>
         Promise.resolve({ schemaVersion: 1, revision: 0, bots: [] }),
       createBot: () =>
@@ -410,13 +419,16 @@ describe("foundation application", () => {
     expect(userBackend.contributions).toHaveLength(0);
     const requestedSecrets: string[] = [];
     expect(
-      createFoundationHostedRuntimePackages({
-        userId: "user-1",
-        readSecret: (name) => {
-          requestedSecrets.push(name);
-          return undefined;
+      createFoundationHostedRuntimePackages(
+        {
+          userId: "user-1",
+          readSecret: (name) => {
+            requestedSecrets.push(name);
+            return undefined;
+          },
         },
-      }).map((pkg) => pkg.id),
+        TEST_BRAND_V1,
+      ).map((pkg) => pkg.id),
     ).toEqual(["credentials", "computer-host", "computer"]);
     // Whether there is a Computer is the presence of a host and nothing else.
     // The application asks the shell for no secret to answer it: which
@@ -427,18 +439,23 @@ describe("foundation application", () => {
     // The Skills Package mounts only for a Turn whose instruction root the
     // host can read, and then it leads the hosted runtime packages.
     expect(
-      createFoundationHostedRuntimePackages({
-        userId: "user-1",
-        readSecret: () => undefined,
-        skills: {
-          owner: { userId: "user-1", botId: "bot-1" },
-          reads: {
-            read: () => Promise.resolve({ status: "not-found", reason: "n/a" }),
-            stat: () => Promise.resolve({ status: "not-found", reason: "n/a" }),
-            list: () => Promise.resolve({ status: "ok", entries: [] }),
+      createFoundationHostedRuntimePackages(
+        {
+          userId: "user-1",
+          readSecret: () => undefined,
+          skills: {
+            owner: { userId: "user-1", botId: "bot-1" },
+            reads: {
+              read: () =>
+                Promise.resolve({ status: "not-found", reason: "n/a" }),
+              stat: () =>
+                Promise.resolve({ status: "not-found", reason: "n/a" }),
+              list: () => Promise.resolve({ status: "ok", entries: [] }),
+            },
           },
         },
-      }).map((pkg) => pkg.id),
+        TEST_BRAND_V1,
+      ).map((pkg) => pkg.id),
     ).toEqual(["skills", "credentials", "computer-host", "computer"]);
 
     const webCapability = {
@@ -461,6 +478,7 @@ describe("foundation application", () => {
             new Error("connection-less Web Capability must not authorize"),
           ),
       },
+      TEST_BRAND_V1,
     );
     expect(freshBotRuntime.map((pkg) => pkg.id)).toEqual(["web"]);
 
@@ -484,19 +502,27 @@ describe("foundation application", () => {
     };
     expect(
       (
-        await createFoundationEnabledRuntimePackages(searchPlan, {
-          ...host,
-          readSecret: () => undefined,
-        })
+        await createFoundationEnabledRuntimePackages(
+          searchPlan,
+          {
+            ...host,
+            readSecret: () => undefined,
+          },
+          TEST_BRAND_V1,
+        )
       ).map((pkg) => pkg.id),
     ).toEqual(["web"]);
     expect(
       (
-        await createFoundationEnabledRuntimePackages(searchPlan, {
-          ...host,
-          readSecret: (name) =>
-            name === "BRAVE_SEARCH_API_KEY" ? "brave-key" : undefined,
-        })
+        await createFoundationEnabledRuntimePackages(
+          searchPlan,
+          {
+            ...host,
+            readSecret: (name) =>
+              name === "BRAVE_SEARCH_API_KEY" ? "brave-key" : undefined,
+          },
+          TEST_BRAND_V1,
+        )
       ).map((pkg) => pkg.id),
     ).toEqual(["web", "web"]);
   });

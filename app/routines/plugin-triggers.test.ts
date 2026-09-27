@@ -31,7 +31,7 @@ const USER = { kind: "user" as const };
 
 function harness(seam?: RoutinePluginTriggerSeamV1) {
   const storage = createMemoryRoutineStorageV1();
-  const scheduler = new RoutineScheduler(storage);
+  const scheduler = new RoutineScheduler(storage, { productName: "FrockBot" });
   const store = new RoutineStore(storage, {
     firings: scheduler,
     hookKeys: {

@@ -20,6 +20,7 @@ async function mounted(demonstrations?: {
   await harness.mount(
     createComputerAgentFeature({
       userId: "user-1",
+      productName: "FrockBot",
       defaultProviderId: "fixture",
       ...(demonstrations ? { demonstrations } : {}),
     }),

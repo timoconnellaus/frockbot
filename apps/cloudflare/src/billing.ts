@@ -1,3 +1,4 @@
+import { BRAND_V1 } from "#brand";
 import {
   BILLING_LAUNCH_BLOCKERS,
   hostedBillingEnabledV1,
@@ -20,7 +21,7 @@ import {
   type StripeConfig,
 } from "@frockbot/app/billing/stripe";
 import {
-  billingPage,
+  billingPageV1,
   billingScript,
   billingStyles,
 } from "@frockbot/app/billing/page";
@@ -55,6 +56,7 @@ export function stripeConfig(env: BillingEnv): StripeConfig {
   if (!/^price_[a-zA-Z0-9]+$/.test(env.STRIPE_MONTHLY_PRICE_ID))
     throw new BillingError("Payment plan is not configured", 503);
   return {
+    productName: BRAND_V1.productName,
     secretKey: env.STRIPE_SECRET_KEY,
     webhookSecret: env.STRIPE_WEBHOOK_SECRET,
     monthlyPriceId: env.STRIPE_MONTHLY_PRICE_ID,
@@ -215,7 +217,7 @@ export function billingRoutes(
             ? billingScript
             : url.pathname.endsWith(".css")
               ? billingStyles
-              : billingPage,
+              : billingPageV1(BRAND_V1.productName),
           {
             headers: {
               "content-type": `${type}; charset=utf-8`,
@@ -298,7 +300,7 @@ export function billingRoutes(
       };
       if (request.method === "GET") {
         if (url.pathname === "/billing")
-          return new Response(billingPage, {
+          return new Response(billingPageV1(BRAND_V1.productName), {
             headers: { ...headers, "content-type": "text/html; charset=utf-8" },
           });
         if (url.pathname === "/billing.js")

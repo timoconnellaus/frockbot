@@ -7,12 +7,12 @@ import {
 } from "@frockbot/core/contracts";
 import {
   CREDIT_EXHAUSTED_REASON_V1,
-  SUBSCRIPTION_REQUIRED_REASON_V1,
+  subscriptionRequiredReasonV1,
 } from "../billing/ledger.js";
 import {
-  BILLING_FAILURE_REASONS_V1,
   CLIENT_VERSION_DEGRADED_MESSAGE_V1,
   failureNoticeV1,
+  isBillingFailureCopyV1,
   knownFailureCopyV1,
   MODEL_PROVIDER_FAILURE_COPY_V1,
   RUN_FAILURE_COPY_V1,
@@ -132,7 +132,11 @@ describe("runFailureCopyV1", () => {
   // Billing's refusals are the one model failure the person can do something
   // about, so the sentence that names the remedy reaches the bubble intact.
   test("a billing refusal reaches the person with its remedy", () => {
-    for (const reason of BILLING_FAILURE_REASONS_V1) {
+    const billingReasons = [
+      subscriptionRequiredReasonV1("FrockBot"),
+      CREDIT_EXHAUSTED_REASON_V1,
+    ];
+    for (const reason of billingReasons) {
       const copy = runFailureCopyV1({
         failure: `Bot turn ended with outcome model-error: ${reason}`,
         events: [turnEnd("model-error")],
@@ -142,11 +146,9 @@ describe("runFailureCopyV1", () => {
       expect(knownFailureCopyV1(copy)).toBe(reason);
       // Sending again does not repair an empty balance.
       expect(failureNoticeV1(copy).retry).toBe(false);
+      expect(isBillingFailureCopyV1(reason)).toBe(true);
     }
-    expect(BILLING_FAILURE_REASONS_V1).toEqual([
-      SUBSCRIPTION_REQUIRED_REASON_V1,
-      CREDIT_EXHAUSTED_REASON_V1,
-    ]);
+    expect(isBillingFailureCopyV1(RUN_FAILURE_FALLBACK_COPY_V1)).toBe(false);
   });
 
   test("a Turn with no terminal event still says something plain", () => {

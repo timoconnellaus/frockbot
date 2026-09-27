@@ -41,7 +41,7 @@ export const EGRESS_CA = `${EGRESS_ROOT}/ca.pem`;
 export const EGRESS_PLACEHOLDER_TOKEN = "frockbot-connected-account";
 const EGRESS_REQUEST_MAX_BYTES = 1_000_000;
 
-export const egressProxySource = `// Installed by FrockBot. Loopback HTTPS proxy for connected accounts.
+export const egressProxySource = `// Installed by the platform. Loopback HTTPS proxy for connected accounts.
 import http from "node:http";
 import net from "node:net";
 import tls from "node:tls";
@@ -69,7 +69,7 @@ function ensureCa() {
   if (!fs.existsSync(DIR + "/ca.pem") || !fs.existsSync(DIR + "/ca.key")) {
     openssl(["req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes",
       "-keyout", DIR + "/ca.key.tmp", "-out", DIR + "/ca.pem.tmp", "-days", "3650",
-      "-subj", "/CN=FrockBot Computer egress",
+      "-subj", "/CN=Computer egress",
       "-addext", "basicConstraints=critical,CA:TRUE",
       "-addext", "keyUsage=critical,keyCertSign,cRLSign"]);
     fs.renameSync(DIR + "/ca.key.tmp", DIR + "/ca.key");
@@ -186,12 +186,12 @@ async function forward(req, res) {
       return;
     }
     if (!response.ok) {
-      reply(res, 502, "FrockBot could not send this request (" + response.status + ").");
+      reply(res, 502, "The platform could not send this request (" + response.status + ").");
       return;
     }
     answer = await response.json();
   } catch {
-    reply(res, 502, "FrockBot could not be reached to send this request. Its outcome is unknown; do not repeat a change without checking.");
+    reply(res, 502, "The platform could not be reached to send this request. Its outcome is unknown; do not repeat a change without checking.");
     return;
   }
   const bytes = Buffer.from(typeof answer.bodyBase64 === "string" ? answer.bodyBase64 : "", "base64");
@@ -264,7 +264,7 @@ server.listen(PORT, "127.0.0.1", () => {
 `;
 
 export const egressEnsureScript = `#!/usr/bin/env bash
-# Installed by FrockBot. Starts the connected-account proxy if it is not up;
+# Installed by the platform. Starts the connected-account proxy if it is not up;
 # exits 0 only when it is listening and its CA bundle exists.
 DIR=${shellQuote(EGRESS_ROOT)}
 SCRIPT=${shellQuote(EGRESS_PROXY_SCRIPT)}

@@ -29,7 +29,10 @@ import {
   type ConnectionReturnClientV1,
 } from "@frockbot/core/configuration";
 import { defineGatewayContribution } from "@frockbot/core/contracts/contributions";
-import { returnPageV1 } from "@frockbot/app/return-page";
+import {
+  returnPageV1,
+  type ReturnPageBrandV1,
+} from "@frockbot/app/return-page";
 import { connectCallbackPathV1 } from "@frockbot/app/connect/user";
 import { MCP_CONNECTION_TYPE_ID, MCP_PACKAGE_ID } from "./definition.js";
 import {
@@ -45,6 +48,8 @@ import {
 import { verifyMcpOAuthStateV1, type McpOAuthStateV1 } from "./oauth-state.js";
 
 export interface McpGatewayHost {
+  /** What the sign-in pages show of the product. */
+  brand: ReturnPageBrandV1;
   executeConnection(
     userId: string,
     command: ConnectionCommandV1,
@@ -80,34 +85,38 @@ function jsonError(status: number, error: string): Response {
   return Response.json({ error }, { status });
 }
 
-const EXPIRED_LINE =
-  "This sign-in link has expired or isn't one FrockBot made.";
+const expiredLine = (product: string) =>
+  `This sign-in link has expired or isn't one ${product} made.`;
 const FAILED_LINE = "The sign-in couldn't finish. Sign in again.";
-const ELSEWHERE_LINE =
-  "This sign-in was started from another FrockBot account, so nothing was connected.";
+const elsewhereLine = (product: string) =>
+  `This sign-in was started from another ${product} account, so nothing was connected.`;
 /** Longer than any code, state or error a server sends back. */
 const MAX_RETURN_FIELD = 4_096;
 
 /** What a browser tab is told once the server's sign-in is done. */
 function signedInPage(
   origin: string,
+  brand: ReturnPageBrandV1,
   outcome: { ok: true } | { ok: false; line: string },
 ): Response {
+  const { productName } = brand;
   return outcome.ok
     ? returnPageV1({
+        brand,
         title: "Signed in",
         heading: "Signed in",
-        lead: "Your Bots can use this server's tools now. You can close this tab and return to FrockBot.",
-        action: { label: "Open FrockBot", href: `${origin}/` },
+        lead: `Your Bots can use this server's tools now. You can close this tab and return to ${productName}.`,
+        action: { label: `Open ${productName}`, href: `${origin}/` },
         footnote:
           "You can remove the server, or sign in again, from Connectors.",
       })
     : returnPageV1({
+        brand,
         title: "Sign-in didn't finish",
         heading: "Sign-in didn't finish",
         lead: outcome.line,
-        action: { label: "Open FrockBot", href: `${origin}/` },
-        footnote: "Sign in again from Connectors in FrockBot.",
+        action: { label: `Open ${productName}`, href: `${origin}/` },
+        footnote: `Sign in again from Connectors in ${productName}.`,
       });
 }
 
@@ -115,12 +124,14 @@ function signedInPage(
  * A browser that is not the User who started the sign-in: signed out, or
  * signed in as someone else. Nothing was traded, and it says so.
  */
-function elsewherePage(origin: string): Response {
+function elsewherePage(origin: string, brand: ReturnPageBrandV1): Response {
+  const { productName } = brand;
   return returnPageV1({
-    title: "Finish in FrockBot",
-    heading: "Finish signing in from FrockBot",
-    lead: "This browser isn't signed in to the FrockBot account that started this sign-in, so nothing was connected. Open FrockBot where you're signed in, and sign in to the server again from Connectors.",
-    action: { label: "Open FrockBot", href: `${origin}/` },
+    brand,
+    title: `Finish in ${productName}`,
+    heading: `Finish signing in from ${productName}`,
+    lead: `This browser isn't signed in to the ${productName} account that started this sign-in, so nothing was connected. Open ${productName} where you're signed in, and sign in to the server again from Connectors.`,
+    action: { label: `Open ${productName}`, href: `${origin}/` },
     footnote:
       "If you didn't start this sign-in, close this tab. Nothing was connected.",
   });
@@ -202,14 +213,18 @@ async function callback(
   if (request.method !== "GET") return jsonError(405, "method not allowed");
   const state = await verifiedState(host, url.searchParams.get("state"));
   if (!state) {
-    return signedInPage(url.origin, { ok: false, line: EXPIRED_LINE });
+    return signedInPage(url.origin, host.brand, {
+      ok: false,
+      line: expiredLine(host.brand.productName),
+    });
   }
   if (client !== undefined) return handOff(client, url);
   if ((await sessionUserId?.()) !== state.userId) {
-    return elsewherePage(url.origin);
+    return elsewherePage(url.origin, host.brand);
   }
   return signedInPage(
     url.origin,
+    host.brand,
     await complete(host, state, url.searchParams, url.origin),
   );
 }
@@ -247,8 +262,9 @@ async function completeFromApp(
     answer.set(name, value);
   }
   const state = await verifiedState(host, answer.get("state"));
-  if (!state) return jsonError(400, EXPIRED_LINE);
-  if (state.userId !== userId) return jsonError(403, ELSEWHERE_LINE);
+  if (!state) return jsonError(400, expiredLine(host.brand.productName));
+  if (state.userId !== userId)
+    return jsonError(403, elsewhereLine(host.brand.productName));
   const outcome = await complete(host, state, answer, url.origin);
   return Response.json({
     schemaVersion: 1,
@@ -338,9 +354,12 @@ export function createMcpBackendContribution(
         if (request.method !== "GET") {
           return jsonError(405, "method not allowed");
         }
-        return Response.json(mcpOAuthClientMetadataV1(url.origin), {
-          headers: { "cache-control": "public, max-age=3600" },
-        });
+        return Response.json(
+          mcpOAuthClientMetadataV1(url.origin, host.brand.productName),
+          {
+            headers: { "cache-control": "public, max-age=3600" },
+          },
+        );
       }
       const client = mcpOAuthReturnClientV1(url.pathname);
       if (client === null) return undefined;

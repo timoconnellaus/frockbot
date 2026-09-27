@@ -176,6 +176,7 @@ describe("a Plugin that the worker refuses", () => {
       get: () => ({ getEntrypoint: () => entrypoint }),
     };
     const mounted = await createShellCompositionHost({
+      productName: "FrockBot",
       botId: "bot-1",
       sessionId: `${USER}:bot-1`,
       sessionEvents: [],
@@ -469,6 +470,7 @@ describe("the Approvals a Plugin's Card asks for", () => {
     const { signal } = new AbortController();
     const entrypoint = cardEntrypoint(options);
     const mounted = await createShellCompositionHost({
+      productName: "FrockBot",
       botId: "bot-1",
       sessionId,
       sessionEvents: [],

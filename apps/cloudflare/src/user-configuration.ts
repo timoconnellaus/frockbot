@@ -320,6 +320,7 @@ import {
   createComputerHostV1,
 } from "./computer-host.js";
 import type { AuthPackageEnvironmentV1 } from "#auth-package";
+import { BRAND_V1 } from "#brand";
 import type { VoiceAssistant } from "./voice-assistant.js";
 import {
   InboundEmailUserStoreV1,
@@ -549,7 +550,7 @@ export class UserConfiguration
     this.billing().reconcile(input.command);
   }
   private billing() {
-    return new BillingLedger(this.ctx.storage);
+    return new BillingLedger(this.ctx.storage, BRAND_V1.productName);
   }
   async readBilling(input: { userId: string; before?: number }) {
     await this.assertUserIdentity(input.userId);
@@ -925,6 +926,7 @@ export class UserConfiguration
   private contributions(): Promise<MountedFoundationUserBackend> {
     if (!this.mounted) {
       this.mounted = createFoundationUserBackendContributions({
+        brand: BRAND_V1,
         storage: this.ctx.storage,
         machineSockets: durableObjectMachineSocketsV1(this.ctx),
         readSecret: (name) =>
@@ -1432,7 +1434,9 @@ export class UserConfiguration
         sql ? this.memoryEngine().vectorIdsAfter(cursor, limit) : [],
       deleteIdentity: async () => {
         const { AUTH_PACKAGE_V1 } = await import("#auth-package");
-        await AUTH_PACKAGE_V1.create(this.env).deleteStoredIdentity?.(userId);
+        await AUTH_PACKAGE_V1.create(this.env, {
+          productName: BRAND_V1.productName,
+        }).deleteStoredIdentity?.(userId);
       },
       eraseVoice: async () => {
         const { getAgentByName } = await import("agents");
@@ -4408,9 +4412,9 @@ export class UserConfiguration
    */
   private async emailSignIn(userId: string): Promise<string | undefined> {
     const { AUTH_PACKAGE_V1 } = await import("#auth-package");
-    const identity = await AUTH_PACKAGE_V1.create(this.env).storedIdentity?.(
-      userId,
-    );
+    const identity = await AUTH_PACKAGE_V1.create(this.env, {
+      productName: BRAND_V1.productName,
+    }).storedIdentity?.(userId);
     return identity?.emailVerified
       ? normalizeSenderAddressV1(identity.email)
       : undefined;

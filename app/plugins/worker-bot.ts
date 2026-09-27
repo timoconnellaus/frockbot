@@ -112,7 +112,11 @@ async function mountPluginWorkerV1(
   const host = new PluginWorkerHost({
     ...isolate,
     // Throwaway registries: a standalone call registers nothing anyone calls.
-    tools: new ToolRegistry(hooks, new SystemPromptRegistry(hooks)),
+    tools: new ToolRegistry(
+      hooks,
+      state.application.brand.productName,
+      new SystemPromptRegistry(hooks),
+    ),
     hooks,
     botId: identity.botId,
     sessionId,

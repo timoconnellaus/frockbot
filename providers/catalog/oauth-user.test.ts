@@ -219,6 +219,7 @@ describe("durable model OAuth manager", () => {
     )!;
     const settings = createUserSettingsBackendContribution({
       storage,
+      productName: "FrockBot",
       availablePackages: [
         {
           packageId: definition.id,

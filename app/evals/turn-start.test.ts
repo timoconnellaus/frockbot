@@ -61,15 +61,15 @@ function answersFor(
           : TURN_START_ACKNOWLEDGE_YES_V1),
     },
     complexity: pick(
-      Object.keys(turnStartQuestionsV1.complexity.criteria),
+      Object.keys(turnStartQuestionsV1("FrockBot").complexity.criteria),
       expected.complexity ?? "moderate",
     ),
     objective: pick(
-      Object.keys(turnStartQuestionsV1.objective.criteria),
+      Object.keys(turnStartQuestionsV1("FrockBot").objective.criteria),
       expected.objective ?? "new_request",
     ),
     ambiguity: pick(
-      Object.keys(turnStartQuestionsV1.ambiguity.criteria),
+      Object.keys(turnStartQuestionsV1("FrockBot").ambiguity.criteria),
       expected.ambiguity ?? "clear",
     ),
     consequence: {
@@ -79,13 +79,13 @@ function answersFor(
       legend: Object.fromEntries(
         levels.map((level, index) => [
           level,
-          turnStartQuestionsV1.consequence.criteria[index],
+          turnStartQuestionsV1("FrockBot").consequence.criteria[index],
         ]),
       ),
       probabilities: Object.fromEntries(levels.map((level) => [level, 0.25])),
     },
     capability: pick(
-      Object.keys(turnStartQuestionsV1.capability.criteria),
+      Object.keys(turnStartQuestionsV1("FrockBot").capability.criteria),
       expected.capability ?? "none",
     ),
     // The builder mirrors the wire shape; the SDK's literal label types are
@@ -129,7 +129,9 @@ function ok(expected: TurnStartExpectationV1) {
 
 test("the request carries the exact state, the pinned model, and every question", async () => {
   const { client, calls } = stubClient(() => ok({}));
-  const review = await reviewTurnStartV1(client, evidence);
+  const review = await reviewTurnStartV1(client, evidence, {
+    productName: "FrockBot",
+  });
   const body = calls[0]!.body as {
     model: string;
     state: unknown;
@@ -138,23 +140,22 @@ test("the request carries the exact state, the pinned model, and every question"
   expect(body.model).toBe(TURN_START_MODEL_V1);
   expect(body.state).toEqual(turnStartStateV1(evidence));
   expect(Object.keys(body.questions).sort()).toEqual(
-    Object.keys(turnStartQuestionsV1).sort(),
+    Object.keys(turnStartQuestionsV1("FrockBot")).sort(),
   );
   expect(review.requestId).toBe("req-turn-1");
 });
 
 test("the choices are exactly the TurnDirective's values, and a capability may be none", () => {
-  expect(Object.keys(turnStartQuestionsV1.complexity.criteria)).toEqual([
-    ...TURN_COMPLEXITIES_V1,
-  ]);
-  expect(Object.keys(turnStartQuestionsV1.ambiguity.criteria)).toEqual([
-    ...TURN_AMBIGUITIES_V1,
-  ]);
+  expect(
+    Object.keys(turnStartQuestionsV1("FrockBot").complexity.criteria),
+  ).toEqual([...TURN_COMPLEXITIES_V1]);
+  expect(
+    Object.keys(turnStartQuestionsV1("FrockBot").ambiguity.criteria),
+  ).toEqual([...TURN_AMBIGUITIES_V1]);
   // The specialists Jev may name are exactly the ones the catalog offers.
-  expect(Object.keys(turnStartQuestionsV1.capability.criteria)).toEqual([
-    "none",
-    ...TURN_START_SPECIALTIES_V1,
-  ]);
+  expect(
+    Object.keys(turnStartQuestionsV1("FrockBot").capability.criteria),
+  ).toEqual(["none", ...TURN_START_SPECIALTIES_V1]);
   expect([...TURN_START_SPECIALTIES_V1]).toEqual(
     FROCK_AI_SPECIALTIES_V1.map((specialty) => specialty.name),
   );
@@ -270,7 +271,7 @@ test("the suite is twenty or more distinct cases that exercise every directive f
   expect(sorted(labels("complexity"))).toEqual(sorted(TURN_COMPLEXITIES_V1));
   expect(sorted(labels("ambiguity"))).toEqual(sorted(TURN_AMBIGUITIES_V1));
   expect(sorted(labels("objective"))).toEqual(
-    sorted(Object.keys(turnStartQuestionsV1.objective.criteria)),
+    sorted(Object.keys(turnStartQuestionsV1("FrockBot").objective.criteria)),
   );
   expect(labels("capability").size).toBeGreaterThanOrEqual(4);
   expect(labels("consequenceAtLeast").size).toBeGreaterThan(0);
@@ -307,9 +308,9 @@ test("a service failure surfaces as an error rather than a low answer, without r
       }),
     2,
   );
-  await expect(reviewTurnStartV1(client, evidence)).rejects.toBeInstanceOf(
-    APIError,
-  );
+  await expect(
+    reviewTurnStartV1(client, evidence, { productName: "FrockBot" }),
+  ).rejects.toBeInstanceOf(APIError);
   expect(calls).toHaveLength(1);
 });
 
@@ -318,14 +319,19 @@ test("a caller's abort cancels the call", async () => {
   const controller = new AbortController();
   controller.abort();
   await expect(
-    reviewTurnStartV1(client, evidence, { signal: controller.signal }),
+    reviewTurnStartV1(client, evidence, {
+      productName: "FrockBot",
+      signal: controller.signal,
+    }),
   ).rejects.toThrow();
 });
 
 test("no API key or request header reaches a saved report", async () => {
   const { client } = stubClient(() => ok({ objective: "open_work" }));
   const fixture = turnStartFixturesV1[1]!;
-  const review = await reviewTurnStartV1(client, fixture.evidence);
+  const review = await reviewTurnStartV1(client, fixture.evidence, {
+    productName: "FrockBot",
+  });
   const report = JSON.stringify(
     turnStartReportCaseV1(fixture, {
       review,

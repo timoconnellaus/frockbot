@@ -117,6 +117,7 @@ export async function pluginAuthoringRuntimeHost(
   const bucket = artifacts;
   const buildService = pluginBuildService(state);
   const plugins = createPluginAuthoringHostV1({
+    productName: state.application.brand.productName,
     userId: identity.userId,
     botId: identity.botId,
     turn,

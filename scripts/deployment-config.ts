@@ -14,6 +14,7 @@ import { relative } from "node:path";
 import {
   AUTH_PACKAGE_CHOOSERS_V1,
   generateProfileConfigsV1,
+  validateProfileBrandV1,
   writeGeneratedConfigsV1,
 } from "./deployment-config/generate.ts";
 import { loadProfileV1, REPO_ROOT_V1 } from "./deployment-config/profile.ts";
@@ -42,6 +43,7 @@ const d1DatabaseId = flags["--d1-database-id"];
 const applicationHash = flags["--application-hash"];
 
 const profile = loadProfileV1(name);
+await validateProfileBrandV1(profile);
 const generated = generateProfileConfigsV1({
   profile,
   ...(d1DatabaseId === undefined ? {} : { d1DatabaseId }),
@@ -53,6 +55,9 @@ console.log(`Deployment profile ${profile.name}`);
 console.log(`  account        ${profile.accountId}`);
 console.log(
   `  auth Package   ${profile.authPackage} (apps/cloudflare/${AUTH_PACKAGE_CHOOSERS_V1[profile.authPackage].replace("./", "")})`,
+);
+console.log(
+  `  brand          ${profile.brand ?? "FrockBot (apps/cloudflare/src/brand.ts)"}`,
 );
 // Whether the deploy needs Docker is the difference worth printing here.
 console.log(

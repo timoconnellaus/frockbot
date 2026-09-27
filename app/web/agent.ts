@@ -276,6 +276,8 @@ export async function readBoundedBodyV1(
 }
 
 export interface WebFetchConfigV1 {
+  /** The fixed identity every request carries: the brand's user agent. */
+  userAgent: string;
   fetch?: WebFetchFn;
   timeoutMs?: number;
 }
@@ -286,7 +288,7 @@ export interface WebFetchConfigV1 {
  */
 export async function executeWebFetchV1(
   request: WebFetchRequestV1,
-  config: WebFetchConfigV1 = {},
+  config: WebFetchConfigV1,
   signal?: AbortSignal,
 ): Promise<ToolExecutionResult> {
   // Workerd rejects a detached global `fetch`, so the default forwards.
@@ -313,7 +315,7 @@ export async function executeWebFetchV1(
         headers: {
           accept:
             "text/html,application/xhtml+xml,text/plain;q=0.9,application/json;q=0.8",
-          "user-agent": "FrockBot/0.0.1 (+https://frockbot.com)",
+          "user-agent": config.userAgent,
           "accept-language": "en",
         },
         ...(signal ? { signal } : {}),
@@ -430,7 +432,7 @@ export async function executeWebFetchV1(
 }
 
 export function createWebFetchToolDefinitionV1(
-  config: WebFetchConfigV1 = {},
+  config: WebFetchConfigV1,
 ): ToolDefinition {
   return {
     name: WEB_FETCH_TOOL_NAME_V1,
@@ -468,7 +470,7 @@ export function createWebFetchToolDefinitionV1(
 
 /** Mount `web_fetch` into a Bot's runtime. */
 export function createWebFeature(
-  config: WebFetchConfigV1 = {},
+  config: WebFetchConfigV1,
 ): RuntimeFeatureV1<AgentRuntimeV1> {
   return (runtime) =>
     runtime.tools.register(createWebFetchToolDefinitionV1(config), {
@@ -483,6 +485,7 @@ export function createWebFeature(
  * returns `undefined` and nothing is mounted.
  */
 export function createConfiguredWebFetchRuntimeContribution(config: {
+  userAgent: string;
   capability: {
     packageId: string;
     capabilityId: string;
@@ -496,7 +499,10 @@ export function createConfiguredWebFetchRuntimeContribution(config: {
   ) {
     return undefined;
   }
-  return createWebFeature(config.fetch ? { fetch: config.fetch } : {});
+  return createWebFeature({
+    userAgent: config.userAgent,
+    ...(config.fetch ? { fetch: config.fetch } : {}),
+  });
 }
 
 export default createWebFeature;

@@ -57,7 +57,7 @@ describe("the MCP session", () => {
       instructions: "Use echo to repeat things.",
     });
     const result = await withMcpSessionV1(
-      { url: server.url, fetch: server.fetch },
+      { productName: "FrockBot", url: server.url, fetch: server.fetch },
       async (session) => ({
         info: session.info,
         tools: await session.listTools(),
@@ -88,7 +88,12 @@ describe("the MCP session", () => {
   test("presents the token it was handed on every request", async () => {
     const server = createFakeMcpServerV1({ tools: [echo], token: "secret" });
     await withMcpSessionV1(
-      { url: server.url, fetch: server.fetch, token: "secret" },
+      {
+        productName: "FrockBot",
+        url: server.url,
+        fetch: server.fetch,
+        token: "secret",
+      },
       (session) => session.listTools(),
     );
     expect(server.authorizations.length).toBeGreaterThan(0);
@@ -98,13 +103,19 @@ describe("the MCP session", () => {
   test("says a server wants a credential it does not hold", async () => {
     const server = createFakeMcpServerV1({ tools: [echo], token: "secret" });
     await expect(
-      withMcpSessionV1({ url: server.url, fetch: server.fetch }, (session) =>
-        session.listTools(),
+      withMcpSessionV1(
+        { productName: "FrockBot", url: server.url, fetch: server.fetch },
+        (session) => session.listTools(),
       ),
     ).rejects.toBeInstanceOf(McpUnauthorizedError);
     await expect(
       withMcpSessionV1(
-        { url: server.url, fetch: server.fetch, token: "wrong" },
+        {
+          productName: "FrockBot",
+          url: server.url,
+          fetch: server.fetch,
+          token: "wrong",
+        },
         (session) => session.listTools(),
       ),
     ).rejects.toBeInstanceOf(McpUnauthorizedError);
@@ -118,7 +129,11 @@ describe("the MCP session", () => {
     };
     await expect(
       withMcpSessionV1(
-        { url: "https://mcp.example.test/sse", fetch: fetcher },
+        {
+          productName: "FrockBot",
+          url: "https://mcp.example.test/sse",
+          fetch: fetcher,
+        },
         (session) => session.listTools(),
       ),
     ).rejects.toBeInstanceOf(McpUnreachableError);
@@ -142,8 +157,9 @@ describe("the MCP session", () => {
       return inner(input, init);
     };
     await expect(
-      withMcpSessionV1({ url: server.url, fetch: fetcher }, (session) =>
-        session.callTool("nope", {}),
+      withMcpSessionV1(
+        { productName: "FrockBot", url: server.url, fetch: fetcher },
+        (session) => session.callTool("nope", {}),
       ),
     ).rejects.toBeInstanceOf(McpRefusedError);
   });
@@ -173,7 +189,7 @@ describe("the guarded fetch", () => {
         });
       }
       return new Response("ok");
-    });
+    }, "FrockBot");
     expect(
       await (await guarded("https://mcp.example.test/old", {})).text(),
     ).toBe("ok");
@@ -195,6 +211,7 @@ describe("the guarded fetch", () => {
   test("stops reading a body past its bound", async () => {
     const guarded = guardedMcpFetchV1(
       async () => new Response(new Uint8Array(9 * 1024 * 1024)),
+      "FrockBot",
     );
     const response = await guarded("https://mcp.example.test/mcp", {});
     await expect(response.arrayBuffer()).rejects.toBeInstanceOf(

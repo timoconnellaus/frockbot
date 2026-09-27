@@ -8,6 +8,8 @@ import {
 import { withDeadlineV1 } from "@frockbot/core/deadline";
 
 export interface StripeConfig {
+  /** What a checkout names the credit it sells: the product's. */
+  productName: string;
   secretKey: string;
   webhookSecret: string;
   monthlyPriceId: string;
@@ -354,7 +356,7 @@ export class AccountPayments {
       fields["line_items[0][price_data][currency]"] = "usd";
       fields["line_items[0][price_data][unit_amount]"] = String(intent.cents);
       fields["line_items[0][price_data][product_data][name]"] =
-        "FrockBot usage credit";
+        `${this.stripe.config.productName} usage credit`;
     }
     const session = await this.stripe.call(
       "checkout/sessions",
@@ -411,7 +413,7 @@ export class AccountPayments {
       object(price.recurring).interval !== "month"
     )
       throw new BillingError(
-        "Subscription price does not match the FrockBot plan",
+        "Subscription price does not match the configured plan",
         409,
       );
     const start = Number(subscription.current_period_start) * 1000;

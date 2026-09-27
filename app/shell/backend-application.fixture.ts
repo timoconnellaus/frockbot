@@ -1,5 +1,6 @@
 import type { ShellApplicationV1 } from "./backend-runtime.js";
 import { shellDefinitionV1 } from "./definition.js";
+import { TEST_BRAND_V1 } from "@frockbot/app/testkit";
 
 /**
  * An application that ships two Packages and mounts no runtime features.
@@ -10,7 +11,11 @@ import { shellDefinitionV1 } from "./definition.js";
  */
 export function shellTestApplicationV1(): ShellApplicationV1 {
   return {
-    packages: [shellDefinitionV1, { id: "echo", displayName: "Echo" }],
+    brand: TEST_BRAND_V1,
+    packages: [
+      shellDefinitionV1("FrockBot"),
+      { id: "echo", displayName: "Echo" },
+    ],
     packageVersion: "0.0.1",
     runtime: {
       base: () => [],

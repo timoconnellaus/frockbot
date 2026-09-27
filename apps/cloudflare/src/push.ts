@@ -1,3 +1,4 @@
+import { BRAND_V1 } from "#brand";
 import { isPublicIdentifier } from "@frockbot/core/configuration";
 import { withDeadlineV1 } from "@frockbot/core/deadline";
 
@@ -277,7 +278,7 @@ function apnsMessage(
     payload: {
       aps: {
         alert: {
-          title: data.title || "FrockBot",
+          title: data.title || BRAND_V1.productName,
           body: data.body || "New message",
         },
         sound: "default",

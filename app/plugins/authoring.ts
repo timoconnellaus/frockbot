@@ -147,6 +147,8 @@ export type PluginEnableResultV1 =
 
 /** The seams the Bot Durable Object supplies for one admitted Turn. */
 export interface PluginAuthoringSeamsV1 {
+  /** The product, whose desktop app a device module runs in. */
+  productName: string;
   userId: string;
   botId: string;
   turn: PluginAuthoringTurnV1;
@@ -629,7 +631,7 @@ export function createPluginAuthoringHostV1(
         : "The Bot asks to turn this Plugin on for itself. Approving turns it on for this Bot only.";
     const card = {
       approvalId,
-      action: pluginApprovalActionV1(member, verb),
+      action: pluginApprovalActionV1(member, verb, seams.productName),
       rationale,
       risk: pluginApprovalRiskV1(member),
     };
@@ -932,6 +934,7 @@ export function createPluginAuthoringHostV1(
       return pluginModuleReportsTextV1(
         pluginId,
         await seams.moduleReports(pluginId),
+        seams.productName,
       );
     },
 

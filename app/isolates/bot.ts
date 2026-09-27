@@ -1627,6 +1627,7 @@ function isolateModelPath(
       // settlement knows.
       let chargedMicros: number | undefined;
       const composition = await createShellCompositionHost({
+        productName: state.application.brand.productName,
         botId: identity.botId,
         sessionId: call.sessionId,
         ...(billing

@@ -12,11 +12,13 @@ import {
   NATIVE_RETURN_DEVELOPMENT,
   NATIVE_APPLE_DEV_SCHEME,
   NATIVE_APPLE_SCHEME,
+  nativeAppsV1,
   nativeReturnUris,
   nativeReturnUriV1,
   type NativeAuthOptions,
 } from "./native-auth.js";
 import { createGateway } from "./gateway.js";
+import { BRAND_V1 } from "#brand";
 import type {
   AccountAccessV1,
   AccountAdmissionDecisionV1,
@@ -47,6 +49,22 @@ const NATIVE_RETURN_MACOS = nativeReturnUriV1(NATIVE_ORIGIN, "macos");
 const NATIVE_RETURN_MACOS_DEV = nativeReturnUriV1(NATIVE_ORIGIN, "macos-dev");
 const NATIVE_RETURN_IOS = nativeReturnUriV1(NATIVE_ORIGIN, "ios");
 const NATIVE_RETURN_IOS_DEV = nativeReturnUriV1(NATIVE_ORIGIN, "ios-dev");
+/**
+ * The hosted profile's `nativeApps`, as its generated config carries them, so
+ * the association files asserted below are the ones production serves.
+ */
+const HOSTED_NATIVE_APPS = nativeAppsV1(
+  JSON.stringify(
+    (
+      JSON.parse(
+        readFileSync(
+          new URL("../../../deployments/hosted.json", import.meta.url),
+          "utf8",
+        ),
+      ) as { nativeApps: unknown }
+    ).nativeApps,
+  ),
+);
 
 function fixture(overrides: Partial<NativeAuthOptions> = {}) {
   let time = Date.parse("2026-09-05T01:00:00Z");
@@ -61,6 +79,8 @@ function fixture(overrides: Partial<NativeAuthOptions> = {}) {
     secret: "test-only-secret-that-is-not-a-credential",
     origin: NATIVE_ORIGIN,
     returnUris: [NATIVE_RETURN_ANDROID],
+    nativeApps: HOSTED_NATIVE_APPS,
+    brand: BRAND_V1,
     admit: async () => ({ schemaVersion: 1, admitted: true, basis: "active" }),
     now: () => time,
     auth: {
@@ -927,6 +947,7 @@ function gateway(nativeAuth?: ReturnType<typeof createNativeAuth>) {
   };
   return {
     fetch: createGateway({
+      whatsNew: true,
       ...(nativeAuth ? { nativeAuth } : {}),
       auth: {
         getSession: async () => null,
@@ -1143,6 +1164,8 @@ describe("beta access on the native door", () => {
       secret: SECRET,
       origin: NATIVE_ORIGIN,
       returnUris: [NATIVE_RETURN_ANDROID],
+      nativeApps: HOSTED_NATIVE_APPS,
+      brand: BRAND_V1,
       now: f.now,
       admit: async (userId) => {
         admitted.push(userId);
@@ -1426,6 +1449,7 @@ describe("beta access on the native door", () => {
     };
     const identity = () =>
       createGateway({
+        whatsNew: true,
         nativeAuth: g.auth,
         auth: {
           getSession: async () => null,
@@ -1553,8 +1577,10 @@ test("verified return associations name the existing Android signer and the Appl
     return f.auth.route(f.request("/.well-known/apple-app-site-association"));
   };
   const f = fixture();
-  const android = await f.auth.route(f.request("/.well-known/assetlinks.json"));
-  expect(await android!.text()).toContain(
+  const android = await (await f.auth.route(
+    f.request("/.well-known/assetlinks.json"),
+  ))!.text();
+  expect(android).toContain(
     "61:E6:47:9F:9C:57:55:15:4C:1F:93:9C:DE:48:E8:A7:57:EF:F3:13:6E:54:ED:1D:DA:5F:61:E7:8B:3C:1E:37",
   );
   // The FrockBot Dev returns are never claimed: Safari would offer them to
@@ -1591,6 +1617,83 @@ test("verified return associations name the existing Android signer and the Appl
   // No Apple app signs in to an Android-only deployment, so no path is
   // offered to one as a link that would reach a 404.
   expect((await association("android"))!.status).toBe(404);
+  expect(JSON.parse(android)).toEqual([
+    {
+      relation: ["delegate_permission/common.handle_all_urls"],
+      target: {
+        namespace: "android_app",
+        package_name: "com.frockbot.mobile",
+        sha256_cert_fingerprints: [
+          "61:E6:47:9F:9C:57:55:15:4C:1F:93:9C:DE:48:E8:A7:57:EF:F3:13:6E:54:ED:1D:DA:5F:61:E7:8B:3C:1E:37",
+        ],
+      },
+    },
+  ]);
+});
+
+test("a deployment names only the signed apps its profile names", async () => {
+  const other = nativeAppsV1(
+    JSON.stringify({
+      android: [
+        {
+          packageName: "com.example.wallet",
+          sha256CertFingerprints: [Array(32).fill("AB").join(":")],
+        },
+      ],
+      apple: ["ABCDE12345.com.example.wallet"],
+    }),
+  );
+  const f = fixture({
+    nativeApps: other,
+    returnUris: nativeReturnUris("android,ios", NATIVE_ORIGIN),
+  });
+  const android = await (await f.auth.route(
+    f.request("/.well-known/assetlinks.json"),
+  ))!.text();
+  expect(android).toContain("com.example.wallet");
+  expect(android).not.toContain("frockbot");
+  const apple = await f.auth.route(
+    f.request("/.well-known/apple-app-site-association"),
+  );
+  expect(await apple!.text()).toContain("ABCDE12345.com.example.wallet");
+
+  // Named nowhere, or malformed: no app is claimed at all.
+  for (const flag of [
+    undefined,
+    "",
+    "not json",
+    JSON.stringify({ android: [{ packageName: "com.example" }] }),
+    JSON.stringify({ apple: ["lowercase.com.example"] }),
+    JSON.stringify({ ios: [] }),
+  ]) {
+    const none = fixture({
+      nativeApps: nativeAppsV1(flag),
+      returnUris: nativeReturnUris("android,ios", NATIVE_ORIGIN),
+    });
+    for (const path of [
+      "/.well-known/assetlinks.json",
+      "/.well-known/apple-app-site-association",
+    ]) {
+      expect((await none.auth.route(none.request(path)))!.status).toBe(404);
+    }
+  }
+});
+
+test("the pages name the product the brand names", async () => {
+  const f = fixture({
+    brand: {
+      ...BRAND_V1,
+      productName: "Wallet Pal",
+      pageLogo: "data:image/png;base64,V2FsbGV0UGFs",
+    },
+    returnUris: nativeReturnUris("android,ios", NATIVE_ORIGIN),
+  });
+  const page = await f.auth.route(f.request("/native/return/ios"));
+  const html = await page!.text();
+  expect(html).toContain("Return to Wallet Pal");
+  expect(html).toContain('src="data:image/png;base64,V2FsbGV0UGFs"');
+  expect(html).not.toContain(BRAND_V1.pageLogo);
+  expect(html).not.toContain("FrockBot");
 });
 
 function tamper(value: string, at: number): string {

@@ -201,7 +201,7 @@ describe("a Plugin intent", () => {
       },
       contextKeys: ["user", "bot", "session"],
     });
-    const action = pluginApprovalActionV1({ descriptor }, "Run");
+    const action = pluginApprovalActionV1({ descriptor }, "Run", "FrockBot");
     expect(action.length).toBe(2_000);
     expect(
       decodeSendToUserPayloadV1({
@@ -215,7 +215,7 @@ describe("a Plugin intent", () => {
   });
 
   test("the card says what the Plugin reaches, and open network is high risk", () => {
-    const action = pluginApprovalActionV1(MEMBER, "Run");
+    const action = pluginApprovalActionV1(MEMBER, "Run", "FrockBot");
     expect(action).toContain('Run the Plugin "Notes" (notes, version 1)');
     expect(action).toContain("note_add");
     expect(action).toContain("agent/tool-exposure");
@@ -232,6 +232,7 @@ describe("a Plugin intent", () => {
         },
       },
       "Run",
+      "FrockBot",
     );
     expect(themed).toContain("theme/assemble");
     expect(themed).toContain("This Plugin can change how this Bot looks.");
@@ -258,6 +259,7 @@ describe("a Plugin intent", () => {
           },
         },
         "Turn on",
+        "FrockBot",
       ),
     ).toContain("every Plugin on this account");
   });
@@ -283,7 +285,11 @@ describe("a Plugin intent", () => {
       ],
       contextKeys: ["user", "bot", "session"],
     });
-    const action = pluginApprovalActionV1({ descriptor }, "Turn on");
+    const action = pluginApprovalActionV1(
+      { descriptor },
+      "Turn on",
+      "FrockBot",
+    );
     expect(action).toContain("It offers mailer_draft.");
     expect(action).not.toContain("It offers no tools.");
     expect(action).not.toContain("It reaches no host of its own.");
@@ -291,7 +297,7 @@ describe("a Plugin intent", () => {
   });
 
   test("declared hosts and the email sender are both named", () => {
-    const action = pluginApprovalActionV1(MEMBER, "Run");
+    const action = pluginApprovalActionV1(MEMBER, "Run", "FrockBot");
     expect(action).toContain("It reaches api.example.com.");
     expect(action).toContain("send email on the Bot's behalf");
   });
@@ -300,6 +306,7 @@ describe("a Plugin intent", () => {
     const action = pluginApprovalActionV1(
       { descriptor: { ...DESCRIPTOR, grants: ["storage"] } },
       "Run",
+      "FrockBot",
     );
     expect(action).toContain("It reaches api.example.com.");
     expect(action).not.toContain("send email");
@@ -326,7 +333,7 @@ describe("what a card says about a page that listens", () => {
 
   test("says the page can use the microphone, with a Stop, and where it goes", () => {
     const descriptor = listening(["device"]);
-    const action = pluginApprovalActionV1({ descriptor }, "Run");
+    const action = pluginApprovalActionV1({ descriptor }, "Run", "FrockBot");
     expect(action).toContain("draws its own web page");
     expect(action).toContain(
       "Its page can use your microphone while you have it open",
@@ -371,6 +378,7 @@ describe("what a card says about a declared model provider", () => {
     const action = pluginApprovalActionV1(
       claimedMember(authoritative.artifact.contentHash),
       "Run",
+      "FrockBot",
     );
     expect(action).toContain("It provides DeepSeek models.");
     expect(action).toContain("the key never reaches the Plugin");
@@ -383,7 +391,7 @@ describe("what a card says about a declared model provider", () => {
       // A member whose descriptor is right but whose bytes are not.
       claimedMember("b".repeat(64), "shadow"),
     ]) {
-      const action = pluginApprovalActionV1(claimed, "Run");
+      const action = pluginApprovalActionV1(claimed, "Run", "FrockBot");
       expect(action).toContain(
         "It declares the deepseek model provider this deployment does not serve through this Plugin",
       );
@@ -408,6 +416,7 @@ describe("what a card says about a declared model provider", () => {
         }),
       },
       "Run",
+      "FrockBot",
     );
     expect(action).toContain("does not serve through this Plugin");
   });

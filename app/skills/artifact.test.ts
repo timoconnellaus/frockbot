@@ -19,7 +19,7 @@ const adapters = [
   {
     source: "managed",
     load: (documents: readonly ManagedSkillDocumentV1[]) =>
-      loadManagedSkillsV1(documents),
+      loadManagedSkillsV1("FrockBot", documents),
   },
   {
     source: "plugin",

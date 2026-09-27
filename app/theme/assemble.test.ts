@@ -20,6 +20,12 @@ import {
 } from "./owed.js";
 import type { BotPluginRosterV1 } from "@frockbot/app/plugins/worker-bot";
 
+const LOOKS = {
+  ink: INK_DOCUMENT_V1,
+  paper: PAPER_DOCUMENT_V1,
+  studio: STUDIO_DOCUMENT_V1,
+};
+
 class MemoryStorage {
   values = new Map<string, unknown>();
   get<T>(key: string): Promise<T | undefined> {
@@ -108,6 +114,7 @@ describe("assembleBotThemeV1", () => {
         flock,
         registration,
         appearance: "paper",
+        looks: LOOKS,
         timezone: "UTC",
         roster: roster(),
         mirror: (look, document) => {
@@ -156,6 +163,7 @@ describe("assembleBotThemeV1", () => {
         flock,
         registration,
         appearance: "ink",
+        looks: LOOKS,
         timezone: "UTC",
         roster: roster(["theme/assemble"]),
         assemble: () => Promise.resolve(patched),
@@ -175,6 +183,7 @@ describe("assembleBotThemeV1", () => {
         flock,
         registration,
         appearance: "ink",
+        looks: LOOKS,
         timezone: "UTC",
         roster: roster(["theme/assemble"]),
         assemble: () => Promise.reject(new Error("plugin threw")),
@@ -218,6 +227,7 @@ describe("assembleBotThemeV1", () => {
         flock,
         registration,
         appearance: "ink",
+        looks: LOOKS,
         timezone: "UTC",
         roster: roster(["theme/assemble"]),
         assemble: () => Promise.resolve(patched),
@@ -251,6 +261,7 @@ describe("assembleBotThemeV1", () => {
           flock,
           registration,
           appearance: "ink",
+          looks: LOOKS,
           timezone: "UTC",
           roster: roster(["theme/assemble"]),
           assemble: () => Promise.resolve(canary),
@@ -304,6 +315,7 @@ describe("assembleBotThemeV1", () => {
         flock,
         registration,
         appearance: "ink",
+        looks: LOOKS,
         timezone: "UTC",
         roster: roster(),
         mirror: () => Promise.resolve(),
@@ -330,6 +342,7 @@ describe("assembleBotThemeV1", () => {
         flock,
         registration,
         appearance: "paper",
+        looks: LOOKS,
         timezone: "UTC",
         now,
         roster: roster(["theme/assemble"]),

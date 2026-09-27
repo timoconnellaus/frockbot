@@ -220,6 +220,7 @@ function harness(
   const calls: PluginBuildRequestV1[] = [];
   const shaped: PluginTriggerSampleV1[] = [];
   const host = createPluginAuthoringHostV1({
+    productName: "FrockBot",
     userId: USER,
     botId: "bot-1",
     turn: TURN,
@@ -522,6 +523,7 @@ describe("checking and publishing", () => {
   test("without a build service, a check says so and nothing is stored", async () => {
     const storage = new Map<string, unknown>();
     const host = createPluginAuthoringHostV1({
+      productName: "FrockBot",
       userId: USER,
       botId: "bot-1",
       turn: TURN,

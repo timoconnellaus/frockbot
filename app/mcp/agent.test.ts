@@ -126,6 +126,7 @@ async function mount(
     },
   });
   const feature = createConfiguredMcpRuntimeContributionV1({
+    productName: "FrockBot",
     capability: CAPABILITY,
     userId: "tim",
     connection: target,

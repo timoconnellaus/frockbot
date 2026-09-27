@@ -1,16 +1,19 @@
 // The branded page a person lands on in their browser when a hosted flow
-// hands them back to FrockBot: the app's own sign-in, or an app's sign-in
+// hands them back to the product: the app's own sign-in, or an app's sign-in
 // through Connect. One template, so every return reads as one product.
 //
 // The page loads nothing from anywhere: the icon is inlined, the styles are
 // inlined under a nonce, and a script runs only where a caller supplies one —
 // the Mac app's custom-scheme hand-off — under the same nonce. Nothing a
 // caller passes is reflected without escaping, and no page can be framed.
-import { RETURN_PAGE_LOGO_V1 } from "./return-page-logo.js";
+import type { BrandV1 } from "@frockbot/core/contracts";
 
-export { RETURN_PAGE_LOGO_V1 };
+/** What of the brand a return page shows. */
+export type ReturnPageBrandV1 = Pick<BrandV1, "productName" | "pageLogo">;
 
 export interface ReturnPageV1 {
+  /** The product the page belongs to: its name and logo. */
+  brand: ReturnPageBrandV1;
   /** The document title. */
   title: string;
   heading: string;
@@ -156,8 +159,8 @@ ${page.script}
 </head>
 <body>
 <main>
-  <img class="icon" src="${RETURN_PAGE_LOGO_V1}" alt="" width="88" height="88">
-  <p class="brand">FrockBot</p>
+  <img class="icon" src="${escape(page.brand.pageLogo)}" alt="" width="88" height="88">
+  <p class="brand">${escape(page.brand.productName)}</p>
   <h1>${escape(page.heading)}</h1>
   <p>${escape(page.lead)}</p>${status}${action}${form}
   <small>${escape(page.footnote)}</small>

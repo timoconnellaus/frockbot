@@ -6,8 +6,12 @@ import {
 import {
   clientCompatibilityResponse,
   CLIENT_HELLO_HEADER,
+  UPDATE_APP_MESSAGE,
 } from "./client-compatibility.js";
-import { returnPageV1 } from "@frockbot/app/return-page";
+import {
+  returnPageV1,
+  type ReturnPageBrandV1,
+} from "@frockbot/app/return-page";
 import {
   AUTH_NO_STORE_HEADERS_V1,
   signInFailedV1 as error,
@@ -121,13 +125,85 @@ export function nativeReturnUris(
 }
 
 /** What the consent page calls the app a return belongs to. */
-const NATIVE_APP_NAMES: Record<NativeReturnPlatformV1, string> = {
-  android: "the FrockBot app on this Android device",
-  macos: "the FrockBot app on this Mac",
-  "macos-dev": "FrockBot Dev on this Mac",
-  ios: "the FrockBot app on this iPhone",
-  "ios-dev": "FrockBot Dev on this iPhone",
-};
+function nativeAppName(
+  platform: NativeReturnPlatformV1,
+  product: string,
+): string {
+  switch (platform) {
+    case "android":
+      return `the ${product} app on this Android device`;
+    case "macos":
+      return `the ${product} app on this Mac`;
+    case "macos-dev":
+      return `${product} Dev on this Mac`;
+    case "ios":
+      return `the ${product} app on this iPhone`;
+    case "ios-dev":
+      return `${product} Dev on this iPhone`;
+  }
+}
+
+/**
+ * The signed apps a deployment's association files name: the profile's
+ * `nativeApps`, carried as the `NATIVE_APPS` var.
+ */
+export interface NativeAppsV1 {
+  android: readonly {
+    packageName: string;
+    sha256CertFingerprints: readonly string[];
+  }[];
+  apple: readonly string[];
+}
+
+const ANDROID_PACKAGE_V1 = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/;
+const CERT_FINGERPRINT_V1 = /^[0-9A-F]{2}(:[0-9A-F]{2}){31}$/;
+const APPLE_APP_ID_V1 = /^[A-Z0-9]{10}\.[A-Za-z0-9.-]+$/;
+
+/**
+ * The `NATIVE_APPS` var, decoded. Deployment policy like `nativeAuth`: a value
+ * that is absent or malformed names no app, so the deployment claims no link
+ * rather than a guessed one.
+ */
+export function nativeAppsV1(flag: string | undefined): NativeAppsV1 {
+  const none: NativeAppsV1 = { android: [], apple: [] };
+  try {
+    const value: unknown = JSON.parse(flag ?? "null");
+    if (!isRecord(value) || !hasOnly(value, ["android", "apple"])) return none;
+    const android = value.android ?? [];
+    const apple = value.apple ?? [];
+    const valid =
+      Array.isArray(android) &&
+      android.every(
+        (app) =>
+          isRecord(app) &&
+          hasOnly(app, ["packageName", "sha256CertFingerprints"]) &&
+          typeof app.packageName === "string" &&
+          ANDROID_PACKAGE_V1.test(app.packageName) &&
+          Array.isArray(app.sha256CertFingerprints) &&
+          app.sha256CertFingerprints.length > 0 &&
+          app.sha256CertFingerprints.every(
+            (print) =>
+              typeof print === "string" && CERT_FINGERPRINT_V1.test(print),
+          ),
+      ) &&
+      Array.isArray(apple) &&
+      apple.every((id) => typeof id === "string" && APPLE_APP_ID_V1.test(id));
+    return valid ? ({ android, apple } as NativeAppsV1) : none;
+  } catch {
+    return none;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasOnly(
+  value: Record<string, unknown>,
+  keys: readonly string[],
+): boolean {
+  return Object.keys(value).every((key) => keys.includes(key));
+}
 
 /** The request origin with a fully qualified (trailing-dot) host normalised. */
 export function requestOrigin(url: URL): string {
@@ -198,6 +274,10 @@ export interface NativeAuthOptions {
   auth: AuthPackageIdentityV1;
   // Only associated, signed targets belong here. No request can add an entry.
   returnUris: readonly string[];
+  /** The signed apps the association files name. */
+  nativeApps: NativeAppsV1;
+  /** What the pages show of the product. */
+  brand: ReturnPageBrandV1;
   /**
    * The beta-access authority, asked after a bearer passes its read-only
    * session check, or before a session is issued. Reads never provision a User.
@@ -306,6 +386,7 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
   // Normalised, so a configured origin with a trailing slash or a default port
   // still matches the request origin the `/native/*` check compares it against.
   const origin = new URL(options.origin).origin;
+  const product = options.brand.productName;
   const now = options.now ?? Date.now;
   const key = () =>
     crypto.subtle.importKey(
@@ -406,7 +487,7 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
       request.headers.get(CLIENT_HELLO_HEADER) ?? "null",
     );
     if (!isProtocolValue("ClientHello", value))
-      throw new Error("Update the app to continue using FrockBot.");
+      throw new Error(UPDATE_APP_MESSAGE);
     return value;
   }
   async function browserIdentity(
@@ -494,8 +575,9 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
     );
     const destination = new URL(claims.start.returnUri);
     return returnPageV1({
-      title: "Sign in to FrockBot",
-      heading: `Sign in to ${platform ? NATIVE_APP_NAMES[platform] : "the FrockBot development build on this device"}?`,
+      brand: options.brand,
+      title: `Sign in to ${product}`,
+      heading: `Sign in to ${platform ? nativeAppName(platform, product) : `the ${product} development build on this device`}?`,
       lead: session.user.email
         ? `You’ll be signed in as ${session.user.email}.`
         : "You’ll be signed in with the account this browser uses.",
@@ -586,19 +668,16 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
           url.pathname === "/.well-known/assetlinks.json" &&
           request.method === "GET"
         ) {
+          if (options.nativeApps.android.length === 0) return error(404);
           return Response.json(
-            [
-              {
-                relation: ["delegate_permission/common.handle_all_urls"],
-                target: {
-                  namespace: "android_app",
-                  package_name: "com.frockbot.mobile",
-                  sha256_cert_fingerprints: [
-                    "61:E6:47:9F:9C:57:55:15:4C:1F:93:9C:DE:48:E8:A7:57:EF:F3:13:6E:54:ED:1D:DA:5F:61:E7:8B:3C:1E:37",
-                  ],
-                },
+            options.nativeApps.android.map((app) => ({
+              relation: ["delegate_permission/common.handle_all_urls"],
+              target: {
+                namespace: "android_app",
+                package_name: app.packageName,
+                sha256_cert_fingerprints: app.sha256CertFingerprints,
               },
-            ],
+            })),
             { headers: { "cache-control": "public, max-age=300" } },
           );
         }
@@ -611,13 +690,14 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
           const components = APPLE_ASSOCIATED_RETURNS.filter((platform) =>
             options.returnUris.includes(nativeReturnUriV1(origin, platform)),
           ).map((platform) => ({ "/": `/native/return/${platform}` }));
-          if (components.length === 0) return error(404);
+          if (components.length === 0 || options.nativeApps.apple.length === 0)
+            return error(404);
           return Response.json(
             {
               applinks: {
                 details: [
                   {
-                    appIDs: ["Q444L76529.com.frockbot.mobile"],
+                    appIDs: options.nativeApps.apple,
                     components,
                   },
                 ],
@@ -668,7 +748,7 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
             );
           if (session.user.id !== claims.userId)
             return new Response(
-              "This browser is signed in to a different FrockBot account. Switch accounts in the browser, then return to the app and try again.",
+              `This browser is signed in to a different ${product} account. Switch accounts in the browser, then return to the app and try again.`,
               {
                 status: 403,
                 headers: {
@@ -863,7 +943,8 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
           const platform = NATIVE_RETURN_PLATFORMS.find(
             (candidate) => nativeReturnUriV1(origin, candidate) === page,
           );
-          if (platform) return nativeReturnPage(platform, origin);
+          if (platform)
+            return nativeReturnPage(platform, origin, options.brand);
         }
         return error(404);
       } catch {
@@ -884,25 +965,27 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
 function nativeReturnPage(
   platform: NativeReturnPlatformV1,
   origin: string,
+  brand: ReturnPageBrandV1,
 ): Response {
+  const product = brand.productName;
   const returnUri = new URL(nativeReturnUriV1(origin, platform));
   const target =
     platform === "android"
       ? undefined
       : `${NATIVE_RETURN_SCHEMES[platform]}://${returnUri.host}${returnUri.pathname}`;
   return returnPageV1({
-    title: "Return to FrockBot",
-    heading: "Return to FrockBot to finish signing in",
+    brand,
+    title: `Return to ${product}`,
+    heading: `Return to ${product} to finish signing in`,
     lead: target
-      ? "Your browser is handing you over to the FrockBot app. Once it opens, you can close this tab."
-      : "Head back to the FrockBot app to finish signing in. You can close this page.",
-    footnote:
-      "If FrockBot did not open, check that the latest app is installed and try signing in again.",
+      ? `Your browser is handing you over to the ${product} app. Once it opens, you can close this tab.`
+      : `Head back to the ${product} app to finish signing in. You can close this page.`,
+    footnote: `If ${product} did not open, check that the latest app is installed and try signing in again.`,
     ...(target === undefined
       ? {}
       : {
-          status: "Opening FrockBot",
-          action: { label: "Open FrockBot", href: target, id: "open" },
+          status: `Opening ${product}`,
+          action: { label: `Open ${product}`, href: target, id: "open" },
           script: `(function () {
   var incoming = new URLSearchParams(location.search);
   var forwarded = new URLSearchParams();

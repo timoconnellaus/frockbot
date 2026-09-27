@@ -260,10 +260,13 @@ describe("the Access auth Package", () => {
 });
 
 describe("the Access build", () => {
-  const build = ACCESS_AUTH_PACKAGE_V1.create({
-    ACCESS_TEAM_DOMAIN: TEAM_DOMAIN,
-    ACCESS_AUD: AUDIENCE,
-  });
+  const build = ACCESS_AUTH_PACKAGE_V1.create(
+    {
+      ACCESS_TEAM_DOMAIN: TEAM_DOMAIN,
+      ACCESS_AUD: AUDIENCE,
+    },
+    { productName: "FrockBot" },
+  );
 
   test("stores no identity, so there is none to look up or list", () => {
     // Which is why the operator surface lists no accounts on this build and

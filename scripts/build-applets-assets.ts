@@ -116,7 +116,7 @@ export async function pluginTypesReference(): Promise<string> {
   return [
     "# Types",
     "",
-    "Every type `@frockbot/applet-sdk/plugin` declares: the exact file `plugin_check` type-checks `plugin.ts` against, copied here whenever FrockBot is built.",
+    "Every type `@frockbot/applet-sdk/plugin` declares: the exact file `plugin_check` type-checks `plugin.ts` against, copied here whenever {{product}} is built.",
     "",
     'These declarations are not on the Computer. Nothing there can import or search for them, and an SDK you find there is not this one. Write `import type { … } from "@frockbot/applet-sdk/plugin"` and let `plugin_check` resolve it.',
     "",

@@ -5,7 +5,7 @@ catalogs the app draws; do not edit them by hand._
 
 ## When to use
 
-These seven are the core of FrockBot's own catalog, drawn from the app's own
+These seven are the core of {{product}}'s own catalog, drawn from the app's own
 theme, and they are what most cards are made of. Reach for them **before**
 composing the same thing out of `Row`s and `Text`s: they cost fewer
 components, they look like the rest of the app, and four of them do things

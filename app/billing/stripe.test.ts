@@ -31,6 +31,7 @@ const config = {
   webhookSecret: "whsec_test",
   monthlyPriceId: "price_monthly",
   origin: "https://app.frockbot.com",
+  productName: "FrockBot",
 };
 function fakeFetch(
   fn: (
@@ -102,7 +103,7 @@ describe("Stripe payment boundaries", () => {
   });
 
   test("top-up checkout requires membership and sends only an allowed exact amount", async () => {
-    const ledger = new BillingLedger(storage(), () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
     const calls: {
       path: string;
       fields?: Record<string, string>;
@@ -187,7 +188,7 @@ describe("Stripe payment boundaries", () => {
 
   test("uses a stable one-hour Stripe expiry and refuses an intent too old to submit safely", async () => {
     let now = NOW;
-    const ledger = new BillingLedger(storage(), () => now);
+    const ledger = new BillingLedger(storage(), "FrockBot", () => now);
     active(ledger);
     let calls = 0;
     const stripe = new StripeClient(
@@ -226,7 +227,7 @@ describe("Stripe payment boundaries", () => {
   });
 
   test("paid top-up webhook grants exactly the recorded purchase and replays once", async () => {
-    const ledger = new BillingLedger(storage(), () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
     active(ledger);
     ledger.set("customer", "cus_owner");
     ledger.set("checkout:0123456789abcdef", {
@@ -264,7 +265,7 @@ describe("Stripe payment boundaries", () => {
   });
 
   test("rejects a webhook for another customer before it can change credit", async () => {
-    const ledger = new BillingLedger(storage(), () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
     ledger.set("customer", "cus_owner");
     const payments = new AccountPayments(
       ledger,
@@ -293,7 +294,7 @@ describe("Stripe payment boundaries", () => {
   });
 
   test("a paid monthly invoice grants one allowance for its canonical invoice period", async () => {
-    const ledger = new BillingLedger(storage(), () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
     ledger.set("customer", "cus_owner");
     const periodStart = Math.floor((NOW - 1_000) / 1000);
     const periodEnd = Math.floor((NOW + 30 * 86_400_000) / 1000);
@@ -364,7 +365,7 @@ describe("Stripe payment boundaries", () => {
   });
 
   test("a delayed old invoice cannot grant access to the canonical newer unpaid period", async () => {
-    const ledger = new BillingLedger(storage(), () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
     ledger.set("customer", "cus_owner");
     const oldStart = Math.floor((NOW - 60 * 86_400_000) / 1000);
     const oldEnd = Math.floor((NOW - 30 * 86_400_000) / 1000);
@@ -442,7 +443,7 @@ describe("Stripe payment boundaries", () => {
   });
 
   test("concurrent subscription starts claim one checkout slot before calling Stripe", async () => {
-    const ledger = new BillingLedger(storage(), () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
     let release!: () => void;
     const held = new Promise<void>((resolve) => {
       release = resolve;
@@ -480,7 +481,7 @@ describe("Stripe payment boundaries", () => {
   });
 
   test("a confirmed subscription checkout clears only its matching pending slot", async () => {
-    const ledger = new BillingLedger(storage(), () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
     ledger.set("customer", "cus_owner");
     const intent = {
       id: "subscription-done",
@@ -542,7 +543,7 @@ describe("Stripe payment boundaries", () => {
   });
 
   test("a refund suspends usage once and cannot be replayed with changed event data", async () => {
-    const ledger = new BillingLedger(storage(), () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
     ledger.set("customer", "cus_owner");
     const payments = new AccountPayments(
       ledger,

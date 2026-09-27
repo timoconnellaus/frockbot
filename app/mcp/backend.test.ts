@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { TEST_BRAND_V1 } from "@frockbot/app/testkit";
 import type {
   ConnectionCommandReceiptV1,
   ConnectionCommandV1,
@@ -26,6 +27,7 @@ function harness(
 ) {
   const executed: { userId: string; command: ConnectionCommandV1 }[] = [];
   const routes = createMcpBackendContribution({
+    brand: TEST_BRAND_V1,
     mcpSignInKeyring: keyring,
     now: () => now,
     executeConnection: async (userId, command) => {

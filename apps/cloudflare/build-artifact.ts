@@ -1,6 +1,7 @@
 import { readFile, rm } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { decodeBrandV1 } from "@frockbot/core/contracts";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const outdir = resolve(root, "dist/artifacts");
@@ -22,10 +23,29 @@ try {
   throw new Error("Flutter web client was not built", { cause: error });
 }
 
-// The hosted shell serves the site icon the marketing site already serves,
-// read from the one canonical brand icon the app-icon script also renders.
+// The brand this artifact is built with: `--brand <module>` names a
+// deployment's own (the profile's `brand`, resolved), and without it `#brand`
+// resolves through the package import to FrockBot's. The artifact is bundled
+// here rather than by wrangler, so the profile's alias never reaches it; the
+// plugin below is that alias for this build. The brand is validated here, where
+// a build can still refuse it: every look through the ThemeDocument decoder
+// and its contrast floor. Its icon is a path beside the brand module, which the
+// shell serves as the site icon.
+const brandFlag = process.argv.indexOf("--brand");
+const brandModule =
+  brandFlag === -1
+    ? fileURLToPath(import.meta.resolve("#brand"))
+    : resolve(
+        process.argv[brandFlag + 1] ??
+          (() => {
+            throw new Error("--brand names no module");
+          })(),
+      );
+const brand = decodeBrandV1(
+  ((await import(brandModule)) as { BRAND_V1?: unknown }).BRAND_V1,
+);
 const clientIcon = await readFile(
-  resolve(root, "../../assets/marketing/app-icon/frockbot-icon-64.png"),
+  resolve(dirname(brandModule), brand.iconPng),
   "base64",
 );
 
@@ -40,6 +60,14 @@ const result = await Bun.build({
   minify: true,
   sourcemap: "external",
   packages: "bundle",
+  plugins: [
+    {
+      name: "brand",
+      setup(build) {
+        build.onResolve({ filter: /^#brand$/ }, () => ({ path: brandModule }));
+      },
+    },
+  ],
   define: {
     __FROCKBOT_FLUTTER_BUILD__: JSON.stringify(flutterBuild),
     __FROCKBOT_CLIENT_ICON__: JSON.stringify(clientIcon),

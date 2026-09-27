@@ -1,4 +1,5 @@
 import {
+  runtimeNoteLabelV1,
   withheldSendEndsTurnV1,
   type LoopHooksV1,
   type SessionEvent,
@@ -128,7 +129,9 @@ export function endedOwingReplyV1(events: readonly SessionEvent[]): boolean {
 }
 
 /** Delivery is application policy; the loop still owns execution and settlement. */
-export const conversationDeliveryHooksV1: LoopHooksV1 = {
+export const conversationDeliveryHooksV1 = (
+  productName: string,
+): LoopHooksV1 => ({
   async request(agent, _request, _turn, _step, _signal, next) {
     const request = await next();
     const start = agent.session.activeRunJournal.findLast(
@@ -167,8 +170,8 @@ export const conversationDeliveryHooksV1: LoopHooksV1 = {
           role: "user",
           content:
             answerTool === REPLY_TO_REQUEST_TOOL_V1
-              ? `[FrockBot runtime: delivery repair]\nYour previous response was not delivered. Call ${REPLY_TO_REQUEST_TOOL_V1} now with the answer, result, or blocker for the original request, as {"answer":"your reply"}. Do not answer in plain text or repeat completed work.`
-              : '[FrockBot runtime: delivery repair]\nYour previous response was not delivered. Call send_to_user now with the answer, result, or blocker for the original request. For text, use {"disposition":"finish","payload":{"type":"text","text":"your reply"}}. Do not answer in plain text or repeat completed work.',
+              ? `${runtimeNoteLabelV1(productName, "delivery repair")}\nYour previous response was not delivered. Call ${REPLY_TO_REQUEST_TOOL_V1} now with the answer, result, or blocker for the original request, as {"answer":"your reply"}. Do not answer in plain text or repeat completed work.`
+              : `${runtimeNoteLabelV1(productName, "delivery repair")}\nYour previous response was not delivered. Call send_to_user now with the answer, result, or blocker for the original request. For text, use {"disposition":"finish","payload":{"type":"text","text":"your reply"}}. Do not answer in plain text or repeat completed work.`,
         },
       ],
       tools: replyTools,
@@ -184,4 +187,4 @@ export const conversationDeliveryHooksV1: LoopHooksV1 = {
     if (state.attempts >= 2) throw new Error(UNSENT_REPLY_REASON_V1);
     return { kind: "continue" };
   },
-};
+});

@@ -116,6 +116,7 @@ function harness(options?: {
   };
   const now = { value: Date.parse("2026-09-22T00:00:00.000Z") };
   const contribution = new ConnectUserBackendContribution({
+    productName: "FrockBot",
     storage: storage as never,
     settings: settings as never,
     client: client as never,
@@ -162,6 +163,7 @@ describe("account tool catalogs", () => {
     });
     let fetches = 0;
     const contribution = new ConnectUserBackendContribution({
+      productName: "FrockBot",
       storage: storage as never,
       settings: settings as never,
       client: {
@@ -268,6 +270,7 @@ describe("account tool catalogs", () => {
       release = resolve;
     });
     const slow = new ConnectUserBackendContribution({
+      productName: "FrockBot",
       storage: storage as never,
       settings: settings as never,
       client: {
@@ -310,6 +313,7 @@ describe("account tool catalogs", () => {
     };
     job.dueAt = now.value;
     const failing = new ConnectUserBackendContribution({
+      productName: "FrockBot",
       storage: storage as never,
       settings: settings as never,
       client: {
@@ -359,6 +363,7 @@ describe("account tool catalogs", () => {
     now.value += CONNECT_CATALOG_DISCLOSURE_MAX_AGE_MS_V1;
     let fetches = 0;
     const contribution = new ConnectUserBackendContribution({
+      productName: "FrockBot",
       storage: storage as never,
       settings: settings as never,
       client: {

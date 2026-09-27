@@ -59,6 +59,7 @@ import {
   BOT_STATE_CHANNEL_INTERNAL_PATH,
 } from "./bot-state-channel.js";
 import { foundationShellApplicationV1 } from "@frockbot/app/runtime";
+import { BRAND_V1 } from "#brand";
 import {
   computerBotContribution,
   createFoundationBackendContributions,
@@ -764,6 +765,7 @@ export class BotState
     this.turnSupervisor = dependencies.turnSupervisor;
     const emailSender = createBindingEmailSenderV1(
       env as Parameters<typeof createBindingEmailSenderV1>[0],
+      BRAND_V1.emailSenderName,
     );
     // One copy of the deployment's rate table per Bot object: billing prices
     // from it and the Gateway bounds each request by it.
@@ -906,7 +908,7 @@ export class BotState
           backendHost: "bot",
           mountedContributions,
           shell: {
-            ...foundationShellApplicationV1,
+            ...foundationShellApplicationV1(BRAND_V1),
             state: this.ctx,
             env: this.backendEnv,
             outboundFetch: this.outboundFetch,
@@ -1978,6 +1980,7 @@ export class BotState
       flock,
       registration,
       appearance: user.appearance?.look ?? "ink",
+      looks: BRAND_V1.looks,
       timezone: userTimezoneV1(user.profile),
       mirror: async (look, document) => {
         await userConfigurationV1(shell.state, identity).mirrorBotLook(

@@ -148,6 +148,8 @@ interface StoredAuthConfig {
 }
 
 export interface ConnectUserBackendHost {
+  /** The product, which the provider's auth configs are named for. */
+  productName: string;
   storage: UserSettingsStorage & {
     delete(key: string): Promise<boolean>;
     list<T>(options: {
@@ -740,7 +742,7 @@ export class ConnectUserBackendContribution {
       existing ??
       (await client.createAuthConfig(
         toolkit.slug,
-        `FrockBot ${toolkit.name}`,
+        `${this.host.productName} ${toolkit.name}`,
         toolkit.auth,
       ));
     await this.host.storage.put<StoredAuthConfig>(key, { id: config.id });

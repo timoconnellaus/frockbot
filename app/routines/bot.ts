@@ -223,13 +223,14 @@ export async function projectRoutineAccountTimezoneV1(
  */
 export function createBotRoutines(
   storage: RoutineStorageV1,
+  productName: string,
   hookKeys?: RoutineHookMinterV1,
   pluginTriggers?: RoutinePluginTriggerSeamV1,
 ): {
   store: RoutineStore;
   scheduler: RoutineScheduler;
 } {
-  const scheduler = new RoutineScheduler(storage);
+  const scheduler = new RoutineScheduler(storage, { productName });
   return {
     scheduler,
     store: new RoutineStore(storage, {
@@ -275,11 +276,6 @@ export function createBotRoutineHookMinter(
       };
     },
   };
-}
-
-/** Kept for callers that only want the record store. */
-export function createBotRoutineStore(storage: RoutineStorageV1): RoutineStore {
-  return createBotRoutines(storage).store;
 }
 
 /**

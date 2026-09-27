@@ -97,6 +97,8 @@ export type RoutineFireExecutorV1 = (
 ) => Promise<RoutineFireOutcomeV1>;
 
 export interface RoutineSchedulerOptionsV1 {
+  /** The product, which a failure with no sentence of its own names. */
+  productName: string;
   now?(): Date;
   /** Injected so a test can watch the drain without a Durable Object. */
   onSettled?(
@@ -254,12 +256,11 @@ export class RoutineScheduler {
     | undefined;
   readonly #fireTimeoutMs: number;
   readonly #fireLeaseMs: number;
+  readonly #productName: string;
 
-  constructor(
-    storage: RoutineStorageV1,
-    options: RoutineSchedulerOptionsV1 = {},
-  ) {
+  constructor(storage: RoutineStorageV1, options: RoutineSchedulerOptionsV1) {
     this.#storage = storage;
+    this.#productName = options.productName;
     this.#now = options.now ?? (() => new Date());
     this.#onSettled = options.onSettled;
     this.#fireTimeoutMs = options.fireTimeoutMs ?? ROUTINE_FIRE_TIMEOUT_MS;
@@ -926,7 +927,7 @@ export class RoutineScheduler {
     const verb = outcome.status === "cancelled" ? "was stopped" : "did not run";
     // The sentence, not the kernel string: the raw summary is on the run-log
     // row this same transaction writes, which is where an operator looks.
-    const text = `"${name}" ${verb}: ${routineFailureSentenceV1(outcome.summary)}`;
+    const text = `"${name}" ${verb}: ${routineFailureSentenceV1(outcome.summary, this.#productName)}`;
     // The same Routine failing the same way every minute is one thing that is
     // wrong, not sixty. It folds into the entry already at the head of the
     // inbox, which keeps its place in the order and gains a count.

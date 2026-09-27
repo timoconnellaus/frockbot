@@ -104,6 +104,8 @@ export interface RuntimeModelSelection {
 }
 
 export interface FoundationRuntimeOptions {
+  /** The product's name, which the native tool namespace is described in. */
+  productName: string;
   billing?: ModelBilling;
   /** Fills in attachment bytes and text for each dispatch; absent, none are. */
   attachments?: ModelAttachmentResolverV1;
@@ -166,7 +168,7 @@ export async function createFoundationRuntime(
   const llm = options.billing
     ? new BilledLlmRegistry(hooks, options.billing, options.attachments)
     : new LlmRegistry(hooks, options.attachments);
-  const tools = new ToolRegistry(hooks, systemPrompt);
+  const tools = new ToolRegistry(hooks, options.productName, systemPrompt);
   const services: FoundationRuntimeServices = {
     sessions,
     systemPrompt,

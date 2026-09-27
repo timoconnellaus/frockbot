@@ -94,6 +94,8 @@ export interface MachineCallV1 {
 }
 
 export interface MachineGatewayHostV1 {
+  /** Whose desktop app the Machines page tells a person to open. */
+  brand: { productName: string };
   /**
    * The HMAC secret every machine token and pairing code is signed with, or
    * nothing. Absent means the door is closed: enrollment and every machine
@@ -336,7 +338,9 @@ export function createMachineBackendContribution(
           return jsonError(405, "method not allowed");
         }
         const view = decodeMachineListViewV1(await host.listMachines(userId));
-        return Response.json(asDocument ? machinesDocumentV1(view) : view);
+        return Response.json(
+          asDocument ? machinesDocumentV1(view, host.brand.productName) : view,
+        );
       } catch (error) {
         return errorResponse(error);
       }

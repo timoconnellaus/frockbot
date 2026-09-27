@@ -1,8 +1,11 @@
 import type { PackageDefinitionV1 } from "@frockbot/core/contracts";
 
-export const settingsDefinitionV1: PackageDefinitionV1 = {
-  id: "settings",
-  displayName: "FrockBot Settings",
-  dependencies: ["auth", "shell", "ui-theme"],
-  platformOwned: true,
-};
+/** The account's own settings, named for the product. */
+export function settingsDefinitionV1(productName: string): PackageDefinitionV1 {
+  return {
+    id: "settings",
+    displayName: `${productName} Settings`,
+    dependencies: ["auth", "shell", "ui-theme"],
+    platformOwned: true,
+  };
+}

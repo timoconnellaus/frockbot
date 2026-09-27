@@ -197,6 +197,7 @@ function testGateway() {
     botConfigurationFor: () => ({}) as BotConfigurationBinding,
     backendContributions: [],
     allowDevelopmentIdentity: false,
+    whatsNew: true,
   });
 }
 

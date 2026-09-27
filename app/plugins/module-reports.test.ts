@@ -148,7 +148,11 @@ describe("what a Plugin's device modules report", () => {
 
   test("reads as each module's state, with a crash's detail, then its logs", () => {
     expect(
-      pluginModuleReportsTextV1("beeper", { entries: [], states: [] }),
+      pluginModuleReportsTextV1(
+        "beeper",
+        { entries: [], states: [] },
+        "FrockBot",
+      ),
     ).toMatch(/have reported nothing/);
     const origin = {
       machineId: "mac-1",
@@ -156,32 +160,36 @@ describe("what a Plugin's device modules report", () => {
       moduleId: "bridge",
     };
     expect(
-      pluginModuleReportsTextV1("beeper", {
-        entries: [
-          {
-            ...origin,
-            at: "2026-09-25T00:00:02.000Z",
-            kind: "log",
-            level: "error",
-            text: "ECONNREFUSED localhost:23373",
-          },
-          {
-            ...origin,
-            at: "2026-09-25T00:00:01.000Z",
-            kind: "state",
-            state: "crashed",
-            detail: "exit 1",
-          },
-        ],
-        states: [
-          {
-            ...origin,
-            at: "2026-09-25T00:00:01.000Z",
-            state: "crashed",
-            detail: "exit 1",
-          },
-        ],
-      }),
+      pluginModuleReportsTextV1(
+        "beeper",
+        {
+          entries: [
+            {
+              ...origin,
+              at: "2026-09-25T00:00:02.000Z",
+              kind: "log",
+              level: "error",
+              text: "ECONNREFUSED localhost:23373",
+            },
+            {
+              ...origin,
+              at: "2026-09-25T00:00:01.000Z",
+              kind: "state",
+              state: "crashed",
+              detail: "exit 1",
+            },
+          ],
+          states: [
+            {
+              ...origin,
+              at: "2026-09-25T00:00:01.000Z",
+              state: "crashed",
+              detail: "exit 1",
+            },
+          ],
+        },
+        "FrockBot",
+      ),
     ).toBe(
       [
         "beeper's device modules, latest state on each desktop:",

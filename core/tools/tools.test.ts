@@ -14,7 +14,7 @@ function registryFixture(tool: ToolDefinition): {
   context: ToolExecutionContext;
 } {
   const hooks = new LoopHookListV1();
-  const tools = new ToolRegistry(hooks);
+  const tools = new ToolRegistry(hooks, "FrockBot");
   tools.register(tool);
   return {
     hooks,
@@ -182,7 +182,7 @@ describe("ToolRegistry effect keying", () => {
 
 describe("ToolRegistry turn admission", () => {
   function admissionRegistry(): ToolRegistry {
-    return new ToolRegistry(new LoopHookListV1());
+    return new ToolRegistry(new LoopHookListV1(), "FrockBot");
   }
 
   function admittedNames(

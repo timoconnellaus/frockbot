@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { createAgentLoop } from "@frockbot/core/agent-loop";
-import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
+import {
+  createAgentRuntimeHarness,
+  TEST_BRAND_V1,
+} from "@frockbot/app/testkit";
 import { modelToolCallsV1 } from "./grading.js";
 import { AGENT_LOOP_MAX_STEPS_V1 } from "@frockbot/app/agent-runtime";
 import { foundationBaseRuntimePackagesV1 } from "@frockbot/app/runtime";
@@ -74,7 +77,7 @@ const path = `.eval-results/conversation-${Date.now()}.json`;
 for (const scenario of cases) {
   for (let repetition = 1; repetition <= report.repetitions; repetition++) {
     const root = createAgentRuntimeHarness();
-    for (const pkg of foundationBaseRuntimePackagesV1())
+    for (const pkg of foundationBaseRuntimePackagesV1(TEST_BRAND_V1))
       await root.mount(pkg.feature);
     let modelCalls = 0;
     root.llm.register({

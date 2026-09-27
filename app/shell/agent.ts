@@ -3,6 +3,7 @@
 import {
   appendRuntimeNoteV1,
   packageAdmissionCeilingV1,
+  runtimeNoteLabelV1,
 } from "@frockbot/core/contracts";
 import {
   SUBAGENT_QUESTION_PREFIX_V1,
@@ -44,7 +45,7 @@ import {
 import { compactionScopeV1, compactionWorkV1 } from "./compaction-scheduler.js";
 import { SUMMARY_EFFECT_PREFIX_V1 } from "@frockbot/app/billing/model";
 import { conversationDeliveryHooksV1 } from "./delivery.js";
-import { shellDefinitionV1 } from "./definition.js";
+import { SHELL_PACKAGE_V1 } from "./definition.js";
 import {
   drawFirstPartyCardV1,
   type SecretRequestTermsV1,
@@ -76,7 +77,7 @@ export const PARENT_HANDOFF_CAPABILITY_V1 = "parent-handoff";
 export function shellAdmissionCeilingV1(
   capabilityId: string,
 ): readonly TurnTypeV1[] | undefined {
-  return packageAdmissionCeilingV1(shellDefinitionV1, capabilityId);
+  return packageAdmissionCeilingV1(SHELL_PACKAGE_V1, capabilityId);
 }
 
 function refusal(reason: string): ToolExecutionResult {
@@ -292,7 +293,9 @@ export function timeBudgetPromptTextV1(context: {
 }
 
 /** Runtime notes carry a label so the model reads them as the platform's. */
-export const TURN_BUDGET_NOTE_LABEL_V1 = "[FrockBot runtime: budget]";
+export function turnBudgetNoteLabelV1(productName: string): string {
+  return runtimeNoteLabelV1(productName, "budget");
+}
 
 /**
  * The step and time warnings, as one note at the tail of the request they
@@ -301,7 +304,7 @@ export const TURN_BUDGET_NOTE_LABEL_V1 = "[FrockBot runtime: budget]";
  * the whole conversation behind it. A note at the tail costs nothing, and the
  * next request, built from the log, does not carry it.
  */
-export const turnBudgetHooksV1: LoopHooksV1 = {
+export const turnBudgetHooksV1 = (productName: string): LoopHooksV1 => ({
   async request(agent, _request, _turn, step, _signal, next) {
     const request = await next();
     const budget = agent.turnBudget?.();
@@ -324,10 +327,10 @@ export const turnBudgetHooksV1: LoopHooksV1 = {
     if (!note) return request;
     return appendRuntimeNoteV1(
       request,
-      `${TURN_BUDGET_NOTE_LABEL_V1}\n${note}`,
+      `${turnBudgetNoteLabelV1(productName)}\n${note}`,
     );
   },
-};
+});
 
 export const CONVERSATION_PROMPT_TEXT_V1 = [
   "## Talking to the user",
@@ -853,204 +856,202 @@ async function compactionWindowV1(
  * conversation that started it, each bounded by the turn types its manifest
  * Capability declares.
  */
-export const shellAgentFeature: RuntimeFeatureV1<AgentRuntimeV1> = (
-  runtime,
-) => {
-  const userVoice = shellAdmissionCeilingV1(USER_VOICE_CAPABILITY_V1);
-  const parentHandoff = shellAdmissionCeilingV1(PARENT_HANDOFF_CAPABILITY_V1);
-  const disposers = [
-    // The voice and the rules for using it are contributed together, and the
-    // rules are chosen by the same ceiling that admits the tool: a Turn that
-    // has the send tool carries the conversational contract, and one that has
-    // only the hand-off is told about the hand-off. A section that named a
-    // tool the Turn could not call sent the model hunting for it instead.
-    runtime.systemPrompt.register({
-      id: CONVERSATION_PROMPT_SECTION_V1,
-      order: CONVERSATION_PROMPT_ORDER_V1,
-      render: (context) => conversationPromptTextV1(context.turnType),
-    }),
-    // Nothing for most of a Turn; a countdown and one instruction at the end
-    // of its step or time budget. See `turnBudgetHooksV1`.
-    runtime.hooks.add(turnBudgetHooksV1),
-    runtime.tools.register(
-      createSendToUserTool(SEND_TO_USER_TOOL_V1, runtime.sessions, runtime),
-      userVoice ? { admissionCeiling: userVoice } : undefined,
-    ),
-    runtime.tools.register(
-      createWakeParentTool(runtime.sessions),
-      parentHandoff ? { admissionCeiling: parentHandoff } : undefined,
-    ),
-    runtime.tools.register(
-      createTaskAskTool(runtime.sessions),
-      parentHandoff ? { admissionCeiling: parentHandoff } : undefined,
-    ),
-    runtime.hooks.add(conversationDeliveryHooksV1),
-    // The hook is evaluated after `turn/end` is on the log and flushed — but
-    // `turnStopping` is a hook the loop *awaits* inside its `finally`, so
-    // running the summariser here is exactly the latency a compaction must
-    // never cost. It is handed to the detached scheduler instead and this
-    // returns at once: the Turn ends, the run settles, the response goes out,
-    // and the summariser carries on behind it. Nothing here may throw, and
-    // nothing here may wait.
-    runtime.hooks.add({
-      turnStopping: async (agent, turn) => {
-        const session = agent.session;
-        const work = compactionWorkV1(session.id, compactionScopeV1(session));
-        // The log is free until the next admission, so an outcome that lands
-        // before then is written straight through this Turn's Session.
-        work.adopt(session);
-        const types = turnTypesByTurnV1(session.activeRunJournal);
-        if ((types.get(turn) ?? "chat") !== "chat") return;
-        const selector = session.workingContextSelector as
-          | {
-              parkedCompaction?: ParkedCompactionStoreV1;
-              compactionChooser?: CompactionChooserV1;
-            }
-          | undefined;
-        const parked = selector?.parkedCompaction ?? work.memoryParking;
-        const choose = selector?.compactionChooser;
-        const log: CompactionLogV1 = {
-          journal: session.activeRunJournal,
-          append: (event) =>
-            work.write(session, async (owner) => {
-              owner.append(event);
-              await owner.flush();
-            }),
-          park: (outcome) => parked.write(outcome),
-        };
-        // The platform's summary model when a provider offers one, so a
-        // conversation is compacted whatever model the Bot is on.
-        const summaryModel = runtime.llm
-          .list()
-          .find((provider) => provider.summaryModel);
-        work.start(async () => {
-          // Whatever landed while this Turn ran is written first, so the
-          // assessment below reads the summary as it now stands.
-          const applied = await applyParkedCompactionV1({
-            log,
-            parked,
-            state: (await compactionWindowV1(session, turn)).state,
-          });
-          if (applied === "yielded") return;
-          // A backlog is summarised a bounded slice at a time; keep going
-          // until it is covered, a Turn takes the log, or a slice fails.
-          for (
-            let slice = 0;
-            slice < COMPACTION_MAX_SLICES_PER_RUN_V1;
-            slice++
-          ) {
-            const outcome = await runCompactionV1({
+export const createShellAgentFeatureV1 =
+  (productName: string): RuntimeFeatureV1<AgentRuntimeV1> =>
+  (runtime) => {
+    const userVoice = shellAdmissionCeilingV1(USER_VOICE_CAPABILITY_V1);
+    const parentHandoff = shellAdmissionCeilingV1(PARENT_HANDOFF_CAPABILITY_V1);
+    const disposers = [
+      // The voice and the rules for using it are contributed together, and the
+      // rules are chosen by the same ceiling that admits the tool: a Turn that
+      // has the send tool carries the conversational contract, and one that has
+      // only the hand-off is told about the hand-off. A section that named a
+      // tool the Turn could not call sent the model hunting for it instead.
+      runtime.systemPrompt.register({
+        id: CONVERSATION_PROMPT_SECTION_V1,
+        order: CONVERSATION_PROMPT_ORDER_V1,
+        render: (context) => conversationPromptTextV1(context.turnType),
+      }),
+      // Nothing for most of a Turn; a countdown and one instruction at the end
+      // of its step or time budget. See `turnBudgetHooksV1`.
+      runtime.hooks.add(turnBudgetHooksV1(productName)),
+      runtime.tools.register(
+        createSendToUserTool(SEND_TO_USER_TOOL_V1, runtime.sessions, runtime),
+        userVoice ? { admissionCeiling: userVoice } : undefined,
+      ),
+      runtime.tools.register(
+        createWakeParentTool(runtime.sessions),
+        parentHandoff ? { admissionCeiling: parentHandoff } : undefined,
+      ),
+      runtime.tools.register(
+        createTaskAskTool(runtime.sessions),
+        parentHandoff ? { admissionCeiling: parentHandoff } : undefined,
+      ),
+      runtime.hooks.add(conversationDeliveryHooksV1(productName)),
+      // The hook is evaluated after `turn/end` is on the log and flushed — but
+      // `turnStopping` is a hook the loop *awaits* inside its `finally`, so
+      // running the summariser here is exactly the latency a compaction must
+      // never cost. It is handed to the detached scheduler instead and this
+      // returns at once: the Turn ends, the run settles, the response goes out,
+      // and the summariser carries on behind it. Nothing here may throw, and
+      // nothing here may wait.
+      runtime.hooks.add({
+        turnStopping: async (agent, turn) => {
+          const session = agent.session;
+          const work = compactionWorkV1(session.id, compactionScopeV1(session));
+          // The log is free until the next admission, so an outcome that lands
+          // before then is written straight through this Turn's Session.
+          work.adopt(session);
+          const types = turnTypesByTurnV1(session.activeRunJournal);
+          if ((types.get(turn) ?? "chat") !== "chat") return;
+          const selector = session.workingContextSelector as
+            | {
+                parkedCompaction?: ParkedCompactionStoreV1;
+                compactionChooser?: CompactionChooserV1;
+              }
+            | undefined;
+          const parked = selector?.parkedCompaction ?? work.memoryParking;
+          const choose = selector?.compactionChooser;
+          const log: CompactionLogV1 = {
+            journal: session.activeRunJournal,
+            append: (event) =>
+              work.write(session, async (owner) => {
+                owner.append(event);
+                await owner.flush();
+              }),
+            park: (outcome) => parked.write(outcome),
+          };
+          // The platform's summary model when a provider offers one, so a
+          // conversation is compacted whatever model the Bot is on.
+          const summaryModel = runtime.llm
+            .list()
+            .find((provider) => provider.summaryModel);
+          work.start(async () => {
+            // Whatever landed while this Turn ran is written first, so the
+            // assessment below reads the summary as it now stands.
+            const applied = await applyParkedCompactionV1({
               log,
-              window: await compactionWindowV1(session, turn),
-              budget: CHAT_HISTORY_BUDGET_CHARS_V1,
-              currentTurn: turn,
-              ...(summaryModel?.summaryModel
-                ? {
-                    model: {
-                      provider: summaryModel.id,
-                      model: summaryModel.summaryModel.model,
-                      modelBinding: summaryModel.summaryModel.modelBinding,
-                    },
-                  }
-                : {}),
-              newEffectId: () =>
-                `${SUMMARY_EFFECT_PREFIX_V1}${crypto.randomUUID()}`,
-              ...(choose ? { choose } : {}),
-              summarise: async (request) => {
-                try {
-                  let text = "";
-                  let truncated = false;
-                  for await (const event of runtime.llm.stream(
-                    {
-                      // The intent's own effect id, never a fresh one: the
-                      // summariser is a model effect like any other, and the
-                      // id is what the durable log and the host's dispatch
-                      // both key it by.
-                      requestId: request.effectId,
-                      provider: request.provider,
-                      model: request.model,
-                      system: request.system,
-                      messages: request.messages,
-                      tools: [],
-                      ...(request.modelBinding
-                        ? { modelBinding: request.modelBinding }
-                        : {}),
-                    },
-                    request.signal,
-                  )) {
-                    if (event.type === "text-delta") text += event.text;
-                    if (event.type === "finish") {
-                      truncated = event.reason === "max-tokens";
+              parked,
+              state: (await compactionWindowV1(session, turn)).state,
+            });
+            if (applied === "yielded") return;
+            // A backlog is summarised a bounded slice at a time; keep going
+            // until it is covered, a Turn takes the log, or a slice fails.
+            for (
+              let slice = 0;
+              slice < COMPACTION_MAX_SLICES_PER_RUN_V1;
+              slice++
+            ) {
+              const outcome = await runCompactionV1({
+                log,
+                window: await compactionWindowV1(session, turn),
+                budget: CHAT_HISTORY_BUDGET_CHARS_V1,
+                currentTurn: turn,
+                ...(summaryModel?.summaryModel
+                  ? {
+                      model: {
+                        provider: summaryModel.id,
+                        model: summaryModel.summaryModel.model,
+                        modelBinding: summaryModel.summaryModel.modelBinding,
+                      },
+                    }
+                  : {}),
+                newEffectId: () =>
+                  `${SUMMARY_EFFECT_PREFIX_V1}${crypto.randomUUID()}`,
+                ...(choose ? { choose } : {}),
+                summarise: async (request) => {
+                  try {
+                    let text = "";
+                    let truncated = false;
+                    for await (const event of runtime.llm.stream(
+                      {
+                        // The intent's own effect id, never a fresh one: the
+                        // summariser is a model effect like any other, and the
+                        // id is what the durable log and the host's dispatch
+                        // both key it by.
+                        requestId: request.effectId,
+                        provider: request.provider,
+                        model: request.model,
+                        system: request.system,
+                        messages: request.messages,
+                        tools: [],
+                        ...(request.modelBinding
+                          ? { modelBinding: request.modelBinding }
+                          : {}),
+                      },
+                      request.signal,
+                    )) {
+                      if (event.type === "text-delta") text += event.text;
+                      if (event.type === "finish") {
+                        truncated = event.reason === "max-tokens";
+                      }
+                    }
+                    if (truncated) {
+                      throw new Error(
+                        "The summary was cut off at its length limit.",
+                      );
+                    }
+                    return text;
+                  } finally {
+                    // The loop settles a model call's held resources when it
+                    // dispatches it; this call is the compaction's own, outside
+                    // any loop, so its lease is settled here — however the call
+                    // ended. A failed settlement cannot be re-announced by a
+                    // compaction, so it must not fail a summary that succeeded.
+                    try {
+                      await runtime.hooks.modelOutcomeCommitted(
+                        agent,
+                        request.effectId,
+                      );
+                    } catch {
+                      // Nothing left to tell.
                     }
                   }
-                  if (truncated) {
-                    throw new Error(
-                      "The summary was cut off at its length limit.",
-                    );
-                  }
-                  return text;
-                } finally {
-                  // The loop settles a model call's held resources when it
-                  // dispatches it; this call is the compaction's own, outside
-                  // any loop, so its lease is settled here — however the call
-                  // ended. A failed settlement cannot be re-announced by a
-                  // compaction, so it must not fail a summary that succeeded.
-                  try {
-                    await runtime.hooks.modelOutcomeCommitted(
-                      agent,
-                      request.effectId,
-                    );
-                  } catch {
-                    // Nothing left to tell.
-                  }
-                }
-              },
+                },
+              });
+              if (outcome.kind !== "compacted") return;
+            }
+          });
+        },
+      }),
+      // Applied after the rest of the chain, so this Package has the last word on
+      // what history a request carries — the one rule the visible transcript
+      // rests on.
+      runtime.hooks.add({
+        messageWindow: async (agent, _messages, turn, _step, _signal, next) => {
+          await next();
+          const session = agent.session;
+          const currentMessages = session.deriveTurnMessages(turn);
+          const currentTurnType = session.turnType(turn);
+          if (session.workingContextSelector) {
+            return session.workingContextSelector({
+              sessionId: session.id,
+              epoch: session.cursor.epoch,
+              currentTurn: turn,
+              currentTurnType,
+              currentMessages,
+              budget: CHAT_HISTORY_BUDGET_CHARS_V1,
+              pointer: automationParentPointerV1,
             });
-            if (outcome.kind !== "compacted") return;
           }
-        });
-      },
-    }),
-    // Applied after the rest of the chain, so this Package has the last word on
-    // what history a request carries — the one rule the visible transcript
-    // rests on.
-    runtime.hooks.add({
-      messageWindow: async (agent, _messages, turn, _step, _signal, next) => {
-        await next();
-        const session = agent.session;
-        const currentMessages = session.deriveTurnMessages(turn);
-        const currentTurnType = session.turnType(turn);
-        if (session.workingContextSelector) {
-          return session.workingContextSelector({
+          const journalStart = session.activeRunJournal[0]?.seq ?? 0;
+          if (journalStart > 0) {
+            throw new Error(
+              "working context is unavailable for this active-run journal",
+            );
+          }
+          return assembleJournalContextV1({
+            events: session.activeRunJournal,
             sessionId: session.id,
-            epoch: session.cursor.epoch,
             currentTurn: turn,
             currentTurnType,
             currentMessages,
-            budget: CHAT_HISTORY_BUDGET_CHARS_V1,
             pointer: automationParentPointerV1,
           });
-        }
-        const journalStart = session.activeRunJournal[0]?.seq ?? 0;
-        if (journalStart > 0) {
-          throw new Error(
-            "working context is unavailable for this active-run journal",
-          );
-        }
-        return assembleJournalContextV1({
-          events: session.activeRunJournal,
-          sessionId: session.id,
-          currentTurn: turn,
-          currentTurnType,
-          currentMessages,
-          pointer: automationParentPointerV1,
-        });
-      },
-    }),
-  ];
-  return () => {
-    for (const dispose of disposers.toReversed()) dispose();
+        },
+      }),
+    ];
+    return () => {
+      for (const dispose of disposers.toReversed()) dispose();
+    };
   };
-};
-
-export default shellAgentFeature;

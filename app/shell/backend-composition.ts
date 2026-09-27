@@ -146,6 +146,8 @@ export interface ShellIsolateMountOptions {
 }
 
 export interface ShellCompositionMountOptions {
+  /** The product's name, which the native tool namespace is described in. */
+  productName: string;
   billing?: ModelBilling;
   /** Fills in what a request's attachments name, for one dispatch. */
   attachments?: ModelAttachmentResolverV1;
@@ -248,6 +250,7 @@ export function createShellCompositionHost(
     async mount(generation, signal) {
       signal.throwIfAborted();
       const runtime = await createFoundationRuntime(undefined, {
+        productName: options.productName,
         agentId: options.botId,
         billing: options.billing,
         ...(options.attachments ? { attachments: options.attachments } : {}),

@@ -237,7 +237,11 @@ class FakeSettings {
 function fixture() {
   const storage = new MemoryStorage();
   const settings = new FakeSettings();
-  const frockAi = createFrockAiUserBackendContribution({ storage, settings });
+  const frockAi = createFrockAiUserBackendContribution({
+    storage,
+    settings,
+    connectionName: "Frock AI",
+  });
   settings.registerConfigurationReadBootstrap(frockAi);
   return { storage, settings };
 }
@@ -372,7 +376,7 @@ describe("Frock AI User Contribution", () => {
       unexpected: true,
     });
     await expect(settings.readConfiguration("user-1")).rejects.toThrow(
-      "Stored Frock AI bootstrap marker is invalid",
+      "Stored built-in model bootstrap marker is invalid",
     );
   });
 });

@@ -1245,7 +1245,7 @@ export class ComputerHost {
         {
           id: request.tenant.botId,
           name: request.tenant.botId,
-          description: "FrockBot Bot",
+          description: "Bot",
           computer: { botKey, sharedHome: HOME_ROOT },
         },
         null,
@@ -2518,7 +2518,7 @@ export class ComputerHost {
       if (outcome.outputTruncated) {
         throw new ComputerHostError(
           "limit-exceeded",
-          "The browser holds more sign-in data than FrockBot keeps",
+          "The browser holds more sign-in data than can be kept",
           413,
         );
       }

@@ -263,6 +263,7 @@ describe("the Skills loader", () => {
     ]);
     const rendered = renderSkillCatalogPromptV1(
       await loadSkillCatalogV1(workspace, OWNER),
+      "FrockBot",
     );
     expect(rendered).toContain("<agent_skills>");
     expect(rendered).toContain(
@@ -277,7 +278,10 @@ describe("the Skills loader", () => {
     // Progressive disclosure: the body is never in the prompt.
     expect(rendered).not.toContain("Secret body text.");
     expect(
-      renderSkillCatalogPromptV1({ owner: OWNER, skills: [], refusals: [] }),
+      renderSkillCatalogPromptV1(
+        { owner: OWNER, skills: [], refusals: [] },
+        "FrockBot",
+      ),
     ).toBe("");
   });
 

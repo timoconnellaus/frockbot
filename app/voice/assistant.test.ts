@@ -441,6 +441,7 @@ describe("what the session may call", () => {
 describe("the system prompt", () => {
   test("supplies the full current instant and the User's local date and time", () => {
     const input = {
+      productName: "FrockBot",
       bots: [],
       memory: { logDays: 30 },
       now: new Date("2026-09-12T23:35:42.000Z"),
@@ -461,6 +462,7 @@ describe("the system prompt", () => {
     "uses the local daylight-saving offset at %s",
     (instant, local, offset) => {
       const prompt = renderVoiceSystemPromptV1({
+        productName: "FrockBot",
         bots: [],
         memory: { logDays: 30 },
         now: new Date(instant),
@@ -474,6 +476,7 @@ describe("the system prompt", () => {
 
   test("uses an explicit UTC clock when no User timezone is set", () => {
     const prompt = renderVoiceSystemPromptV1({
+      productName: "FrockBot",
       bots: [],
       memory: { logDays: 30 },
       now: new Date("2026-09-12T23:35:42.000Z"),
@@ -514,6 +517,7 @@ describe("the system prompt", () => {
     ];
     const prompt = renderVoiceSystemPromptV1({
       // A call wears a Bot (ADR 0029), and the answer rule is that Bot's.
+      productName: "FrockBot",
       bot: { botId: "sunny", name: "Sunny" },
       bots: [
         {
@@ -553,6 +557,7 @@ describe("the system prompt", () => {
     ["without one", undefined, VOICE_ACCOUNT_FUNCTION_DECLARATIONS_V1],
   ])("only names tools it is given, %s", (_label, bot, declarations) => {
     const prompt = renderVoiceSystemPromptV1({
+      productName: "FrockBot",
       bots: [],
       memory: { logDays: 30 },
       now: new Date("2026-09-12T00:00:00.000Z"),
@@ -578,6 +583,7 @@ describe("the system prompt", () => {
   // that it is already the one talking to them.
   test("the directory is the other Bots, never the one speaking", () => {
     const prompt = renderVoiceSystemPromptV1({
+      productName: "FrockBot",
       bot: { botId: "sunny", name: "Sunny" },
       bots: [
         { botId: "sunny", name: "Sunny" },
@@ -592,6 +598,7 @@ describe("the system prompt", () => {
 
   test("a Bot with no siblings is told there is nobody to hand over to", () => {
     const prompt = renderVoiceSystemPromptV1({
+      productName: "FrockBot",
       bot: { botId: "sunny", name: "Sunny" },
       bots: [{ botId: "sunny", name: "Sunny" }],
       memory: { logDays: 30 },
@@ -603,6 +610,7 @@ describe("the system prompt", () => {
 
   test("names running work silently so a new call does not announce it", () => {
     const prompt = renderVoiceSystemPromptV1({
+      productName: "FrockBot",
       bot: { botId: "sunny", name: "Sunny" },
       bots: [{ botId: "sunny", name: "Sunny" }],
       memory: { logDays: 30 },
@@ -620,6 +628,7 @@ describe("the system prompt", () => {
 
   test("says when memory could not be read rather than pretending it is empty", () => {
     const prompt = renderVoiceSystemPromptV1({
+      productName: "FrockBot",
       bots: [],
       memory: {
         user: { ...tier([]), unavailable: "bucket missing" },
@@ -636,6 +645,7 @@ describe("what it is told about its own memory", () => {
   const sessionInput = (
     session: VoiceAssistantPromptInputV1["session"],
   ): VoiceAssistantPromptInputV1 => ({
+    productName: "FrockBot",
     bots: [],
     memory: { logDays: 30 },
     now: new Date("2026-09-12T10:00:00.000Z"),

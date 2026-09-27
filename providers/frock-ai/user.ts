@@ -79,6 +79,8 @@ interface FrockAiUserSettingsHost {
 interface FrockAiUserBackendHost {
   storage: FrockAiUserSettingsStorage;
   settings: FrockAiUserSettingsHost;
+  /** What a person sees the ambient Connection called: the brand's model name. */
+  connectionName: string;
 }
 
 interface StoredBootstrapV1 {
@@ -94,7 +96,7 @@ interface StoredCommandV1 {
 
 function decodeBootstrap(input: unknown): StoredBootstrapV1 {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
-    throw new Error("Stored Frock AI bootstrap marker is invalid");
+    throw new Error("Stored built-in model bootstrap marker is invalid");
   }
   const value = input as Record<string, unknown>;
   if (
@@ -103,14 +105,14 @@ function decodeBootstrap(input: unknown): StoredBootstrapV1 {
     typeof value.userId !== "string" ||
     !value.userId
   ) {
-    throw new Error("Stored Frock AI bootstrap marker is invalid");
+    throw new Error("Stored built-in model bootstrap marker is invalid");
   }
   return { schemaVersion: 1, userId: value.userId };
 }
 
 function decodeStoredCommand(input: unknown): StoredCommandV1 {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
-    throw new Error("Stored Frock AI command is invalid");
+    throw new Error("Stored built-in model command is invalid");
   }
   const value = input as Record<string, unknown>;
   if (
@@ -118,7 +120,7 @@ function decodeStoredCommand(input: unknown): StoredCommandV1 {
     typeof value.accountId !== "string" ||
     !value.accountId
   ) {
-    throw new Error("Stored Frock AI command is invalid");
+    throw new Error("Stored built-in model command is invalid");
   }
   return {
     accountId: value.accountId,
@@ -127,12 +129,12 @@ function decodeStoredCommand(input: unknown): StoredCommandV1 {
   };
 }
 
-function ambientConnection(): ConnectionView {
+function ambientConnection(displayName: string): ConnectionView {
   return {
     connectionId: FROCK_AI_CONNECTION_ID,
     packageId: FROCK_AI_PACKAGE_ID,
     connectionTypeId: FROCK_AI_CONNECTION_TYPE_ID,
-    displayName: "Frock AI",
+    displayName,
     state: "ready",
     generation: FROCK_AI_CONNECTION_GENERATION,
     providerType: FROCK_AI_PROVIDER_TYPE,
@@ -199,7 +201,7 @@ export class FrockAiUserBackendContribution implements UserConfigurationReadBoot
       if (marker !== undefined) {
         const decoded = decodeBootstrap(marker);
         if (decoded.userId !== userId) {
-          throw new Error("Frock AI bootstrap belongs to another User");
+          throw new Error("Built-in model bootstrap belongs to another User");
         }
       }
 
@@ -229,21 +231,21 @@ export class FrockAiUserBackendContribution implements UserConfigurationReadBoot
 
       let connection = await this.host.settings.createConnection(
         userId,
-        ambientConnection(),
+        ambientConnection(this.host.connectionName),
         storage,
       );
       if (
         connection.packageId !== FROCK_AI_PACKAGE_ID ||
         connection.connectionTypeId !== FROCK_AI_CONNECTION_TYPE_ID
       ) {
-        throw new Error("Frock AI Connection identity is invalid");
+        throw new Error("Built-in model Connection identity is invalid");
       }
       if (frockConnectionNeedsRepair(connection)) {
         await this.host.settings.replaceConnection(
           userId,
           FROCK_AI_CONNECTION_ID,
           connection.generation,
-          ambientConnection(),
+          ambientConnection(this.host.connectionName),
           storage,
         );
       }
@@ -287,7 +289,7 @@ export class FrockAiUserBackendContribution implements UserConfigurationReadBoot
           decoded.accountId !== accountId ||
           JSON.stringify(decoded.command) !== JSON.stringify(command)
         ) {
-          throw new Error("Frock AI command id collision");
+          throw new Error("Built-in model command id collision");
         }
         return decoded.receipt;
       }
@@ -345,7 +347,9 @@ export class FrockAiUserBackendContribution implements UserConfigurationReadBoot
   }
 
   async leaseModelCredential(): Promise<never> {
-    throw new Error("Frock AI uses its deployment binding, not a credential");
+    throw new Error(
+      "The built-in model uses its deployment binding, not a credential",
+    );
   }
 
   settleModelCredential(): Promise<void> {

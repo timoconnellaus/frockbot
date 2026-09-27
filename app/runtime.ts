@@ -18,9 +18,11 @@ import type {
   ResolvedModelBindingV1,
 } from "@frockbot/core/configuration";
 import clockFeature from "@frockbot/app/clock/agent";
-import type {
-  AgentRuntimeV1,
-  RuntimeFeatureV1,
+import {
+  brandUserAgentV1,
+  type AgentRuntimeV1,
+  type BrandV1,
+  type RuntimeFeatureV1,
 } from "@frockbot/core/contracts";
 import type { CredentialLeaseRuntime } from "@frockbot/app/credentials/user";
 
@@ -52,7 +54,7 @@ import {
   type FlockSelfRuntimeHostV1,
 } from "@frockbot/app/flock/agent";
 export type { FlockSelfRuntimeHostV1 } from "@frockbot/app/flock/agent";
-import identityFeature from "@frockbot/app/identity/agent";
+import { createIdentityFeature } from "@frockbot/app/identity/agent";
 import foundationProviderFeature, {
   FOUNDATION_MODEL,
   FOUNDATION_PROVIDER,
@@ -100,7 +102,7 @@ import {
   createImageFeature,
   type ImageRuntimeHostV1,
 } from "@frockbot/app/image/agent";
-import shellAgentFeature from "@frockbot/app/shell/agent";
+import { createShellAgentFeatureV1 } from "@frockbot/app/shell/agent";
 import {
   createSkillsRuntimeFeature,
   type SkillsRuntimeHostV1,
@@ -110,12 +112,13 @@ import { createPanelFocusFeature } from "@frockbot/app/plugins/panel-focus";
 
 export { FOUNDATION_MODEL, FOUNDATION_PROVIDER };
 import {
-  FOUNDATION_PACKAGE_CATALOG_V1,
+  foundationPackageCatalogV1,
   FOUNDATION_PACKAGE_VERSION_V1,
 } from "./packages.js";
 export {
-  FOUNDATION_PACKAGE_CATALOG_V1,
+  foundationPackageCatalogV1,
   FOUNDATION_PACKAGE_VERSION_V1,
+  type FoundationPackageBrandV1,
 } from "./packages.js";
 
 /** Everything a feature may register into, for one Turn. */
@@ -138,13 +141,18 @@ export interface FoundationRuntimePackage {
  * built-in model, the two demo tools and the Shell's own voice. The host's
  * Packages mount before these, so a provider they need is already registered.
  */
-export function foundationBaseRuntimePackagesV1(): FoundationRuntimePackage[] {
+export function foundationBaseRuntimePackagesV1(
+  brand: BrandV1,
+): FoundationRuntimePackage[] {
   return [
-    runtimePackage("identity", identityFeature),
+    runtimePackage(
+      "identity",
+      createIdentityFeature({ productName: brand.productName }),
+    ),
     runtimePackage("provider-foundation", foundationProviderFeature),
     runtimePackage("echo", echoFeature),
     runtimePackage("clock", clockFeature),
-    runtimePackage("shell", shellAgentFeature),
+    runtimePackage("shell", createShellAgentFeatureV1(brand.productName)),
   ];
 }
 
@@ -155,6 +163,7 @@ export function foundationBaseRuntimePackagesV1(): FoundationRuntimePackage[] {
  * account-wide grant and nothing else.
  */
 type EnabledRuntimeContributionFactory = (config: {
+  brand: BrandV1;
   capability: EnabledCapabilityV1;
   /** This Capability's ordinal among the enabled ones from its Package. */
   capabilityIndex: number;
@@ -252,6 +261,7 @@ const enabledRuntimeContributionFactories = new Map<
   [
     "mcp",
     ({
+      brand,
       capability,
       userId,
       connection,
@@ -263,6 +273,7 @@ const enabledRuntimeContributionFactories = new Map<
       settleCredential,
     }) =>
       createConfiguredMcpRuntimeContributionV1({
+        productName: brand.productName,
         capability,
         userId,
         ...(connection ? { connection } : {}),
@@ -283,8 +294,9 @@ const enabledRuntimeContributionFactories = new Map<
   ],
   [
     "web",
-    ({ capability, fetch: outbound, readSecret, billing }) =>
+    ({ brand, capability, fetch: outbound, readSecret, billing }) =>
       createConfiguredWebFetchRuntimeContribution({
+        userAgent: brandUserAgentV1(brand),
         capability,
         ...(outbound ? { fetch: outbound } : {}),
       }) ??
@@ -300,6 +312,7 @@ const enabledRuntimeContributionFactories = new Map<
 ]);
 
 interface ModelRuntimeContributionConfig {
+  brand: BrandV1;
   accountId: string;
   connectionId: string;
   connectionGeneration?: string;
@@ -357,6 +370,7 @@ const modelRuntimeContributionFactories = new Map<
     {
       providerType: "flock-ai",
       create: ({
+        brand,
         connectionId,
         connectionGeneration,
         frockAiAutoRoute,
@@ -369,9 +383,12 @@ const modelRuntimeContributionFactories = new Map<
           frockAiAutoRoute === undefined ||
           !runFrockAiChatCompletion
         ) {
-          throw new Error("Frock AI gateway host is unavailable");
+          throw new Error(
+            `${brand.builtInModelName} gateway host is unavailable`,
+          );
         }
         return createFrockAiFeature({
+          displayName: brand.builtInModelName,
           connectionId,
           connectionGeneration,
           autoRoute: frockAiAutoRoute,
@@ -474,6 +491,7 @@ function computerProviderFeature(host: {
 
 export function createFoundationHostedRuntimePackages(
   host: ShellHostedRuntimeHostV1,
+  brand: BrandV1,
 ): FoundationRuntimePackage[] {
   const computerConfigured = computerConfiguredV1(host);
   return [
@@ -483,7 +501,10 @@ export function createFoundationHostedRuntimePackages(
       ? [
           runtimePackage(
             "supervision",
-            createSupervisionRuntimeFeatureV1(host.supervision),
+            createSupervisionRuntimeFeatureV1({
+              ...host.supervision,
+              productName: brand.productName,
+            }),
           ),
         ]
       : []),
@@ -496,7 +517,15 @@ export function createFoundationHostedRuntimePackages(
         ]
       : []),
     ...(host.skills
-      ? [runtimePackage("skills", createSkillsRuntimeFeature(host.skills))]
+      ? [
+          runtimePackage(
+            "skills",
+            createSkillsRuntimeFeature({
+              ...host.skills,
+              productName: brand.productName,
+            }),
+          ),
+        ]
       : []),
     ...(host.memory
       ? [runtimePackage("memory", createMemoryRuntimeFeature(host.memory))]
@@ -532,7 +561,10 @@ export function createFoundationHostedRuntimePackages(
       ? [
           runtimePackage(
             "user-machine",
-            createMachineRuntimeFeature(host.machines),
+            createMachineRuntimeFeature({
+              ...host.machines,
+              productName: brand.productName,
+            }),
           ),
         ]
       : []),
@@ -550,6 +582,7 @@ export function createFoundationHostedRuntimePackages(
     runtimePackage(
       "computer",
       createComputerAgentFeature({
+        productName: brand.productName,
         userId: host.userId,
         defaultProviderId: "computer-host",
         configured: computerConfigured,
@@ -593,6 +626,7 @@ export function createFoundationHostedRuntimePackages(
 export async function createFoundationEnabledRuntimePackages(
   execution: BotExecutionPlanV1,
   host: ShellEnabledRuntimeHostV1,
+  brand: BrandV1,
 ): Promise<FoundationRuntimePackage[]> {
   const result: FoundationRuntimePackage[] = [];
   const capabilityIndexes = new Map<string, number>();
@@ -608,6 +642,7 @@ export async function createFoundationEnabledRuntimePackages(
     const capabilityIndex = capabilityIndexes.get(packageId) ?? 0;
     capabilityIndexes.set(packageId, capabilityIndex + 1);
     const plugin = await factory({
+      brand,
       capability,
       capabilityIndex,
       userId: host.userId,
@@ -646,6 +681,7 @@ export async function createFoundationEnabledRuntimePackages(
 export function createFoundationModelRuntimePackage(
   binding: ResolvedModelBindingV1,
   host: ShellModelRuntimeHostV1,
+  brand: BrandV1,
 ): FoundationRuntimePackage {
   if (
     binding.state === "unavailable" ||
@@ -665,6 +701,7 @@ export function createFoundationModelRuntimePackage(
     id: binding.packageId,
     feature: factory.create({
       ...host,
+      brand,
       connectionId: binding.connection.connectionId,
       settings: binding.connection.settings,
       ...(binding.connection.generation
@@ -686,6 +723,7 @@ export function createFoundationModelRuntimePackage(
  */
 export function createFoundationSummariserRuntimePackage(
   host: ShellModelRuntimeHostV1,
+  brand: BrandV1,
 ): FoundationRuntimePackage | undefined {
   if (host.frockAiAutoRoute === undefined || !host.runFrockAiChatCompletion) {
     return undefined;
@@ -693,6 +731,7 @@ export function createFoundationSummariserRuntimePackage(
   return {
     id: "provider-flock-ai",
     feature: createFrockAiSummaryFeature({
+      displayName: brand.builtInModelName,
       connectionId: FROCK_AI_CONNECTION_ID,
       connectionGeneration: FROCK_AI_CONNECTION_GENERATION,
       autoRoute: host.frockAiAutoRoute,
@@ -706,14 +745,22 @@ export function createFoundationSummariserRuntimePackage(
  * the factories that turn a Package id into a mounted feature. The Shell
  * reads no part of this application directly.
  */
-export const foundationShellApplicationV1: ShellApplicationV1 = {
-  packages: FOUNDATION_PACKAGE_CATALOG_V1.entries,
-  packageVersion: FOUNDATION_PACKAGE_VERSION_V1,
-  runtime: {
-    base: foundationBaseRuntimePackagesV1,
-    hosted: createFoundationHostedRuntimePackages,
-    enabled: createFoundationEnabledRuntimePackages,
-    model: createFoundationModelRuntimePackage,
-    summariser: createFoundationSummariserRuntimePackage,
-  },
-};
+export function foundationShellApplicationV1(
+  brand: BrandV1,
+): ShellApplicationV1 {
+  return {
+    brand,
+    packages: foundationPackageCatalogV1(brand).entries,
+    packageVersion: FOUNDATION_PACKAGE_VERSION_V1,
+    runtime: {
+      base: () => foundationBaseRuntimePackagesV1(brand),
+      hosted: (host) => createFoundationHostedRuntimePackages(host, brand),
+      enabled: (execution, host) =>
+        createFoundationEnabledRuntimePackages(execution, host, brand),
+      model: (binding, host) =>
+        createFoundationModelRuntimePackage(binding, host, brand),
+      summariser: (host) =>
+        createFoundationSummariserRuntimePackage(host, brand),
+    },
+  };
+}

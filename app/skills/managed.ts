@@ -37,9 +37,6 @@ export { PLUGINS_SKILL_SLUG_V1 };
 /** The directory prefix a managed Skill is listed and loadable under. */
 export const MANAGED_SKILL_PATH_PREFIX = "managed";
 
-/** Who a managed Skill is attributed to in the rendered catalog. */
-export const MANAGED_SKILL_ATTRIBUTION = "FrockBot";
-
 /** One bundled `SKILL.md`, exactly as it would sit on disk. */
 export interface ManagedSkillDocumentV1 {
   slug: string;
@@ -90,12 +87,44 @@ export function managedSkillPathV1(slug: string): string {
  * hash the Composition pins is what makes that name reproducible.
  */
 export async function loadManagedSkillsV1(
+  /** Who they are attributed to in the rendered catalog: the product. */
+  attribution: string,
   documents: readonly ManagedSkillDocumentV1[] = MANAGED_SKILL_DOCUMENTS_V1,
 ): Promise<{ skills: LoadedSkillV1[]; refusals: SkillRefusalV1[] }> {
-  return loadArtifactSkillsV1(documents, (document) => ({
-    source: "managed",
-    ref: { schemaVersion: 1, source: "managed", slug: document.slug },
-    path: managedSkillPathV1(document.slug),
-    attribution: MANAGED_SKILL_ATTRIBUTION,
-  }));
+  return loadArtifactSkillsV1(
+    documents.map((document) => inProductV1(document, attribution)),
+    (document) => ({
+      source: "managed",
+      ref: { schemaVersion: 1, source: "managed", slug: document.slug },
+      path: managedSkillPathV1(document.slug),
+      attribution,
+    }),
+  );
+}
+
+/**
+ * The managed Skills are written once for every deployment, so where one
+ * names the product it says `{{product}}`, and it is spelled here — before
+ * the document is hashed, so a deployment's hash is of what its Bots read.
+ */
+export const MANAGED_SKILL_PRODUCT_TOKEN_V1 = "{{product}}";
+
+function inProductV1(
+  document: ManagedSkillDocumentV1,
+  productName: string,
+): ManagedSkillDocumentV1 {
+  const spell = (text: string) =>
+    text.replaceAll(MANAGED_SKILL_PRODUCT_TOKEN_V1, productName);
+  return {
+    ...document,
+    text: spell(document.text),
+    ...(document.references
+      ? {
+          references: document.references.map((reference) => ({
+            ...reference,
+            text: spell(reference.text),
+          })),
+        }
+      : {}),
+  };
 }

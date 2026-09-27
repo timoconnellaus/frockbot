@@ -138,7 +138,11 @@ function client(fetch: Fetch): TypeSafeClient {
 const budget = { retry: { maxRetries: 1 }, timeout: 1_000 };
 
 function jevSupervisor(fetch: Fetch = jevFetch()): TurnSupervisor {
-  return createJevTurnSupervisorV1({ client: client(fetch), budget });
+  return createJevTurnSupervisorV1({
+    productName: "FrockBot",
+    client: client(fetch),
+    budget,
+  });
 }
 
 function choice(labels: readonly string[], chosen: string, sure = 0.9) {
@@ -786,9 +790,10 @@ describe("the Jev adapter", () => {
       withResponse: () => Promise.reject(new APITimeoutError(1_000)),
     })) as unknown as TypeSafeClient["systemOne"];
     await expect(
-      createJevTurnSupervisorV1({ client: timingOut }).reviewStep(
-        stepEvidence([mutate]),
-      ),
+      createJevTurnSupervisorV1({
+        productName: "FrockBot",
+        client: timingOut,
+      }).reviewStep(stepEvidence([mutate])),
     ).rejects.toMatchObject({
       name: "SupervisionUnavailableError",
       kind: "timeout",
@@ -822,7 +827,7 @@ describe("the Jev adapter", () => {
 
 describe("the hosted chooser", () => {
   test("is unavailable when no credential is configured", async () => {
-    const supervisor = createHostedTurnSupervisorV1({});
+    const supervisor = createHostedTurnSupervisorV1({}, "FrockBot");
     await expect(supervisor.startTurn(startEvidence)).rejects.toMatchObject({
       kind: "unavailable",
     });
@@ -831,12 +836,14 @@ describe("the hosted chooser", () => {
 
   test("reads JEV_API_KEY and ignores TYPESAFE_API_KEY", async () => {
     await expect(
-      createHostedTurnSupervisorV1({
-        TYPESAFE_API_KEY: "sk-test-do-not-leak-4f3a",
-      }).startTurn(startEvidence),
+      createHostedTurnSupervisorV1(
+        { TYPESAFE_API_KEY: "sk-test-do-not-leak-4f3a" },
+        "FrockBot",
+      ).startTurn(startEvidence),
     ).rejects.toMatchObject({ kind: "unavailable" });
     const directive = await createHostedTurnSupervisorV1(
       { JEV_API_KEY: "sk-test-do-not-leak-4f3a" },
+      "FrockBot",
       jevFetch(),
     ).startTurn(startEvidence);
     expect(directive.acknowledge).toBe(false);

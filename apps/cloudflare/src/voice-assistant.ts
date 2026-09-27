@@ -14,6 +14,7 @@
 // Nothing durable lives only in this object's memory. A call is a ledger row,
 // a delegation is a ledger row plus a scheduled look-up, and an eviction
 // mid-answer costs the person that answer and nothing else.
+import { BRAND_V1 } from "#brand";
 import {
   Agent,
   type Connection,
@@ -4913,6 +4914,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     ]);
     timing?.("prompt-context-ready");
     return {
+      productName: BRAND_V1.productName,
       bots,
       timezone,
       session,

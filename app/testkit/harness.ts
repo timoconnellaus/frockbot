@@ -1,4 +1,5 @@
 // A runtime for a feature under test: the real registries, no loop.
+import { TEST_BRAND_V1 } from "./brand.js";
 import { ComputerRegistry } from "@frockbot/computer/core/host";
 import {
   type AgentRuntimeV1,
@@ -97,7 +98,11 @@ export function createAgentRuntimeHarness(
   const systemPrompt = new SystemPromptRegistry(hooks);
   const cleanups: Array<() => Promise<void>> = [];
   const sessions = new SessionStore(options.sessions);
-  const tools = new ToolRegistry(hooks, systemPrompt);
+  const tools = new ToolRegistry(
+    hooks,
+    TEST_BRAND_V1.productName,
+    systemPrompt,
+  );
   const harness: AgentRuntimeHarness = {
     sessions,
     systemPrompt,

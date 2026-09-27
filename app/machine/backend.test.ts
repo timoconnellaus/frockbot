@@ -136,6 +136,7 @@ beforeEach(() => {
     now: () => now,
   });
   contribution = createMachineBackendContribution({
+    brand: { productName: "FrockBot" },
     machineTokenSecret: SECRET,
     createMachinePairing: (userId) => authority.createPairing(userId),
     enrollMachine: async (userId, input) =>
@@ -617,6 +618,7 @@ describe("the machine door", () => {
 
   test("without the deployment secret the machine door answers 503", async () => {
     contribution = createMachineBackendContribution({
+      brand: { productName: "FrockBot" },
       createMachinePairing: () => {
         throw new Error("unreachable");
       },

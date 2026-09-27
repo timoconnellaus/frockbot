@@ -94,6 +94,7 @@ describe("computer agent contribution", () => {
     await harness.mount(
       createComputerAgentFeature({
         userId: "user-1",
+        productName: "FrockBot",
         defaultProviderId: "fixture",
       }),
     );
@@ -175,6 +176,7 @@ describe("computer agent contribution", () => {
     await harness.mount(
       createComputerAgentFeature({
         userId: "user-1",
+        productName: "FrockBot",
         defaultProviderId: "fixture",
         egress: {
           object: "user-1:bot-1",
@@ -269,6 +271,7 @@ describe("computer agent contribution", () => {
       createComputerAgentFeature({
         userId: "user-1",
         defaultProviderId: "fixture",
+        productName: "FrockBot",
         now: () => clock,
         egress: {
           object: "user-1:bot-1",
@@ -313,6 +316,7 @@ describe("computer agent contribution", () => {
     await harness.mount(
       createComputerAgentFeature({
         userId: "user-1",
+        productName: "FrockBot",
         defaultProviderId: "fixture",
       }),
     );
@@ -355,6 +359,7 @@ describe("computer agent contribution", () => {
     await harness.mount(
       createComputerAgentFeature({
         userId: "user-1",
+        productName: "FrockBot",
         defaultProviderId: "fixture",
       }),
     );
@@ -430,6 +435,7 @@ describe("computer agent contribution", () => {
     await harness.mount(
       createComputerAgentFeature({
         userId: "user-1",
+        productName: "FrockBot",
         defaultProviderId: "fixture",
       }),
     );
@@ -491,6 +497,7 @@ describe("computer agent contribution", () => {
     await harness.mount(
       createComputerAgentFeature({
         userId: "user-1",
+        productName: "FrockBot",
         defaultProviderId: "fixture",
       }),
     );
@@ -529,6 +536,7 @@ describe("computer agent contribution", () => {
       await harness.mount(
         createComputerAgentFeature({
           userId: "user-1",
+          productName: "FrockBot",
           defaultProviderId: "fixture",
         }),
       );
@@ -563,6 +571,7 @@ describe("computer agent contribution", () => {
     await harness.mount(
       createComputerAgentFeature({
         userId: "user-1",
+        productName: "FrockBot",
         defaultProviderId: "fixture",
         controlRecords: {
           get: <T>(key: string) =>
@@ -631,6 +640,7 @@ describe("computer agent contribution", () => {
     await harness.mount(
       createComputerAgentFeature({
         userId: "user-1",
+        productName: "FrockBot",
         defaultProviderId: "fixture",
       }),
     );
@@ -649,6 +659,7 @@ describe("computer agent contribution", () => {
     await harness.mount(
       createComputerAgentFeature({
         userId: "user-1",
+        productName: "FrockBot",
         defaultProviderId: "fixture",
         configured: false,
       }),
@@ -694,6 +705,7 @@ describe("computer_browser filling a saved secret", () => {
     await harness.mount(
       createComputerAgentFeature({
         userId: "user-1",
+        productName: "FrockBot",
         defaultProviderId: host.id,
         secrets,
       }),
@@ -806,6 +818,7 @@ describe("computer_browser filling a saved secret", () => {
     await bare.mount(
       createComputerAgentFeature({
         userId: "user-1",
+        productName: "FrockBot",
         defaultProviderId: "fake-computer-host",
       }),
     );
@@ -854,6 +867,7 @@ describe("what a browser page is showing", () => {
     await harness.mount(
       createComputerAgentFeature({
         userId: "user-1",
+        productName: "FrockBot",
         defaultProviderId: "fixture",
         judgePage: async (page) => {
           judged.push(page);

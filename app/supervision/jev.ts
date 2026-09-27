@@ -77,6 +77,8 @@ export const JEV_OUTCOME_BUDGET_V1: JevCallBudgetV1 = {
 
 export interface JevTurnSupervisorOptionsV1 {
   readonly client: TypeSafeClient;
+  /** The product the rubric names, as the brand spells it. */
+  readonly productName: string;
   /** Defaults to {@link JEV_TURN_BUDGET_V1}. */
   readonly budget?: JevCallBudgetV1;
 }
@@ -130,7 +132,7 @@ export function createJevTurnSupervisorV1(
         const review = await reviewTurnStartV1(
           options.client,
           turnStartJudgmentEvidenceV1(evidence),
-          { signal, budget },
+          { productName: options.productName, signal, budget },
         );
         return composeTurnDirectiveV1(
           review.answers,
@@ -334,6 +336,7 @@ export function hostedJevClientV1(
  */
 export function createHostedTurnSupervisorV1(
   env: Record<string, string | undefined>,
+  productName: string,
   fetch?: Fetch,
 ): TurnSupervisor {
   const client = hostedJevClientV1(env, fetch);
@@ -342,5 +345,5 @@ export function createHostedTurnSupervisorV1(
       "Turn supervision is unavailable: no JEV_API_KEY is configured.",
     );
   }
-  return createJevTurnSupervisorV1({ client });
+  return createJevTurnSupervisorV1({ client, productName });
 }

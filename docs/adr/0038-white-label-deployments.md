@@ -178,6 +178,26 @@ deployment unchanged in behaviour.
    server's user-visible brand strings and the document icon read from it; the
    profile's `nativeApps` replaces the identities in `native-auth.ts`, with the
    hosted equivalence gate unchanged.
+
+   **Built.** `BrandV1` also carries `homepage` (the outbound user agent names
+   it) and `pageLogo`, the inline logo on the pages a browser lands on, since a
+   Worker cannot read the icon file at runtime. Every server string a person,
+   a Bot or a third party reads takes the product or model name from the
+   brand: pages, Settings, billing, admission, MCP and Connect sign-ins, tool
+   and prompt text, runtime-note labels, Jev's turn-start rubric and managed
+   Skills (whose sources write `{{product}}`, spelled before hashing). The
+   artifact build takes `--brand <module>`, since wrangler's alias never
+   reaches the bundle it builds. The files provisioned into a Computer come
+   from the container image every deployment shares, so they name no product
+   at all. Left as identifiers: package and module names, storage keys, the
+   `frockbot` tool namespace and `window.frockbot` Plugin page API, the A2UI
+   catalog URIs, the stored "unset" profile-name sentinel, and What's New,
+   which a brand turns off. The one hosted-visible change is that neutral
+   Computer wording, which each Computer applies with one update run. An auth
+   Package is now given the product's name as the required
+   `AuthPackageDependenciesV1.productName`, a breaking change to that published
+   contract.
+
 3. **External auth Packages.** §3: `authPackage` accepts a chooser path, the
    generator aliases it, and the profile names the chooser's required
    secrets. Rides with step 5, whose fixture is what proves it.

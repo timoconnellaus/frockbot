@@ -1416,7 +1416,7 @@ export const viewerPage = `<!doctype html>
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <title>FrockBot Computer</title>
+    <title>Computer</title>
     <style>
       :root { color-scheme: dark; background: #0a0d12; }
       * { box-sizing: border-box; }
@@ -1620,7 +1620,7 @@ export const CLOCK_FLOOR_EPOCH = 1_756_684_800;
  * corrected. The version is compared on every adoption instead, and the whole
  * set is rewritten when it moves. Bump it whenever a document below changes.
  */
-export const REFERENCE_DOCS_VERSION = "2026-09-24.1";
+export const REFERENCE_DOCS_VERSION = "2026-09-27.1";
 
 /**
  * What a Bot reads to debug its own Computer.
@@ -1634,7 +1634,7 @@ export const REFERENCE_DOCS_VERSION = "2026-09-24.1";
 export const REFERENCE_DOCS: readonly { name: string; content: string }[] = [
   {
     name: "README.md",
-    content: `# Your FrockBot Computer
+    content: `# Your Computer
 
 One Computer serves all of your User's Bots. You have your own directories and
 your own window on its one screen; the browser and its profile are shared, so a
@@ -2493,7 +2493,7 @@ fi`,
     body: `mkdir -p ${VIEWER_ROOT} ${FLUXBOX_ROOT}
 ${installDeclaredFiles(COMPUTER_RUNTIME_FILES)}
 # noVNC's ES modules in core/ import one another and ../vendor/pako. The links
-# keep that package-owned graph intact while FrockBot owns every rendered element.
+# keep that package-owned graph intact while the platform owns every rendered element.
 ln -sfn /usr/share/novnc/core ${VIEWER_ROOT}/core
 ln -sfn /usr/share/novnc/vendor ${VIEWER_ROOT}/vendor
 ${installManifestScript}

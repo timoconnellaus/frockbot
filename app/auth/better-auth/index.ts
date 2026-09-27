@@ -62,10 +62,10 @@ export function identityCreationHooksV1(
 
 export function createAuth(
   environment: ConfiguredEnvironmentV1,
-  dependencies: AuthPackageDependenciesV1 = {},
+  dependencies: AuthPackageDependenciesV1,
 ) {
   return betterAuth({
-    appName: "FrockBot",
+    appName: dependencies.productName,
     baseURL: environment.BETTER_AUTH_URL,
     secret: environment.BETTER_AUTH_SECRET,
     database: environment.AUTH_DB,
@@ -197,7 +197,7 @@ function unconfigured(environment: BetterAuthEnvironmentV1): AuthPackageV1 {
 
 function betterAuthPackage(
   environment: BetterAuthEnvironmentV1,
-  dependencies: AuthPackageDependenciesV1 = {},
+  dependencies: AuthPackageDependenciesV1,
 ): AuthPackageV1 {
   const configured = configuredEnvironment(environment);
   if (!configured) return unconfigured(environment);

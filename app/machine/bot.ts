@@ -71,7 +71,7 @@ export function createBotMachineHost(
   turn: BotMachineTurnV1,
   storage: MachineIntentStorageV1,
   seam: BotMachineSeamV1,
-): MachineRuntimeHostV1 {
+): Omit<MachineRuntimeHostV1, "productName"> {
   return {
     botId: identity.botId,
     writer: {

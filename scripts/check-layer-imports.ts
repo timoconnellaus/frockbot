@@ -128,6 +128,9 @@ function isForbiddenSpecifier(
   if (specifier.startsWith("apps/") || specifier.includes("/apps/")) {
     return "an app";
   }
+  // The Worker's build-time seams (`#auth-package`, `#brand`) are the Worker's
+  // to resolve; a module below it is handed what they chose as data (ADR 0038).
+  if (specifier.startsWith("#")) return "a Worker seam";
   if (!specifier.startsWith("@frockbot/")) return undefined;
   for (const allowed of module.allowed) {
     const bare = allowed.replace(/\/$/, "");

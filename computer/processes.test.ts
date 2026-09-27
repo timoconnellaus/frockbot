@@ -131,6 +131,7 @@ async function mount(
   await harness.mount(
     createComputerAgentFeature({
       userId: "user-1",
+      productName: "FrockBot",
       defaultProviderId: "fixture",
       writer,
       processes: held,
@@ -272,6 +273,7 @@ describe("computer_exec with background:true", () => {
     await harness.mount(
       createComputerAgentFeature({
         userId: "user-1",
+        productName: "FrockBot",
         defaultProviderId: "fixture",
         writer: { sessionId: "session-1", turnId: "run-9", runId: "run-9" },
       }),

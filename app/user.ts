@@ -28,8 +28,9 @@ import {
   type UserSettingsStorage,
 } from "@frockbot/app/settings/user";
 import {
-  FOUNDATION_PACKAGE_CATALOG_V1,
+  foundationPackageCatalogV1,
   FOUNDATION_PACKAGE_VERSION_V1,
+  type FoundationPackageBrandV1,
 } from "./packages.js";
 import type {
   PackageCatalogIndexV1,
@@ -154,7 +155,7 @@ export interface MountedFoundationUserBackend {
  * first repairing invisible dependency rows.
  */
 export function foundationDefaultPackageIds(
-  catalog: PackageCatalogIndexV1<PackageDefinitionV1> = FOUNDATION_PACKAGE_CATALOG_V1,
+  catalog: PackageCatalogIndexV1<PackageDefinitionV1>,
 ): ReadonlySet<string> {
   const packageIds = new Set(
     catalog.entries
@@ -178,6 +179,8 @@ export function foundationDefaultPackageIds(
 }
 
 export async function createFoundationUserBackendContributions(host: {
+  /** The names the Worker's brand gives the product and its built-in model. */
+  brand: FoundationPackageBrandV1;
   storage: UserSettingsStorage &
     CredentialStorage &
     FlockUserBackendHost["storage"] &
@@ -225,7 +228,8 @@ export async function createFoundationUserBackendContributions(host: {
     maxAgeMs?: number;
   };
 }): Promise<MountedFoundationUserBackend> {
-  const defaultPackageIds = foundationDefaultPackageIds();
+  const catalog = foundationPackageCatalogV1(host.brand);
+  const defaultPackageIds = foundationDefaultPackageIds(catalog);
   const connections = new Map<
     string,
     FoundationConnectionUserBackendContribution
@@ -255,7 +259,8 @@ export async function createFoundationUserBackendContributions(host: {
     get settings() {
       return {
         storage: host.storage,
-        availablePackages: FOUNDATION_PACKAGE_CATALOG_V1.entries.map((pkg) => ({
+        productName: host.brand.productName,
+        availablePackages: catalog.entries.map((pkg) => ({
           packageId: pkg.id,
           version: FOUNDATION_PACKAGE_VERSION_V1,
           dependencies: pkg.dependencies ?? [],
@@ -286,6 +291,7 @@ export async function createFoundationUserBackendContributions(host: {
       // refuse a forged one before it reaches this object.
       const keyring = host.readSecret("CREDENTIAL_KEYRING");
       return {
+        productName: host.brand.productName,
         storage: host.storage,
         settings,
         credentials,
@@ -300,6 +306,7 @@ export async function createFoundationUserBackendContributions(host: {
       const apiKey = host.readSecret("COMPOSIO_API_KEY");
       const callbackBaseUrl = host.readSecret("BETTER_AUTH_URL");
       return {
+        productName: host.brand.productName,
         storage: host.storage,
         settings,
         ...(apiKey ? { apiKey } : {}),
@@ -317,9 +324,15 @@ export async function createFoundationUserBackendContributions(host: {
     get frockAi() {
       const settings = mountedContributions.get(settingsUserContribution);
       if (!settings) {
-        throw new Error("Frock AI requires the Settings Contribution");
+        throw new Error(
+          "The built-in model requires the Settings Contribution",
+        );
       }
-      return { storage: host.storage, settings };
+      return {
+        storage: host.storage,
+        settings,
+        connectionName: host.brand.builtInModelName,
+      };
     },
     get machines() {
       return {
@@ -410,7 +423,7 @@ export async function createFoundationUserBackendContributions(host: {
   ) {
     await mounted.dispose();
     throw new Error(
-      "Foundation requires Settings, Credentials, Ollama, Frock AI, Flock, Search, Audit, Machines, Connected apps and MCP servers User Contributions",
+      "Foundation requires Settings, Credentials, Ollama, the built-in model, Flock, Search, Audit, Machines, Connected apps and MCP servers User Contributions",
     );
   }
 

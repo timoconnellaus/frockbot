@@ -48,6 +48,8 @@ function errorRecordV1(value: unknown): Record<string, unknown> | undefined {
 /** Map both AI Gateway and Workers AI error envelopes to the model contract. */
 export function classifyFrockAiFailureV1(
   error: unknown,
+  /** The built-in model's name, which a failure with no words of its own names. */
+  displayName: string,
 ): ModelProviderFailureError {
   if (error instanceof ModelProviderFailureError) return error;
   const outer = errorRecordV1(error);
@@ -69,7 +71,7 @@ export function classifyFrockAiFailureV1(
         ? nested.message
         : typeof outer?.message === "string"
           ? outer.message
-          : "Frock AI request did not reach the provider";
+          : `${displayName} request did not reach the provider`;
   const words = `${String(code ?? "")} ${reason}`;
   let classification: ModelProviderFailureClassV1;
   if (status !== undefined) {
@@ -144,6 +146,8 @@ export type FrockAiChatCompletionV1 = (
 ) => Promise<ReadableStream<Uint8Array>>;
 
 export interface FrockAiRuntimeConfig {
+  /** The brand's name for the built-in model. */
+  displayName: string;
   connectionId: string;
   connectionGeneration: string;
   /** `null` on a transport with no dynamic route; Auto is a pinned model there. */
@@ -195,7 +199,7 @@ class FrockAiProvider implements LlmProvider {
     ) {
       throw new ModelProviderFailureError({
         classification: "permanent",
-        reason: "Frock AI request has invalid Connection authority",
+        reason: `${this.config.displayName} request has invalid Connection authority`,
       });
     }
     signal.throwIfAborted();
@@ -253,7 +257,7 @@ class FrockAiProvider implements LlmProvider {
           reason: error.message,
         });
       }
-      const failure = classifyFrockAiFailureV1(error);
+      const failure = classifyFrockAiFailureV1(error, this.config.displayName);
       if (
         failure.classification === "permanent" &&
         request.model !== FROCK_AI_DEFAULT_MODEL

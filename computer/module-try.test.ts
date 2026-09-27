@@ -70,6 +70,7 @@ async function mounted(modules: ComputerPluginModulesSeamV1) {
   await harness.mount(
     createComputerAgentFeature({
       userId: "user-1",
+      productName: "FrockBot",
       defaultProviderId: "fixture",
       pluginModules: modules,
     }),

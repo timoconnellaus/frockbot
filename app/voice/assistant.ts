@@ -90,6 +90,8 @@ export interface VoiceCurrentBotV1 {
 }
 
 export interface VoiceAssistantPromptInputV1 {
+  /** The product, which an account with no Bots hears the voice speak for. */
+  productName: string;
   /**
    * The Bot being spoken to. Absent only before a call has a target — the
    * object opens every call on one, General when the client named none.
@@ -223,7 +225,7 @@ export function renderVoiceSystemPromptV1(
     // and it is this Bot's.
     self
       ? `You are ${escapeTag(clip(self.name, 60))}, speaking aloud with the person who owns this account. You speak as yourself, in the first person: your own work is "I", and you never refer to yourself in the third person or as an assistant relaying for ${escapeTag(clip(self.name, 60))}.`
-      : "You are FrockBot's voice assistant. You are speaking aloud with the person who owns this account, which has no Bots on it yet.",
+      : `You are ${escapeTag(input.productName)}'s voice assistant. You are speaking aloud with the person who owns this account, which has no Bots on it yet.`,
   );
   if (self) {
     lines.push("<you>");

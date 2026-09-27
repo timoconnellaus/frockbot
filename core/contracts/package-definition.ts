@@ -143,7 +143,7 @@ export interface PackageDefinitionV1 {
  * turn types admit a tool.
  */
 export function packageAdmissionCeilingV1(
-  definition: PackageDefinitionV1,
+  definition: Pick<PackageDefinitionV1, "capabilities">,
   capabilityId: string,
 ): readonly TurnTypeV1[] | undefined {
   return definition.capabilities?.find(

@@ -1,7 +1,8 @@
 import {
-  FOUNDATION_PACKAGE_CATALOG_V1,
+  foundationPackageCatalogV1,
   FOUNDATION_PACKAGE_VERSION_V1,
 } from "@frockbot/app/runtime";
+import { BRAND_V1 } from "#brand";
 import { COMPUTER_HOST_CAPABILITIES_V1 } from "./computer-host.js";
 import {
   decodeBotIdV1,
@@ -77,6 +78,11 @@ const APP_ICON = Uint8Array.from(
   (character) => character.charCodeAt(0),
 );
 
+/** The product's name as the document title carries it. */
+const DOCUMENT_TITLE = BRAND_V1.productName
+  .replaceAll("&", "&amp;")
+  .replaceAll("<", "&lt;");
+
 type HostedAuthModeV1 = "anonymous" | "better-auth" | "development";
 
 function hostedAuthMode(request: Request): HostedAuthModeV1 {
@@ -131,7 +137,7 @@ function appHtml(
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="frockbot-application" content="${applicationHash}">
   <base href="${FLUTTER_BASE}">
-  <title>FrockBot</title>
+  <title>${DOCUMENT_TITLE}</title>
   <link rel="icon" type="image/png" href="/favicon.ico">
   <link rel="apple-touch-icon" href="/favicon.ico">
   <meta name="color-scheme" content="dark">
@@ -409,7 +415,7 @@ function createUserApplicationRoute() {
         url,
       );
     }
-    if (request.method === "GET") {
+    if (request.method === "GET" && BRAND_V1.whatsNew) {
       const picture = whatsNewImageResponseV1(url.pathname);
       if (picture) {
         return withSecurityHeaders(picture, url);
@@ -423,7 +429,7 @@ function createUserApplicationRoute() {
         // platform-owned, so every Package is projected and each carries the
         // ownership its definition declares; enablement surfaces omit those
         // rows while model resolution still sees them.
-        packages: FOUNDATION_PACKAGE_CATALOG_V1.entries.map((pkg) => ({
+        packages: foundationPackageCatalogV1(BRAND_V1).entries.map((pkg) => ({
           id: pkg.id,
           displayName: pkg.displayName,
           version: FOUNDATION_PACKAGE_VERSION_V1,

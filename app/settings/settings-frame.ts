@@ -118,6 +118,7 @@ export function applicationSettingsFrame(
   userId: string,
   settings: UserSettingsViewV1,
   catalog: readonly AvailableUserPackage[],
+  productName: string,
   identity?: { name?: string; email?: string; image?: string },
 ): SettingsFrame {
   const sections: SettingsFrame["sections"] = [
@@ -133,6 +134,7 @@ export function applicationSettingsFrame(
             savedName: settings.profile.name,
             sessionName: identity?.name,
             sessionEmail: identity?.email,
+            productName,
           }).slice(0, 100),
           editable: true,
           required: true,
@@ -396,6 +398,7 @@ export function modelsSettingsFrame(
   userId: string,
   settings: UserSettingsViewV1,
   catalog: readonly AvailableUserPackage[],
+  productName: string,
 ): SettingsFrame {
   const modelProviders = catalog.filter(
     (pkg) =>
@@ -441,7 +444,7 @@ export function modelsSettingsFrame(
           editable: true,
           choices,
           choiceSource: "account-models",
-          hint: "Default for Bots without their own model choice. Automatic lets FrockBot choose; no setup needed.",
+          hint: `Default for Bots without their own model choice. Automatic lets ${productName} choose; no setup needed.`,
         },
       ],
     },

@@ -10,7 +10,7 @@ import {
   discoverMcpSignInV1,
   encodeMcpAccessSecretV1,
   exchangeMcpSignInV1,
-  MCP_SIGN_IN_UNAVAILABLE_LINE_V1,
+  mcpSignInUnavailableLineV1,
   mcpOAuthClientMetadataV1,
   mcpOAuthRedirectUrisV1,
   mcpOAuthReturnClientV1,
@@ -29,7 +29,10 @@ const now = Date.parse("2026-09-24T00:00:00.000Z");
 
 async function challengeOf(fetch: McpFetchV1, url: string) {
   try {
-    await withMcpSessionV1({ url, fetch }, async () => undefined);
+    await withMcpSessionV1(
+      { productName: "FrockBot", url, fetch },
+      async () => undefined,
+    );
   } catch (error) {
     if (error instanceof McpUnauthorizedError) return error.challenge;
   }
@@ -46,6 +49,7 @@ describe("signing in to an MCP server", () => {
       scope: "tools",
     });
     const server = await discoverMcpSignInV1({
+      productName: "FrockBot",
       url: auth.server.url,
       challenge,
       fetch: auth.fetch,
@@ -61,6 +65,7 @@ describe("signing in to an MCP server", () => {
       },
     });
     const client = await registerMcpClientV1({
+      productName: "FrockBot",
       server,
       origin: ORIGIN,
       fetch: auth.fetch,
@@ -99,6 +104,7 @@ describe("signing in to an MCP server", () => {
     const back = new URL(auth.approve(started.authorizationUrl));
     const exchange = () =>
       exchangeMcpSignInV1({
+        productName: "FrockBot",
         server,
         client,
         code: back.searchParams.get("code")!,
@@ -116,7 +122,12 @@ describe("signing in to an MCP server", () => {
     // The code is good once, and the server says so.
     await expect(exchange()).rejects.toThrow("invalid_grant");
     await withMcpSessionV1(
-      { url: auth.server.url, token: tokens.accessToken, fetch: auth.fetch },
+      {
+        productName: "FrockBot",
+        url: auth.server.url,
+        token: tokens.accessToken,
+        fetch: auth.fetch,
+      },
       async (session) => {
         expect(await session.listTools()).toEqual([]);
       },
@@ -126,10 +137,12 @@ describe("signing in to an MCP server", () => {
   test("refreshes with rotation and revokes", async () => {
     const auth = createFakeMcpAuthorizationServerV1();
     const server = await discoverMcpSignInV1({
+      productName: "FrockBot",
       url: auth.server.url,
       fetch: auth.fetch,
     });
     const client = await registerMcpClientV1({
+      productName: "FrockBot",
       server,
       origin: ORIGIN,
       fetch: auth.fetch,
@@ -141,6 +154,7 @@ describe("signing in to an MCP server", () => {
       state: "s",
     });
     const tokens = await exchangeMcpSignInV1({
+      productName: "FrockBot",
       server,
       client,
       code: new URL(auth.approve(started.authorizationUrl)).searchParams.get(
@@ -152,6 +166,7 @@ describe("signing in to an MCP server", () => {
       now,
     });
     const refreshed = await refreshMcpSignInV1({
+      productName: "FrockBot",
       server,
       client,
       refreshToken: tokens.refreshToken!,
@@ -165,6 +180,7 @@ describe("signing in to an MCP server", () => {
     // The rotated-out refresh token is dead.
     await expect(
       refreshMcpSignInV1({
+        productName: "FrockBot",
         server,
         client,
         refreshToken: tokens.refreshToken!,
@@ -174,6 +190,7 @@ describe("signing in to an MCP server", () => {
     ).rejects.toBeInstanceOf(McpSignInError);
     expect(
       await revokeMcpSignInV1({
+        productName: "FrockBot",
         server,
         client,
         token: refreshed.refreshToken!,
@@ -185,6 +202,7 @@ describe("signing in to an MCP server", () => {
     // No answer is the one worth asking again; any other answer stands.
     expect(
       await revokeMcpSignInV1({
+        productName: "FrockBot",
         server,
         client,
         token: "t",
@@ -194,6 +212,7 @@ describe("signing in to an MCP server", () => {
     ).toBe("unreachable");
     expect(
       await revokeMcpSignInV1({
+        productName: "FrockBot",
         server,
         client,
         token: "t",
@@ -209,22 +228,29 @@ describe("signing in to an MCP server", () => {
     auth.clientMetadataDocuments = true;
     auth.registration = false;
     const server = await discoverMcpSignInV1({
+      productName: "FrockBot",
       url: auth.server.url,
       fetch: auth.fetch,
     });
     expect(
-      await registerMcpClientV1({ server, origin: ORIGIN, fetch: auth.fetch }),
+      await registerMcpClientV1({
+        productName: "FrockBot",
+        server,
+        origin: ORIGIN,
+        fetch: auth.fetch,
+      }),
     ).toEqual({ client_id: `${ORIGIN}/api/mcp/oauth/client` });
     expect(auth.registrations).toEqual([]);
     // A local deployment has no https address to be fetched at.
     await expect(
       registerMcpClientV1({
+        productName: "FrockBot",
         server,
         origin: "http://127.0.0.1:8787",
         fetch: auth.fetch,
       }),
     ).rejects.toThrow("doesn't let FrockBot register");
-    expect(mcpOAuthClientMetadataV1(ORIGIN)).toMatchObject({
+    expect(mcpOAuthClientMetadataV1(ORIGIN, "FrockBot")).toMatchObject({
       client_id: `${ORIGIN}/api/mcp/oauth/client`,
       redirect_uris: mcpOAuthRedirectUrisV1(ORIGIN),
       token_endpoint_auth_method: "none",
@@ -234,16 +260,26 @@ describe("signing in to an MCP server", () => {
   test("refuses a server with no sign-in, or one FrockBot cannot register with", async () => {
     const plain = createFakeMcpServerV1({ token: "sk" });
     await expect(
-      discoverMcpSignInV1({ url: plain.url, fetch: plain.fetch }),
-    ).rejects.toThrow(MCP_SIGN_IN_UNAVAILABLE_LINE_V1);
+      discoverMcpSignInV1({
+        productName: "FrockBot",
+        url: plain.url,
+        fetch: plain.fetch,
+      }),
+    ).rejects.toThrow(mcpSignInUnavailableLineV1("FrockBot"));
     const auth = createFakeMcpAuthorizationServerV1();
     auth.registration = false;
     const server = await discoverMcpSignInV1({
+      productName: "FrockBot",
       url: auth.server.url,
       fetch: auth.fetch,
     });
     await expect(
-      registerMcpClientV1({ server, origin: ORIGIN, fetch: auth.fetch }),
+      registerMcpClientV1({
+        productName: "FrockBot",
+        server,
+        origin: ORIGIN,
+        fetch: auth.fetch,
+      }),
     ).rejects.toThrow("doesn't let FrockBot register");
   });
 
@@ -260,7 +296,11 @@ describe("signing in to an MCP server", () => {
       return auth.fetch(input, init);
     };
     await expect(
-      discoverMcpSignInV1({ url: auth.server.url, fetch }),
+      discoverMcpSignInV1({
+        productName: "FrockBot",
+        url: auth.server.url,
+        fetch,
+      }),
     ).rejects.toThrow("different server");
   });
 });

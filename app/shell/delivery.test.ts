@@ -9,7 +9,7 @@ import type {
 import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
 import { createWebFetchToolDefinitionV1 } from "@frockbot/app/web/agent";
 import { initializeBotSettingsV1 } from "@frockbot/core/configuration";
-import { shellAgentFeature } from "./agent.js";
+import { createShellAgentFeatureV1 } from "./agent.js";
 import type { StoredRun } from "./backend-contracts.js";
 import { projectClientRunV1 } from "./run-protocol.js";
 import {
@@ -27,11 +27,12 @@ async function run(
   const root = createAgentRuntimeHarness(
     initial ? { sessions: { initialSessions: { "user:test": initial } } } : {},
   );
-  await root.mount(shellAgentFeature);
+  await root.mount(createShellAgentFeatureV1("FrockBot"));
   if (caller)
     root.tools.register(createReplyToRequestToolV1(caller, root.sessions));
   root.tools.register(
     createWebFetchToolDefinitionV1({
+      userAgent: "FrockBot/0.0.1 (+https://frockbot.com)",
       fetch: async () =>
         new Response("Example result", {
           headers: { "content-type": "text/plain" },

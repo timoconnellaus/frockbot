@@ -23,7 +23,7 @@ function base64(bytes: ArrayBuffer): string {
 
 /** A Google-created User and the browser cookie its session is signed into. */
 async function browserUser(email: string) {
-  const auth = createAuth(env);
+  const auth = createAuth(env, { productName: "FrockBot" });
   const adapter = (await auth.$context).internalAdapter;
   const user = await adapter.createUser(
     { name: "Native sign-in tester", email, emailVerified: true },

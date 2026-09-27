@@ -128,10 +128,10 @@ export function frockModelIdForCloudflareIdV1(id: string): string {
 export function cloudflareModelIdForFrockIdV1(input: string): string {
   const id = normalizeFrockModelIdV1(input);
   if (!isFrockModelIdV1(id)) {
-    throw new Error(`Frock AI model id "${input}" must start with "@frock/"`);
+    throw new Error(`Built-in model id "${input}" must start with "@frock/"`);
   }
   if (id === FROCK_AI_DEFAULT_MODEL) {
-    throw new Error("Frock AI Auto does not name a Cloudflare model");
+    throw new Error("Built-in model Auto does not name a Cloudflare model");
   }
   return `@cf/${id.slice(FROCK_AI_MODEL_PREFIX.length)}`;
 }
@@ -146,7 +146,7 @@ export function gatewayModelForFrockIdV1(
 ): string {
   const id = normalizeFrockModelIdV1(input);
   if (!isFrockModelIdV1(id)) {
-    throw new Error(`Frock AI model id "${input}" must start with "@frock/"`);
+    throw new Error(`Built-in model id "${input}" must start with "@frock/"`);
   }
   if (id === FROCK_AI_SUMMARY_MODEL) {
     // The binding path has no routes; its Auto model has the context a
@@ -164,7 +164,7 @@ export function gatewayModelForFrockIdV1(
   if (id === FROCK_AI_DEFAULT_MODEL) {
     if (autoRoute === null) return FROCK_AI_BINDING_AUTO_MODEL;
     if (!/^[A-Za-z0-9-]+$/.test(autoRoute)) {
-      throw new Error(`Frock AI Auto route "${autoRoute}" is invalid`);
+      throw new Error(`Built-in model Auto route "${autoRoute}" is invalid`);
     }
     return `dynamic/${autoRoute}`;
   }

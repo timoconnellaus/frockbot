@@ -28,22 +28,31 @@ function platformError(code: string, message: string): Error {
 }
 
 function sender(platform: EmailBindingV1) {
-  return createBindingEmailSenderV1({
-    SEND_EMAIL: platform,
-    EMAIL_DOMAIN: "Bots.Example.com",
-  })!;
+  return createBindingEmailSenderV1(
+    {
+      SEND_EMAIL: platform,
+      EMAIL_DOMAIN: "Bots.Example.com",
+    },
+    "FrockBot",
+  )!;
 }
 
 describe("the deployment's binding sender", () => {
   test("a deployment missing either half of the sender has none", () => {
     expect(
-      createBindingEmailSenderV1({ SEND_EMAIL: binding() }),
+      createBindingEmailSenderV1({ SEND_EMAIL: binding() }, "FrockBot"),
     ).toBeUndefined();
     expect(
-      createBindingEmailSenderV1({ EMAIL_DOMAIN: "bots.example.com" }),
+      createBindingEmailSenderV1(
+        { EMAIL_DOMAIN: "bots.example.com" },
+        "FrockBot",
+      ),
     ).toBeUndefined();
     expect(
-      createBindingEmailSenderV1({ SEND_EMAIL: binding(), EMAIL_DOMAIN: "  " }),
+      createBindingEmailSenderV1(
+        { SEND_EMAIL: binding(), EMAIL_DOMAIN: "  " },
+        "FrockBot",
+      ),
     ).toBeUndefined();
     expect(sender(binding()).domain).toBe("bots.example.com");
   });
@@ -76,6 +85,17 @@ describe("the deployment's binding sender", () => {
     expect(platform.sent[0]).toMatchObject({
       from: { email: "fox.tim@bots.example.com", name: "Fox Bcc: x" },
       replyTo: "tim@example.com",
+    });
+  });
+
+  test("a name that is nothing but control characters is the brand's", async () => {
+    const platform = binding();
+    await sender(platform).send({
+      ...request,
+      from: { address: "fox.tim@bots.example.com", name: "\u0007\u200b" },
+    });
+    expect(platform.sent[0]).toMatchObject({
+      from: { email: "fox.tim@bots.example.com", name: "FrockBot" },
     });
   });
 

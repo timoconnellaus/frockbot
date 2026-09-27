@@ -8,7 +8,16 @@
 
 import type { NormalizedModelRequest } from "./types.js";
 
-export const RUNTIME_NOTE_LABEL_PREFIX_V1 = "[FrockBot runtime:";
+/**
+ * The label a note opens with: `[<product> runtime: <topic>]`, in the
+ * brand's words.
+ */
+export function runtimeNoteLabelV1(productName: string, topic: string): string {
+  return `[${productName} runtime: ${topic}]`;
+}
+
+/** A trailing message that is already a runtime note, whoever's brand. */
+const RUNTIME_NOTE_V1 = /^\[[^\]\n]+ runtime: [^\]\n]+\]/;
 
 /** The request with `note` at its tail, joined to a note already there. */
 export function appendRuntimeNoteV1(
@@ -16,10 +25,7 @@ export function appendRuntimeNoteV1(
   note: string,
 ): NormalizedModelRequest {
   const last = request.messages.at(-1);
-  if (
-    last?.role === "user" &&
-    last.content.startsWith(RUNTIME_NOTE_LABEL_PREFIX_V1)
-  ) {
+  if (last?.role === "user" && RUNTIME_NOTE_V1.test(last.content)) {
     return {
       ...request,
       messages: [

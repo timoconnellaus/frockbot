@@ -53,6 +53,7 @@ function host(receiptOverride?: unknown, compositionOverride?: unknown) {
     executed,
     reverted,
     contribution: createSettingsBackendContribution({
+      brand: { productName: "FrockBot" },
       listCompositionGenerations: (_userId, botId, query) =>
         Promise.resolve(
           (compositionOverride ?? {

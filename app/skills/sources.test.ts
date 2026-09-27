@@ -64,7 +64,7 @@ async function openSession(): Promise<{
 
 describe("the managed Skill source", () => {
   test("ships the first-party Skills, content-addressed", async () => {
-    const loaded = await loadManagedSkillsV1();
+    const loaded = await loadManagedSkillsV1("FrockBot");
 
     expect(loaded.refusals).toEqual([]);
     expect(loaded.skills.map((skill) => skill.ref?.slug)).toEqual([
@@ -86,7 +86,7 @@ describe("the managed Skill source", () => {
 
   test("carries the files bundled beside a Skill, and refuses one past a bound", async () => {
     const document = MANAGED_SKILL_DOCUMENTS_V1[0]?.text ?? "";
-    const loaded = await loadManagedSkillsV1([
+    const loaded = await loadManagedSkillsV1("FrockBot", [
       {
         slug: "a2ui",
         text: document,
@@ -104,7 +104,7 @@ describe("the managed Skill source", () => {
       },
     ]);
 
-    const refused = await loadManagedSkillsV1([
+    const refused = await loadManagedSkillsV1("FrockBot", [
       {
         slug: "a2ui",
         text: document,
@@ -116,8 +116,8 @@ describe("the managed Skill source", () => {
   });
 
   test("is stable across loads, so a pinned Composition reproduces it", async () => {
-    const first = await loadManagedSkillsV1();
-    const second = await loadManagedSkillsV1();
+    const first = await loadManagedSkillsV1("FrockBot");
+    const second = await loadManagedSkillsV1("FrockBot");
 
     expect(second.skills.map((skill) => skill.contentHash)).toEqual(
       first.skills.map((skill) => skill.contentHash),
@@ -125,7 +125,7 @@ describe("the managed Skill source", () => {
   });
 
   test("records a malformed bundled document as a refusal, never a throw", async () => {
-    const loaded = await loadManagedSkillsV1([
+    const loaded = await loadManagedSkillsV1("FrockBot", [
       { slug: "broken", text: "no frontmatter here" },
       { slug: "Not A Slug", text: MANAGED_SKILL_DOCUMENTS_V1[0]?.text ?? "" },
       {
@@ -156,7 +156,12 @@ describe("the managed Skill source", () => {
     const workspace = new FakeWorkspace();
     const { sessions, dispose } = await openSession();
     const tool = createSkillWriteTool(
-      { owner: OWNER, reads: workspace, files: workspace },
+      {
+        productName: "FrockBot",
+        owner: OWNER,
+        reads: workspace,
+        files: workspace,
+      },
       { sessionId: "user-1:bot-1", turnId: "turn-1", runId: "run-1" },
       sessions,
     );
@@ -276,6 +281,7 @@ describe("the rendered catalog block", () => {
           refusals: [],
         },
       }),
+      "FrockBot",
     );
 
     expect(rendered).toContain('source="managed" ref="managed/teach"');
@@ -298,10 +304,11 @@ describe("the rendered catalog block", () => {
     ]);
 
     const catalog = await loadFullSkillCatalogV1(workspace, OWNER, {
+      productName: "FrockBot",
       managed: false,
       indexes: await skillIndexSourceForFake(workspace, OWNER).load(),
     });
-    const rendered = renderSkillCatalogPromptV1(catalog);
+    const rendered = renderSkillCatalogPromptV1(catalog, "FrockBot");
 
     expect(catalog.skills).toHaveLength(1);
     expect(catalog.skills[0]?.ref).toBeUndefined();
@@ -315,6 +322,7 @@ describe("the rendered catalog block", () => {
         bot: { skills: [fakeSkill("bot", "standup")], refusals: [] },
         user: { skills: [fakeSkill("user", "standup")], refusals: [] },
       }),
+      "FrockBot",
     );
 
     expect(rendered).toContain('name="standup (bot/standup)"');
@@ -373,6 +381,7 @@ describe("a Turn's whole catalog", () => {
     ]);
     const { session, dispose } = await openSession();
     const catalog = new SkillCatalog(
+      "FrockBot",
       OWNER,
       workspace,
       [],
@@ -418,6 +427,7 @@ describe("a Turn's whole catalog", () => {
 
   test("offers an enabled Plugin's Skills, last, under its Plugin's ref", async () => {
     const catalog = await loadFullSkillCatalogV1(new FakeWorkspace(), OWNER, {
+      productName: "FrockBot",
       managed: false,
       pluginSkills: [
         {
@@ -445,7 +455,7 @@ describe("a Turn's whole catalog", () => {
         slug: "drafting",
       },
     ]);
-    expect(renderSkillCatalogPromptV1(catalog)).toContain(
+    expect(renderSkillCatalogPromptV1(catalog, "FrockBot")).toContain(
       'ref="plugin/email-card/drafting"',
     );
   });
@@ -453,6 +463,7 @@ describe("a Turn's whole catalog", () => {
   test("omits the managed set when the host disables it", async () => {
     const workspace = new FakeWorkspace();
     const catalog = await loadFullSkillCatalogV1(workspace, OWNER, {
+      productName: "FrockBot",
       managed: false,
     });
 
@@ -502,6 +513,7 @@ describe("the User-global instruction root", () => {
     ]);
 
     const catalog = await loadFullSkillCatalogV1(workspace, OWNER, {
+      productName: "FrockBot",
       managed: false,
       indexes: await skillIndexSourceForFake(workspace, OWNER).load(),
     });
@@ -526,7 +538,7 @@ describe("the User-global instruction root", () => {
     // Another User's root was never even listed.
     expect(catalog.skills.map((skill) => skill.name)).not.toContain("Foreign");
 
-    const rendered = renderSkillCatalogPromptV1(catalog);
+    const rendered = renderSkillCatalogPromptV1(catalog, "FrockBot");
     expect(rendered).toContain('ref="user/standup"');
     expect(rendered).toContain('source="user"');
     expect(rendered).toContain('by="Bot &quot;bot-2&quot;"');
@@ -536,7 +548,12 @@ describe("the User-global instruction root", () => {
     const workspace = new FakeWorkspace();
     const { sessions, dispose } = await openSession();
     const tool = createSkillWriteTool(
-      { owner: OWNER, reads: workspace, files: workspace },
+      {
+        productName: "FrockBot",
+        owner: OWNER,
+        reads: workspace,
+        files: workspace,
+      },
       { sessionId: "user-1:bot-1", turnId: "turn-1", runId: "run-1" },
       sessions,
     );
@@ -580,6 +597,7 @@ describe("the User-global instruction root", () => {
     // Another Bot of the same User loads it, and is told who wrote it.
     const reader = { userId: "user-1", botId: "bot-2" };
     const catalog = await loadFullSkillCatalogV1(workspace, reader, {
+      productName: "FrockBot",
       managed: false,
       indexes: await skillIndexSourceForFake(workspace, reader).load(),
     });
@@ -594,6 +612,7 @@ describe("the User-global instruction root", () => {
     const { sessions, dispose } = await openSession();
     const tool = createSkillWriteTool(
       {
+        productName: "FrockBot",
         owner: OWNER,
         reads: workspace,
         files: workspace,
@@ -638,6 +657,7 @@ describe("the User-global instruction root", () => {
     const { sessions, dispose } = await openSession();
     const tool = createSkillWriteTool(
       {
+        productName: "FrockBot",
         owner: OWNER,
         reads: workspace,
         files: workspace,

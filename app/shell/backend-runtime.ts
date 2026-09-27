@@ -1,3 +1,4 @@
+import type { BrandV1 } from "@frockbot/core/contracts";
 import type { PackageDefinitionV1 } from "@frockbot/core/contracts";
 import type { CredentialLeaseV1 } from "@frockbot/core/connection";
 import type { AccountUsage } from "@frockbot/app/billing/model";
@@ -63,7 +64,7 @@ export interface ShellHostedRuntimeHostV1 {
    * Turn supervision for one admitted Turn. Present on every Turn: a Turn
    * runs supervised or not at all.
    */
-  supervision?: SupervisionRuntimeHostV1;
+  supervision?: Omit<SupervisionRuntimeHostV1, "productName">;
   /**
    * This deployment's Computer host. Absent, and there is no Computer at all:
    * no host registers, the Computer tools are not mounted, and every Computer
@@ -76,7 +77,7 @@ export interface ShellHostedRuntimeHostV1 {
    * available, and the Skills Package is then not mounted: a Turn with no
    * readable instruction root loads no instructions rather than guessing.
    */
-  skills?: SkillsRuntimeHostV1;
+  skills?: Omit<SkillsRuntimeHostV1, "productName">;
   /**
    * The Memory seam, supplied by the Bot Durable Object for one admitted
    * Turn. Absent outside a Turn, and outside one whose Memory roots are
@@ -177,7 +178,7 @@ export interface ShellHostedRuntimeHostV1 {
    * mounted at all: an intent record with no Session and Turn is an effect
    * nobody can trace back to a conversation.
    */
-  machines?: MachineRuntimeHostV1;
+  machines?: Omit<MachineRuntimeHostV1, "productName">;
   /**
    * The Plugin authoring seam (ADR 0026), supplied by the Bot Durable Object
    * for one admitted Turn behind the account's Plugin-authoring switch.
@@ -291,6 +292,8 @@ export interface ShellRuntimeFactoriesV1 {
 
 /** The application's Packages, and the factories that mount them. */
 export interface ShellApplicationV1 {
+  /** What a person — and the model — hears the product called. */
+  brand: BrandV1;
   /** Every Package this deployment ships, in Composition order. */
   packages: readonly PackageDefinitionV1[];
   /**

@@ -141,105 +141,109 @@ const capabilityCriteria = {
  * `TurnDirective` field: it is what says a short message is about the work
  * already open, which continuation routes on.
  */
-export const turnStartQuestionsV1 = {
-  acknowledge: noul(
-    {
-      target: "The Bot's first message this Turn, in answer to `input.text`",
-      decision:
-        "Should that first message be a short acknowledgement, sent before the Bot does any other work this Turn?",
-      requirements: [
-        "Answering well takes more than one quick lookup: several tool calls, building, checking, researching, or carrying on with work already under way in `openWork`",
-        "Without a word first, the User would see nothing until that work ends",
-      ],
-    },
-    {
-      true: "Both hold: there is real work to do, and the User would otherwise wait in silence",
-      false:
-        "The Bot can give its whole answer in its first message, at most after one quick lookup",
-    },
-  ),
-  complexity: choice(
-    {
-      target:
-        "The work a good answer to `input.text` takes, including any work in `openWork` it carries on",
-      decision: "How much work is that?",
-      rules: [
-        "A message that nudges, checks on or retries open work carries that work's size, however short the message is.",
-        "Judge the work, not the length of the reply.",
-        "Finding and comparing several options is many steps, however few searches it might take.",
-      ],
-    },
-    {
-      simple:
-        "One reply from what the Bot already knows, or a single quick lookup",
-      moderate: "A few tool calls about one thing, or one short piece of work",
-      complex:
-        "Many steps: building, debugging, researching and comparing several things, reading or writing something long, or carrying on with work like that",
-    },
-  ),
-  objective: choice(
-    {
-      target: "`input.text`, the User's newest message",
-      decision: "What is it about?",
-      rules: [
-        "Read it with `conversation` and `openWork`: a short message sent while work is open is usually about that work — a nudge, a call for a word, or a question about how it is going. Thanks that expects nothing more is not.",
-        "With nothing in `openWork`, there is no open work.",
-        "A message that plainly asks for something else is a new request, however much work is open.",
-      ],
-    },
-    {
-      open_work:
-        "The work in progress or offered: carry on with it, retry it, check on it or ask how it is going, change it or stop it, or a nudge or call for a word while it runs",
-      new_request: "Something the Bot should do that is not the open work",
-      conversation_only:
-        "Asks nothing of any work: thanks or a greeting that expects nothing back, or small talk while no work is open",
-    },
-  ),
-  ambiguity: choice(
-    {
-      target: "`input.text`, read with `conversation` and `openWork`",
-      decision: "Can the Bot act on it without asking the User what they mean?",
-      rules: [
-        "Only a real fork counts: two readings that lead to different actions, with nothing in the conversation to choose between them.",
-        "A detail the Bot can sensibly choose itself is not a fork.",
-      ],
-    },
-    {
-      clear: "What to do is settled by the message and what came before it",
-      needs_clarification:
-        "It could mean different things that lead to different actions, and nothing settles which",
-    },
-  ),
-  consequence: score(
-    {
-      target: "The work `input.text` asks for, done as the User means it",
-      decision: "How far does its effect reach, and how recoverable is it?",
-      rule: "Judge the effect of doing it, not whether the User may ask for it. Answering a question changes nothing.",
-    },
-    [
-      "Nothing leaves FrockBot and the Bot could undo it without the User noticing",
-      "A change inside FrockBot the User can see and reverse themselves",
-      "Something reaches a third party or outside system but can still be corrected",
-      "Irreversible once done: money moves, data is destroyed, or a message reaches people it cannot be recalled from",
-    ] as const,
-  ),
-  capability: choice(
-    {
-      target:
-        "The work `input.text` asks for, with any open work it carries on",
-      decision: "Which specialist capability, if any, does it most need?",
-      rules: [
-        "Answer none when the Bot can do it with its own tools in a few steps.",
-        "Work that has already failed more than once and is asked for again needs thinking, whatever kind of work it is.",
-        "Name one: the capability the work cannot be done well without.",
-      ],
-    },
-    capabilityCriteria,
-  ),
-} as const;
+export function turnStartQuestionsV1(productName: string) {
+  return {
+    acknowledge: noul(
+      {
+        target: "The Bot's first message this Turn, in answer to `input.text`",
+        decision:
+          "Should that first message be a short acknowledgement, sent before the Bot does any other work this Turn?",
+        requirements: [
+          "Answering well takes more than one quick lookup: several tool calls, building, checking, researching, or carrying on with work already under way in `openWork`",
+          "Without a word first, the User would see nothing until that work ends",
+        ],
+      },
+      {
+        true: "Both hold: there is real work to do, and the User would otherwise wait in silence",
+        false:
+          "The Bot can give its whole answer in its first message, at most after one quick lookup",
+      },
+    ),
+    complexity: choice(
+      {
+        target:
+          "The work a good answer to `input.text` takes, including any work in `openWork` it carries on",
+        decision: "How much work is that?",
+        rules: [
+          "A message that nudges, checks on or retries open work carries that work's size, however short the message is.",
+          "Judge the work, not the length of the reply.",
+          "Finding and comparing several options is many steps, however few searches it might take.",
+        ],
+      },
+      {
+        simple:
+          "One reply from what the Bot already knows, or a single quick lookup",
+        moderate:
+          "A few tool calls about one thing, or one short piece of work",
+        complex:
+          "Many steps: building, debugging, researching and comparing several things, reading or writing something long, or carrying on with work like that",
+      },
+    ),
+    objective: choice(
+      {
+        target: "`input.text`, the User's newest message",
+        decision: "What is it about?",
+        rules: [
+          "Read it with `conversation` and `openWork`: a short message sent while work is open is usually about that work — a nudge, a call for a word, or a question about how it is going. Thanks that expects nothing more is not.",
+          "With nothing in `openWork`, there is no open work.",
+          "A message that plainly asks for something else is a new request, however much work is open.",
+        ],
+      },
+      {
+        open_work:
+          "The work in progress or offered: carry on with it, retry it, check on it or ask how it is going, change it or stop it, or a nudge or call for a word while it runs",
+        new_request: "Something the Bot should do that is not the open work",
+        conversation_only:
+          "Asks nothing of any work: thanks or a greeting that expects nothing back, or small talk while no work is open",
+      },
+    ),
+    ambiguity: choice(
+      {
+        target: "`input.text`, read with `conversation` and `openWork`",
+        decision:
+          "Can the Bot act on it without asking the User what they mean?",
+        rules: [
+          "Only a real fork counts: two readings that lead to different actions, with nothing in the conversation to choose between them.",
+          "A detail the Bot can sensibly choose itself is not a fork.",
+        ],
+      },
+      {
+        clear: "What to do is settled by the message and what came before it",
+        needs_clarification:
+          "It could mean different things that lead to different actions, and nothing settles which",
+      },
+    ),
+    consequence: score(
+      {
+        target: "The work `input.text` asks for, done as the User means it",
+        decision: "How far does its effect reach, and how recoverable is it?",
+        rule: "Judge the effect of doing it, not whether the User may ask for it. Answering a question changes nothing.",
+      },
+      [
+        `Nothing leaves ${productName} and the Bot could undo it without the User noticing`,
+        `A change inside ${productName} the User can see and reverse themselves`,
+        "Something reaches a third party or outside system but can still be corrected",
+        "Irreversible once done: money moves, data is destroyed, or a message reaches people it cannot be recalled from",
+      ] as const,
+    ),
+    capability: choice(
+      {
+        target:
+          "The work `input.text` asks for, with any open work it carries on",
+        decision: "Which specialist capability, if any, does it most need?",
+        rules: [
+          "Answer none when the Bot can do it with its own tools in a few steps.",
+          "Work that has already failed more than once and is asked for again needs thinking, whatever kind of work it is.",
+          "Name one: the capability the work cannot be done well without.",
+        ],
+      },
+      capabilityCriteria,
+    ),
+  } as const;
+}
 
 export type TurnStartAnswersV1 = SystemOneResult<
-  typeof turnStartQuestionsV1
+  ReturnType<typeof turnStartQuestionsV1>
 >["answers"];
 
 export type TurnStartObjectiveV1 = TurnStartAnswersV1["objective"]["choice"];
@@ -260,19 +264,21 @@ export async function reviewTurnStartV1(
   client: TypeSafeClient,
   evidence: TurnStartJudgmentEvidenceV1,
   options: {
+    /** The product the rubric names, as the brand spells it. */
+    readonly productName: string;
     readonly signal?: AbortSignal;
     /** A Turn's budget; the evals ask once per case. */
     readonly budget?: {
       readonly retry: { readonly maxRetries: number };
       readonly timeout: number;
     };
-  } = {},
+  },
 ): Promise<TurnStartReviewV1> {
   const { data, requestId } = await client
     .systemOne(
       {
         state: turnStartStateV1(evidence),
-        questions: turnStartQuestionsV1,
+        questions: turnStartQuestionsV1(options.productName),
         model: TURN_START_MODEL_V1,
       },
       {

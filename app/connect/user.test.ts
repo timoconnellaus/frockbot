@@ -228,6 +228,7 @@ function fixture(
   const clock = options.clock ?? { now: Date.UTC(2026, 8, 11) };
   let ids = 0;
   const contribution = new ConnectUserBackendContribution({
+    productName: "FrockBot",
     storage,
     settings: settings as never,
     apiKey: options.apiKey ?? "project-key",

@@ -8,6 +8,8 @@
 // all the product ever needed to know about it.
 import {
   indexPackageCatalogV1,
+  type BrandV1,
+  type PackageCatalogIndexV1,
   type PackageDefinitionV1,
 } from "@frockbot/core/contracts";
 import { adminDefinitionV1 } from "@frockbot/app/admin/definition";
@@ -42,37 +44,64 @@ import { webDefinitionV1 } from "@frockbot/app/web/definition";
  */
 export const FOUNDATION_PACKAGE_VERSION_V1 = "0.0.1";
 
-export const FOUNDATION_PACKAGE_CATALOG_V1 = indexPackageCatalogV1(
-  [
-    uiThemeDefinitionV1,
-    authDefinitionV1,
-    adminDefinitionV1,
-    { id: "identity", displayName: "FrockBot Identity" },
-    { id: "provider-foundation", displayName: "Built-in models" },
-    { id: "skills", displayName: "Skills" },
-    { id: "echo", displayName: "Echo" },
-    shellDefinitionV1,
-    settingsDefinitionV1,
-    customModelsDefinitionV1,
-    routinesDefinitionV1,
-    credentialsDefinitionV1,
-    mcpDefinitionV1,
-    connectDefinitionV1,
-    webDefinitionV1,
-    voiceDefinitionV1,
-    providerOllamaCloudDefinitionV1,
-    providerFlockAiDefinitionV1,
-    ...catalogProviderDefinitionsV1,
-    flockDefinitionV1,
-    searchDefinitionV1,
-    auditDefinitionV1,
-    { id: "clock", displayName: "Clock" },
-    { id: "memory", displayName: "Memory" },
-    imageDefinitionV1,
-    computerDefinitionV1,
-    { id: "computer-host", displayName: "Computer" },
-    userMachineDefinitionV1,
-    subagentsDefinitionV1,
-  ] satisfies readonly PackageDefinitionV1[],
-  ({ id }) => ({ packageId: id }),
-);
+/** The names a catalog takes from the brand. */
+export type FoundationPackageBrandV1 = Pick<
+  BrandV1,
+  "productName" | "builtInModelName"
+>;
+
+const catalogs = new WeakMap<
+  FoundationPackageBrandV1,
+  PackageCatalogIndexV1<PackageDefinitionV1>
+>();
+
+/**
+ * The Packages, named by the brand the Worker was built with. One index per
+ * brand object: the Worker has exactly one, so this is built once.
+ */
+export function foundationPackageCatalogV1(
+  brand: FoundationPackageBrandV1,
+): PackageCatalogIndexV1<PackageDefinitionV1> {
+  const cached = catalogs.get(brand);
+  if (cached) return cached;
+  const catalog = buildFoundationPackageCatalogV1(brand);
+  catalogs.set(brand, catalog);
+  return catalog;
+}
+
+function buildFoundationPackageCatalogV1(brand: FoundationPackageBrandV1) {
+  return indexPackageCatalogV1(
+    [
+      uiThemeDefinitionV1,
+      authDefinitionV1,
+      adminDefinitionV1,
+      { id: "identity", displayName: `${brand.productName} Identity` },
+      { id: "provider-foundation", displayName: "Built-in models" },
+      { id: "skills", displayName: "Skills" },
+      { id: "echo", displayName: "Echo" },
+      shellDefinitionV1(brand.productName),
+      settingsDefinitionV1(brand.productName),
+      customModelsDefinitionV1,
+      routinesDefinitionV1,
+      credentialsDefinitionV1,
+      mcpDefinitionV1,
+      connectDefinitionV1,
+      webDefinitionV1,
+      voiceDefinitionV1,
+      providerOllamaCloudDefinitionV1,
+      providerFlockAiDefinitionV1(brand.builtInModelName),
+      ...catalogProviderDefinitionsV1,
+      flockDefinitionV1,
+      searchDefinitionV1,
+      auditDefinitionV1,
+      { id: "clock", displayName: "Clock" },
+      { id: "memory", displayName: "Memory" },
+      imageDefinitionV1,
+      computerDefinitionV1,
+      { id: "computer-host", displayName: "Computer" },
+      userMachineDefinitionV1,
+      subagentsDefinitionV1,
+    ] satisfies readonly PackageDefinitionV1[],
+    ({ id }) => ({ packageId: id }),
+  );
+}

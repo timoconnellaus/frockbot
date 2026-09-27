@@ -11,6 +11,7 @@ import {
   nextHourBoundaryV1,
   themeDocumentsMatchV1,
   type AccountLookV1,
+  type NamedLookDocumentsV1,
   type ThemeDocumentV1,
 } from "@frockbot/core/theme";
 import type { LoopEventPayloadMapV1 } from "@frockbot/core/contracts";
@@ -58,6 +59,8 @@ export interface AssembleBotThemeHostV1 {
   flock: FlockBotBackendContribution;
   registration: BotRegistrationV1;
   appearance: AccountLookV1;
+  /** The brand's palettes, which a named look compiles to. */
+  looks: NamedLookDocumentsV1;
   timezone: string;
   now?: Date;
   /** Injected in tests; the Bot Durable Object mounts the worker. */
@@ -95,7 +98,7 @@ export async function assembleBotThemeV1(
   const timezone = host.timezone;
   const look = await host.flock.readLook(host.registration, identity.userId);
   const seed = look.look;
-  const compiled = compileBotLookV1(seed, host.appearance, true);
+  const compiled = compileBotLookV1(seed, host.appearance, true, host.looks);
   const original = look.document ?? compiled;
   const roster = host.roster ?? (await readBotPluginRosterV1(state, identity));
   // A look the person picked is what they see, whatever wraps it.

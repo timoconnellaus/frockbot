@@ -12,16 +12,19 @@
  * in the same commit. That is the point: the change is seen.
  */
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import {
   AUTH_PACKAGE_CHOOSERS_V1,
+  BRAND_ALIAS_V1,
   CONTAINER_IMAGE_REPOSITORIES_V1,
   DEPLOYABLE_WORKERS_V1,
   generateProfileConfigsV1,
   generateWorkerConfigV1,
   profileWorkersV1,
   PUBLISHED_IMAGE_REGISTRY_V1,
+  validateProfileBrandV1,
   type DeployableWorkerV1,
 } from "./deployment-config/generate.ts";
 import { parseJsoncV1 } from "./deployment-config/jsonc.ts";
@@ -420,6 +423,73 @@ describe("the generator", () => {
       });
       expect(app.config.alias).toBeUndefined();
     }
+  });
+
+  test("aliases the brand a profile names, relative to the profile", async () => {
+    const fixtures = join(import.meta.dirname, "deployment-config", "fixtures");
+    const profile = {
+      ...loadProfileV1("hosted"),
+      name: "white-label",
+      brand: "./white-label/brand.ts",
+    };
+    validateProfileV1(profile, "a profile");
+    await validateProfileBrandV1(profile, fixtures);
+    const app = generateWorkerConfigV1("app", {
+      profile,
+      profileDirectory: fixtures,
+    });
+    const alias = app.config.alias as Config;
+    expect(String(alias[BRAND_ALIAS_V1])).toStartWith("../");
+    expect(resolve(dirname(app.file), String(alias[BRAND_ALIAS_V1]))).toBe(
+      join(fixtures, "white-label", "brand.ts"),
+    );
+    // The brand is the app Worker's alone.
+    const host = generateWorkerConfigV1("computerHost", {
+      profile,
+      profileDirectory: fixtures,
+    });
+    expect(host.config.alias).toBeUndefined();
+  });
+
+  test("refuses a brand module that is missing or is not a brand", async () => {
+    const hosted = loadProfileV1("hosted");
+    const directory = mkdtempSync(join(tmpdir(), "frockbot-brand-"));
+    await expect(
+      validateProfileBrandV1({ ...hosted, brand: "./absent.ts" }, directory),
+    ).rejects.toThrow(/no .*absent\.ts/);
+    writeFileSync(
+      join(directory, "brand.ts"),
+      "export const BRAND_V1 = { schemaVersion: 1, productName: 'Pal' };\n",
+    );
+    await expect(
+      validateProfileBrandV1({ ...hosted, brand: "./brand.ts" }, directory),
+    ).rejects.toThrow(/brand must carry exactly/);
+    // A hosted profile names none, and FrockBot's own is the tracked default.
+    await validateProfileBrandV1(hosted);
+  });
+
+  test("hands the Worker the signed native apps as one var", () => {
+    const hosted = loadProfileV1("hosted");
+    const app = generateWorkerConfigV1("app", { profile: hosted });
+    expect(JSON.parse(String((app.config.vars as Config).NATIVE_APPS))).toEqual(
+      hosted.nativeApps,
+    );
+    const { nativeApps: _none, ...bare } = hosted;
+    expect(
+      generateWorkerConfigV1("app", { profile: bare }).config.vars as Config,
+    ).not.toHaveProperty("NATIVE_APPS");
+    expect(() =>
+      validateProfileV1(
+        { ...hosted, nativeApps: { android: [{ packageName: "com.x" }] } },
+        "a profile",
+      ),
+    ).toThrow(/sha256CertFingerprints/);
+    expect(() =>
+      validateProfileV1(
+        { ...hosted, nativeApps: { apple: ["com.frockbot.mobile"] } },
+        "a profile",
+      ),
+    ).toThrow(/apple/);
   });
 
   test("gives the app Worker the email domain and a sender for it", () => {

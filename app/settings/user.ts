@@ -163,6 +163,8 @@ export interface AvailableUserPackage {
 export interface UserSettingsBackendHost {
   storage: UserSettingsStorage;
   availablePackages: readonly AvailableUserPackage[];
+  /** What the Settings frames call the product. */
+  productName: string;
 }
 
 function initialState(): UserSettingsViewV1 {
@@ -727,14 +729,24 @@ export class UserSettingsBackendContribution {
     home: "application" | "models",
     identity?: { name?: string; email?: string; image?: string },
   ) {
-    const frame =
-      home === "models" ? modelsSettingsFrame : applicationSettingsFrame;
-    return frame(
+    const settings = await this.readConfiguration({
+      schemaVersion: 1,
       userId,
-      await this.readConfiguration({ schemaVersion: 1, userId }),
-      this.host.availablePackages,
-      identity,
-    );
+    });
+    return home === "models"
+      ? modelsSettingsFrame(
+          userId,
+          settings,
+          this.host.availablePackages,
+          this.host.productName,
+        )
+      : applicationSettingsFrame(
+          userId,
+          settings,
+          this.host.availablePackages,
+          this.host.productName,
+          identity,
+        );
   }
 
   async readSettingsOptions(userId: string, input: unknown) {

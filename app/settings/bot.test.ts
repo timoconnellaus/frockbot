@@ -1,5 +1,6 @@
 import { createFakeTurnSupervisorV1 } from "@frockbot/core/contracts";
 import { foundationShellApplicationV1 } from "../runtime.js";
+import { TEST_BRAND_V1 } from "@frockbot/app/testkit";
 import { describe, expect, test } from "bun:test";
 import type {
   BotConfigurationCommandV1,
@@ -135,7 +136,7 @@ function host(storage: MemoryStorage, readUser: () => UserSettingsViewV1) {
   // The Composition is the User's, so the Bot mirrors it from here.
   const userComposition = memoryUserCompositionV1();
   return createShellBotBackendContribution({
-    ...foundationShellApplicationV1,
+    ...foundationShellApplicationV1(TEST_BRAND_V1),
     turnSupervisor: createFakeTurnSupervisorV1(),
     state: { storage } as unknown as DurableObjectState,
     env: {
@@ -329,7 +330,7 @@ describe("Bot configuration admission", () => {
     const storage = new MemoryStorage();
     let archived = false;
     const contribution = createShellBotBackendContribution({
-      ...foundationShellApplicationV1,
+      ...foundationShellApplicationV1(TEST_BRAND_V1),
       state: { storage } as unknown as DurableObjectState,
       env: {} as never,
       assertLifecycleActive: (_transaction, botId) => {
@@ -365,7 +366,7 @@ describe("Bot configuration admission", () => {
     const storage = new MemoryStorage();
     let admissions = 0;
     const contribution = createShellBotBackendContribution({
-      ...foundationShellApplicationV1,
+      ...foundationShellApplicationV1(TEST_BRAND_V1),
       state: { storage } as unknown as DurableObjectState,
       env: {} as never,
       assertLifecycleActive: (_transaction, botId) => {
@@ -416,7 +417,7 @@ describe("Bot configuration admission", () => {
       "bot-configuration": settings,
     });
     const contribution = createShellBotBackendContribution({
-      ...foundationShellApplicationV1,
+      ...foundationShellApplicationV1(TEST_BRAND_V1),
       state: { storage } as unknown as DurableObjectState,
       env: {} as never,
     });
@@ -444,7 +445,7 @@ describe("Bot configuration admission", () => {
       "run:run-1": { status: "completed" },
     });
     const contribution = createShellBotBackendContribution({
-      ...foundationShellApplicationV1,
+      ...foundationShellApplicationV1(TEST_BRAND_V1),
       state: { storage } as unknown as DurableObjectState,
       env: {} as never,
     });
@@ -461,7 +462,7 @@ describe("Bot configuration admission", () => {
   test("binds in-flight and durable receipts to the complete Bot command", async () => {
     const storage = new MemoryStorage();
     const backendHost = {
-      ...foundationShellApplicationV1,
+      ...foundationShellApplicationV1(TEST_BRAND_V1),
       state: { storage } as unknown as DurableObjectState,
       env: {} as never,
     };
