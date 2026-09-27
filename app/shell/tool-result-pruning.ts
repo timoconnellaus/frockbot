@@ -57,9 +57,6 @@ export type ToolResultPrunerV1 = (
 /** Where a Session's owed pass is kept. One per Session; a newer run replaces it. */
 export const TOOL_RESULT_PRUNE_DUE_PREFIX_V1 = "tool-result-prune-due:";
 
-/** How far a pass due while a Turn runs is pushed each time. */
-export const TOOL_RESULT_PRUNE_DEFERRAL_MS_V1 = 2_000;
-
 /** The person's latest messages the judge reads for what the conversation is about. */
 const TOOL_RESULT_PRUNE_CONVERSATION_LINES_V1 = 12;
 
@@ -135,8 +132,10 @@ export async function toolResultPruneDeadlinesV1(
 }
 
 /**
- * The alarm cannot prune while a Turn executes, and re-arms at once: a pass
- * already due would fire it back to back until the Turn settled.
+ * The alarm cannot prune while a Turn executes. That Turn warms the cache
+ * again, so a pass already due waits out another quiet period rather than
+ * waking the alarm every moment until the Turn settles — whose own
+ * settlement then owes the pass that replaces this one.
  */
 export async function deferToolResultPruningV1(
   storage: DueStorageV1,
@@ -144,10 +143,7 @@ export async function deferToolResultPruningV1(
 ): Promise<void> {
   for (const { key, due } of await listDue(storage)) {
     if (due.dueAt > now) continue;
-    await storage.put(key, {
-      ...due,
-      dueAt: now + TOOL_RESULT_PRUNE_DEFERRAL_MS_V1,
-    });
+    await storage.put(key, { ...due, dueAt: now + PRUNE_AFTER_IDLE_MS_V1 });
   }
 }
 

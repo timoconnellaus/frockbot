@@ -10,7 +10,6 @@ import {
   deferToolResultPruningV1,
   PRUNE_AFTER_IDLE_MS_V1,
   settleToolResultPruningV1,
-  TOOL_RESULT_PRUNE_DEFERRAL_MS_V1,
   TOOL_RESULT_PRUNE_DUE_PREFIX_V1,
   toolResultPruneDeadlinesV1,
   toolResultPruneTerminalRecordsV1,
@@ -109,13 +108,13 @@ describe("owing a pass", () => {
     ).toEqual({});
   });
 
-  test("its due time rides the alarm, and a Turn pushes a past-due one back", async () => {
+  test("its due time rides the alarm, and a Turn pushes a past-due one a quiet period back", async () => {
     const storage = new MemoryStorage();
     await owe(storage, SETTLED);
     expect(await toolResultPruneDeadlinesV1(storage)).toEqual([SETTLED]);
     await deferToolResultPruningV1(storage, SETTLED + 1);
     expect(await toolResultPruneDeadlinesV1(storage)).toEqual([
-      SETTLED + 1 + TOOL_RESULT_PRUNE_DEFERRAL_MS_V1,
+      SETTLED + 1 + PRUNE_AFTER_IDLE_MS_V1,
     ]);
   });
 });
