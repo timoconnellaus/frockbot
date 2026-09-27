@@ -1,6 +1,6 @@
 // Events a quiet Bot appends to its own conversation, outside any Turn.
 import { describe, expect, test } from "bun:test";
-import type { SessionEvent } from "@frockbot/core/contracts";
+import type { SessionEvent, SessionEventInput } from "@frockbot/core/contracts";
 import { bootstrapGeneration } from "./composition/generation.js";
 import {
   BotDurableAuthority,
@@ -17,10 +17,10 @@ const codec = createStoredRunCodecV1<undefined>({
   decodeConfigurationSnapshot: () => undefined,
 });
 
-const PRUNED = {
+const PRUNED: SessionEventInput<"conversation/tool-results-pruned"> = {
   type: "conversation/tool-results-pruned",
   results: [{ turn: 1, callId: "c-1" }],
-} as const;
+};
 
 function createAuthority(
   storage: MemoryStorage,
