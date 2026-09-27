@@ -236,14 +236,19 @@ describe("the Jev adapter's call review", () => {
     });
   });
 
-  test("refuses particulars that are not the ones asked for", async () => {
-    const decision = await jevSupervisor(
-      jevFetch((answers) => ({
-        ...answers,
-        argumentsMatchRequest: { type: "noul", noul: 0.2 },
-      })),
-    ).reviewCall(callEvidence);
-    expect(decision.reasonCode).toBe("arguments_changed");
+  test("refuses particulars that are not the ones asked for, where the effect reaches outside", async () => {
+    const mismatched = (score: number) =>
+      jevSupervisor(
+        jevFetch((answers) => ({
+          ...answers,
+          argumentsMatchRequest: { type: "noul", noul: 0.2 },
+          consequence: consequence(score),
+        })),
+      ).reviewCall(callEvidence);
+    expect((await mismatched(2.2)).reasonCode).toBe("arguments_changed");
+    // A read the person asked for runs even when Jev scores it against
+    // everything else they asked in the same message.
+    expect((await mismatched(0.1)).decision).toBe("allow");
   });
 
   test("runs a step the request implies only while it reaches nobody", async () => {
