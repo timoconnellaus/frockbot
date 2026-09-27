@@ -7,7 +7,7 @@ import type { Page } from "playwright";
 import {
   runBrowserTaskV1,
   type BrowserTaskOutcomeV1,
-} from "../../../computer/browser-task.ts";
+} from "@frockbot/computer/browser-task";
 import { jevChargeMicrosV1 } from "../../billing/jev.ts";
 import { RESPONSE_REVIEW_MODEL_V1 } from "../../supervision/response-review.ts";
 

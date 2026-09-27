@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./agent": "./agent.ts",
+    "./browser-task": "./browser-task.ts",
     "./backend": "./backend.ts",
     "./bot": "./bot.ts",
     "./definition": "./definition.ts",
