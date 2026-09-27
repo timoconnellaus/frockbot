@@ -1,17 +1,17 @@
 // Credentialed egress from the Computer's terminal.
 //
 // A CLI on the Computer reaches a connected app's API with a placeholder
-// token. The Computer's local proxy sends each request to one of the hosts
-// below here instead of to the internet, and this module answers it: which
-// connected account it is for, whether it needs Jev's review first, and the
-// account's own send, which attaches the credential on the far side of the
-// app. The Computer never holds the credential.
+// token, on the app's generic address or on one of the real hosts below. The
+// Computer's local proxy sends each such request here instead of to the
+// internet, and this module answers it: which connected account it is for,
+// Jev's review, and the account's own send, which attaches the credential on
+// the far side of the provider. The Computer never holds the credential.
 //
 // AUTHORITY. A request is answered only while the `computer_exec` call that
 // made it is running, under that call's Turn: the token names the object and
 // the call, the call's handler is registered in this isolate for exactly as
-// long as the call runs, and a write is reviewed as a `mutate` call of that
-// Turn before it is sent.
+// long as the call runs, and every request is reviewed as a `mutate` call of
+// that Turn before it is sent.
 //
 // EFFECTS. Every request is one effect of its own, keyed under the exec's
 // effect id. A request is sent at most once; a transport failure after it
@@ -35,11 +35,9 @@ export interface ComputerEgressRouteV1 {
 }
 
 /**
- * The APIs a CLI on the Computer can reach with a connected account. Only
- * these hosts are intercepted on the Computer; everything else goes straight
- * out, with no credential. An app joins only with a read classifier that is
- * right for its API, because a read is sent without a second review: GitHub's
- * reads are GET and HEAD plus GraphQL queries, and Gmail's are GET.
+ * The real API hosts the Computer's proxy also intercepts, so an unmodified
+ * CLI that insists on its own host — `gh` and `api.github.com` — reaches the
+ * connected account. Any other app is reached on its generic address below.
  */
 export const COMPUTER_EGRESS_ROUTES_V1: readonly ComputerEgressRouteV1[] = [
   { toolkit: "github", label: "GitHub", host: "api.github.com" },
@@ -51,6 +49,12 @@ export const COMPUTER_EGRESS_HOSTS_V1: readonly string[] = [
   ...new Set(COMPUTER_EGRESS_ROUTES_V1.map((route) => route.host)),
 ];
 
+export function computerEgressRouteByToolkitV1(
+  toolkit: string,
+): ComputerEgressRouteV1 | undefined {
+  return COMPUTER_EGRESS_ROUTES_V1.find((route) => route.toolkit === toolkit);
+}
+
 export function computerEgressRouteV1(
   url: URL,
 ): ComputerEgressRouteV1 | undefined {
@@ -61,6 +65,39 @@ export function computerEgressRouteV1(
       (!route.pathPrefixes ||
         route.pathPrefixes.some((prefix) => url.pathname.startsWith(prefix))),
   );
+}
+
+/**
+ * Every connected app, whatever it is, answers on the terminal at
+ * `https://<toolkit>.connected.internal/<path>`: the path is sent to the
+ * provider relative to that account's own API base URL, so no host table is
+ * needed. `.internal` is reserved for private use and never resolves, so a
+ * request there reaches nothing but the Computer's proxy.
+ */
+export const COMPUTER_EGRESS_GENERIC_DOMAIN = "connected.internal";
+const GENERIC_HOST = /^([a-z0-9][a-z0-9_-]{0,63})\.connected\.internal$/;
+
+/** The generic address of one connected app on the terminal. */
+export function computerEgressGenericOriginV1(toolkit: string): string {
+  return `https://${toolkit}.${COMPUTER_EGRESS_GENERIC_DOMAIN}`;
+}
+
+/** Which account a request is for, and the endpoint the provider is given. */
+export interface ComputerEgressTargetV1 {
+  readonly toolkit: string;
+  /** Absolute for a routed host; a path, relative to the account's base URL, for the generic one. */
+  readonly endpoint: string;
+}
+
+export function computerEgressTargetV1(
+  url: URL,
+): ComputerEgressTargetV1 | undefined {
+  const generic = GENERIC_HOST.exec(url.hostname.toLowerCase());
+  if (generic) return { toolkit: generic[1]!, endpoint: url.pathname };
+  const route = computerEgressRouteV1(url);
+  return route
+    ? { toolkit: route.toolkit, endpoint: `${url.origin}${url.pathname}` }
+    : undefined;
 }
 
 /** One request a CLI made, as the Computer's proxy forwards it. */
@@ -201,9 +238,10 @@ export function computerEgressMessageV1(
 }
 
 /**
- * Whether a request only reads, and so is sent without review. GitHub's
- * GraphQL endpoint takes every document as a POST, so a POST there reads only
- * when the document, stripped of comments and strings, names no mutation or
+ * Whether a request only reads. Every request is reviewed; a read is reviewed
+ * once per API path for a call, a write each time. GitHub's GraphQL endpoint
+ * takes every document as a POST, so a POST there reads only when the
+ * document, stripped of comments and strings, names no mutation or
  * subscription anywhere; anything unparseable is a write.
  */
 export function computerEgressReadsV1(
@@ -242,15 +280,19 @@ function graphqlSkeleton(query: string): string {
 
 /** One connected account a Turn may reach from the terminal. */
 export interface ComputerEgressAccountV1 {
-  /** The toolkit slug, matched against `COMPUTER_EGRESS_ROUTES_V1`. */
+  /** The toolkit slug: the generic host's name, and `COMPUTER_EGRESS_ROUTES_V1`'s key. */
   readonly toolkit: string;
   /** What a person calls this account, for the review and the refusals. */
   readonly label: string;
   /** Live permission for the Connection. Absent keeps the admitted snapshot. */
   permit?(): Promise<boolean>;
-  /** Sends one request as the account. The credential never leaves the far side. */
+  /**
+   * Sends one request as the account to `endpoint` — absolute, or relative to
+   * the account's API base URL. The credential never leaves the far side.
+   */
   send(
     request: ComputerEgressRequestV1,
+    endpoint: string,
     signal: AbortSignal,
   ): Promise<ComputerEgressResponseV1>;
 }
@@ -312,9 +354,10 @@ export interface ComputerEgressHandlerConfigV1 {
 }
 
 /**
- * Answers the requests one exec call's CLIs make. Reads go to the account
- * directly; anything else is reviewed first, and a refusal is the answer the
- * CLI prints.
+ * Answers the requests one exec call's CLIs make. Every request is reviewed
+ * as a `mutate` call of the exec's Turn before it is sent: a read once per
+ * API path for the call, so paging through a list is one review, and each
+ * write on its own. A refusal is the answer the CLI prints.
  */
 export function createComputerEgressHandlerV1(
   config: ComputerEgressHandlerConfigV1,
@@ -324,10 +367,11 @@ export function createComputerEgressHandlerV1(
   // Within one exec that is the same effect, answered with what the first
   // send answered rather than sent twice.
   const writes = new Map<string, Promise<ComputerEgressResponseV1>>();
+  const readReviews = new Map<string, Promise<string | undefined>>();
   return async (request) => {
     const url = new URL(request.url);
-    const route = computerEgressRouteV1(url);
-    if (!route) {
+    const target = computerEgressTargetV1(url);
+    if (!target) {
       return computerEgressMessageV1(
         403,
         `FrockBot does not attach a connected account to ${url.host}${url.pathname}.`,
@@ -335,72 +379,95 @@ export function createComputerEgressHandlerV1(
     }
     const account = config
       .accounts()
-      .find((candidate) => candidate.toolkit === route.toolkit);
+      .find((candidate) => candidate.toolkit === target.toolkit);
     if (!account || (account.permit && !(await account.permit()))) {
+      const name =
+        computerEgressRouteByToolkitV1(target.toolkit)?.label ?? target.toolkit;
       return computerEgressMessageV1(
         403,
-        `No ${route.label} account is connected for this Bot. Ask the person to connect ${route.label} in Connectors, then try again.`,
+        `No ${name} account is connected for this Bot. Ask the person to connect ${name} in Connectors, then try again.`,
       );
     }
     const reads = computerEgressReadsV1(request);
-    const key = reads
-      ? undefined
-      : `${request.method} ${request.url} ${request.bodyBase64 ?? ""}`;
-    const earlier = key ? writes.get(key) : undefined;
+    if (reads) {
+      const key = `${request.method} ${url.host}${url.pathname}`;
+      let review = readReviews.get(key);
+      if (!review) {
+        review = reviewRequest(request, account);
+        readReviews.set(key, review);
+      }
+      const refusal = await review;
+      if (refusal !== undefined) return refused(refusal);
+      return send(request, target, account, true);
+    }
+    const key = `${request.method} ${request.url} ${request.bodyBase64 ?? ""}`;
+    const earlier = writes.get(key);
     if (earlier) return earlier;
-    const answer = send(request, route, account, reads);
-    if (key) writes.set(key, answer);
+    const answer = (async () => {
+      const refusal = await reviewRequest(request, account);
+      if (refusal !== undefined) return refused(refusal);
+      return send(request, target, account, false);
+    })();
+    writes.set(key, answer);
     return answer;
   };
 
+  function refused(reason: string): ComputerEgressResponseV1 {
+    return computerEgressMessageV1(
+      403,
+      `FrockBot did not send this request. ${reason}`,
+    );
+  }
+
+  /** The refusal's reason, or `undefined` when the request may go. */
+  async function reviewRequest(
+    request: ComputerEgressRequestV1,
+    account: ComputerEgressAccountV1,
+  ): Promise<string | undefined> {
+    if (!config.review) {
+      return "Requests from the terminal need supervision, which this Turn does not have.";
+    }
+    const effectId = `${config.context.effectId}:egress:${sequence++}`;
+    const call: ToolCall = {
+      id: effectId,
+      name: COMPUTER_EGRESS_TOOL_NAME,
+      input: {
+        account: account.label,
+        method: request.method,
+        url: request.url,
+        ...(request.bodyBase64 ? { body: reviewBody(request) } : {}),
+      },
+    };
+    const prepared = await config.review(call, {
+      ...config.context,
+      effectId,
+      toolCall: call,
+      effect: "mutate",
+    });
+    return prepared.kind === "denied" ? prepared.result.content : undefined;
+  }
+
   async function send(
     request: ComputerEgressRequestV1,
-    route: ComputerEgressRouteV1,
+    target: ComputerEgressTargetV1,
     account: ComputerEgressAccountV1,
     reads: boolean,
   ): Promise<ComputerEgressResponseV1> {
-    const effectId = `${config.context.effectId}:egress:${sequence++}`;
-    if (!reads) {
-      if (!config.review) {
-        return computerEgressMessageV1(
-          403,
-          "FrockBot did not send this request: writes from the terminal need supervision, which this Turn does not have.",
-        );
-      }
-      const call: ToolCall = {
-        id: effectId,
-        name: COMPUTER_EGRESS_TOOL_NAME,
-        input: {
-          account: account.label,
-          method: request.method,
-          url: request.url,
-          ...(request.bodyBase64 ? { body: reviewBody(request) } : {}),
-        },
-      };
-      const prepared = await config.review(call, {
-        ...config.context,
-        effectId,
-        toolCall: call,
-        effect: "mutate",
-      });
-      if (prepared.kind === "denied") {
-        return computerEgressMessageV1(
-          403,
-          `FrockBot did not send this request. ${prepared.result.content}`,
-        );
-      }
-    }
     try {
-      return await account.send(request, config.context.signal);
+      return await account.send(
+        request,
+        target.endpoint,
+        config.context.signal,
+      );
     } catch {
       return reads
         ? computerEgressMessageV1(
             502,
-            `${route.label} could not be reached through the connected account. Try again.`,
+            `${account.label} could not be reached through the connected account. Try again.`,
           )
         : computerEgressMessageV1(
             502,
-            `The outcome of this ${route.label} request could not be confirmed. Do not repeat it; check the account for its result.`,
+            `The outcome of this ${account.label} request could not be confirmed. Do not repeat it; check the account for its result.`,
           );
     }
   }

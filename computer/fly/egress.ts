@@ -1,8 +1,9 @@
 // The Sprite half of credentialed egress (`computer/egress.ts`): a small
 // HTTPS proxy on loopback that a `computer_exec` shell is pointed at.
 //
-// It terminates TLS only for the connected-app hosts the Worker attaches an
-// account to, with a certificate from a CA the Sprite makes for itself and
+// It terminates TLS only for the connected apps' generic addresses
+// (`<toolkit>.connected.internal`) and the few real API hosts routed to them,
+// with a certificate from a CA the Sprite makes for itself and
 // trusts through the usual environment variables, and posts each request it
 // reads to the Worker under the exec call's token. Every other destination is
 // a plain tunnel: the proxy never reads it and never sees a credential,
@@ -12,7 +13,10 @@
 // up; a Sprite that cannot start it runs the command with no proxy at all, so
 // a broken proxy costs connected accounts and nothing else.
 
-import { COMPUTER_EGRESS_HOSTS_V1 } from "../egress.js";
+import {
+  COMPUTER_EGRESS_GENERIC_DOMAIN,
+  COMPUTER_EGRESS_HOSTS_V1,
+} from "../egress.js";
 import { shellQuote } from "./shell.js";
 
 /**
@@ -48,6 +52,8 @@ import { execFileSync } from "node:child_process";
 const PORT = ${EGRESS_PORT};
 const DIR = ${JSON.stringify(EGRESS_ROOT)};
 const HOSTS = new Set(${JSON.stringify(COMPUTER_EGRESS_HOSTS_V1)});
+const GENERIC_SUFFIX = ${JSON.stringify(`.${COMPUTER_EGRESS_GENERIC_DOMAIN}`)};
+const intercepted = (host) => HOSTS.has(host) || (host.endsWith(GENERIC_SUFFIX) && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(host.slice(0, -GENERIC_SUFFIX.length)));
 const MAX_BODY = ${EGRESS_REQUEST_MAX_BYTES};
 const TIMEOUT_MS = 110000;
 const SYSTEM_BUNDLE = "/etc/ssl/certs/ca-certificates.crt";
@@ -228,7 +234,7 @@ server.on("connect", (req, socket, head) => {
   }
   const host = match[1].toLowerCase();
   const port = Number(match[2]);
-  if (!HOSTS.has(host) || port !== 443) {
+  if (!intercepted(host) || port !== 443) {
     tunnel(host, port, socket, head);
     return;
   }

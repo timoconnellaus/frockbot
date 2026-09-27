@@ -222,8 +222,8 @@ type ToolEffectV1 = "read" | "mutate";
 - `mutate` is code from outside the deployment acting on the world: a Plugin
   a User installed or a Bot wrote, a remote MCP server, a connected app, every
   `computer_exec` command (a shell reaches the internet and the User's
-  connected accounts), and each credentialed write such a command makes
-  (`credentialed_request`). Every such call needs a positive review decision,
+  connected accounts), and each request such a command makes as the
+  person (`credentialed_request`). Every such call needs a positive review decision,
   made right before it runs.
 - `read` is everything a review would only slow down: reads, changes the
   person can see and undo inside FrockBot, the Computer's other tools, and

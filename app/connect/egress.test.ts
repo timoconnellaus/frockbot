@@ -31,19 +31,24 @@ describe("sending as a connected account", () => {
         "set-cookie": "a=b",
       },
     });
-    const response = await sendAsConnectedAccountV1(fake, "ca_1", {
-      method: "POST",
-      url: "https://api.github.com/repos/o/r/issues?per_page=5",
-      headers: {
-        authorization: "token frockbot-connected-account",
-        accept: "application/vnd.github+json",
-        "content-type": "application/json",
-        cookie: "x=y",
+    const response = await sendAsConnectedAccountV1(
+      fake,
+      "ca_1",
+      {
+        method: "POST",
+        url: "https://api.github.com/repos/o/r/issues?per_page=5",
+        headers: {
+          authorization: "token frockbot-connected-account",
+          accept: "application/vnd.github+json",
+          "content-type": "application/json",
+          cookie: "x=y",
+        },
+        bodyBase64: bytesToBase64V1(
+          new TextEncoder().encode('{"title":"Broken build"}'),
+        ),
       },
-      bodyBase64: bytesToBase64V1(
-        new TextEncoder().encode('{"title":"Broken build"}'),
-      ),
-    });
+      "https://api.github.com/repos/o/r/issues",
+    );
     expect(sent).toEqual([
       {
         connectedAccountId: "ca_1",
@@ -76,12 +81,17 @@ describe("sending as a connected account", () => {
       data: null,
       headers: {},
     });
-    const response = await sendAsConnectedAccountV1(fake, "ca_1", {
-      method: "POST",
-      url: "https://api.github.com/markdown/raw",
-      headers: { "content-type": "text/plain" },
-      bodyBase64: bytesToBase64V1(new TextEncoder().encode("# hi")),
-    });
+    const response = await sendAsConnectedAccountV1(
+      fake,
+      "ca_1",
+      {
+        method: "POST",
+        url: "https://api.github.com/markdown/raw",
+        headers: { "content-type": "text/plain" },
+        bodyBase64: bytesToBase64V1(new TextEncoder().encode("# hi")),
+      },
+      "https://api.github.com/markdown/raw",
+    );
     expect(response.status).toBe(415);
     expect(sent).toHaveLength(0);
   });
@@ -99,12 +109,39 @@ describe("sending as a connected account", () => {
       },
       new Uint8Array([1, 2, 3]),
     );
-    const response = await sendAsConnectedAccountV1(fake, "ca_1", {
-      method: "GET",
-      url: "https://api.github.com/repos/o/r/zipball",
-      headers: {},
-    });
+    const response = await sendAsConnectedAccountV1(
+      fake,
+      "ca_1",
+      {
+        method: "GET",
+        url: "https://api.github.com/repos/o/r/zipball",
+        headers: {},
+      },
+      "https://api.github.com/repos/o/r/zipball",
+    );
     expect(response.headers["content-type"]).toBe("application/zip");
     expect([...base64ToBytesV1(response.bodyBase64)]).toEqual([1, 2, 3]);
+  });
+
+  test("hands the provider a relative path for an app's generic address", async () => {
+    const { client: fake, sent } = client({
+      status: 200,
+      data: {},
+      headers: {},
+    });
+    await sendAsConnectedAccountV1(
+      fake,
+      "ca_2",
+      {
+        method: "GET",
+        url: "https://notion.connected.internal/v1/users/me?x=1",
+        headers: {},
+      },
+      "/v1/users/me",
+    );
+    expect(sent[0]).toMatchObject({
+      endpoint: "/v1/users/me",
+      parameters: [{ name: "x", value: "1", type: "query" }],
+    });
   });
 });

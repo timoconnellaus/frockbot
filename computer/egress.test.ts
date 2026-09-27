@@ -50,8 +50,11 @@ function account(
   return {
     toolkit: "github",
     label: "GitHub",
-    send: async (request) => {
+    send: async (request, endpoint) => {
       sent.push(request);
+      expect(endpoint).toBe(
+        `${new URL(request.url).origin}${new URL(request.url).pathname}`,
+      );
       return send();
     },
   };
@@ -148,25 +151,65 @@ describe("computer egress handler", () => {
     expect(messageOf(unconnected)).toContain("connect GitHub in Connectors");
   });
 
-  test("sends a read without review", async () => {
-    const sent: ComputerEgressRequestV1[] = [];
+  test("reviews a read once per API path, and reaches any app on its generic address", async () => {
+    const sent: { url: string; endpoint: string }[] = [];
     const reviewed: ToolCall[] = [];
+    const notion: ComputerEgressAccountV1 = {
+      toolkit: "notion",
+      label: "Notion",
+      send: async (request, endpoint) => {
+        sent.push({ url: request.url, endpoint });
+        return ok();
+      },
+    };
     const handler = createComputerEgressHandlerV1({
-      accounts: () => [account(sent)],
+      accounts: () => [notion],
       context,
       review: async (call) => {
         reviewed.push(call);
         return { kind: "ready", call, idempotent: false };
       },
     });
+    for (const page of ["1", "2", "3"]) {
+      const response = await handler({
+        method: "GET",
+        url: `https://notion.connected.internal/v1/users?page=${page}`,
+        headers: {},
+      });
+      expect(response.status).toBe(200);
+    }
+    expect(reviewed).toHaveLength(1);
+    expect(reviewed[0]!.input).toMatchObject({
+      account: "Notion",
+      method: "GET",
+      url: "https://notion.connected.internal/v1/users?page=1",
+    });
+    expect(sent.map((entry) => entry.endpoint)).toEqual([
+      "/v1/users",
+      "/v1/users",
+      "/v1/users",
+    ]);
+  });
+
+  test("a read the review refuses is not sent", async () => {
+    const sent: ComputerEgressRequestV1[] = [];
+    const handler = createComputerEgressHandlerV1({
+      accounts: () => [account(sent)],
+      context,
+      review: async (call): Promise<ToolPreparation> => ({
+        kind: "denied",
+        call,
+        result: { content: "Nobody asked for this.", isError: true },
+      }),
+    });
     const response = await handler({
       method: "GET",
-      url: "https://api.github.com/user",
+      url: "https://api.github.com/user/emails",
       headers: {},
     });
-    expect(response.status).toBe(200);
-    expect(sent).toHaveLength(1);
-    expect(reviewed).toHaveLength(0);
+    expect(response.status).toBe(403);
+    expect(messageOf(response)).toContain("Nobody asked for this.");
+    expect(sent).toHaveLength(0);
   });
 
   test("reviews a write as a mutate call of the exec's Turn before sending it", async () => {

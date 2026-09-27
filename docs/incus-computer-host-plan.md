@@ -187,7 +187,7 @@ Grow to a pool of five hosts. Admit one User first and raise the cap one at a ti
 
 ### Phase 5 — terminal first
 
-The credential boundary in §10 runs on the Sprite for GitHub and Gmail. Carry it to the Incus host, add apps one read classifier at a time, move MCP servers' uses to CLIs, then delete `app/mcp/`.
+The credential boundary in §10 runs on the Sprite for every connected app. Carry it to the Incus host, route user-added MCP servers' APIs the same way, move their uses to CLIs, then delete `app/mcp/`.
 
 ---
 
@@ -204,13 +204,13 @@ An always-running Computer means a shell is there the moment a Bot wants one, wi
 
 ### Credentials never enter the VM
 
-"Secrets stay server-side" still holds. A CLI runs with a placeholder token, never a real one. Its requests to a connected app's API go through a proxy on the Computer that terminates TLS for those hosts only, with a CA the Computer trusts, and forwards each request to the app Worker under a token that names the Turn's object and the exec call. The Bot Durable Object sends it as the connected account through the provider, which attaches the credential, so nothing on the Computer ever holds one. Every other destination is a plain tunnel. Revoking a Connection takes effect on the next request.
+"Secrets stay server-side" still holds. A CLI runs with a placeholder token, never a real one. Every connected app answers on the Computer at `https://<app>.connected.internal/<path>`, the path resolved by the provider against that account's API base URL, and a few real hosts (`api.github.com` for `gh`) are routed as well. Requests to either go through a proxy on the Computer that terminates TLS for those names only, with a CA the Computer trusts, and forwards each request to the app Worker under a token that names the Turn's object and the exec call. The Bot Durable Object sends it as the connected account through the provider, which attaches the credential, so nothing on the Computer ever holds one. Every other destination is a plain tunnel. Revoking a Connection takes effect on the next request.
 
-This runs on the Fly Sprite today (`computer/egress.ts`, `computer/fly/egress.ts`, `app/connect/egress.ts`, [architecture §10](architecture.md#connected-accounts-from-the-terminal)), for GitHub and Gmail: an app joins once its API has a correct read classifier, because a read is sent without a second review.
+This runs on the Fly Sprite today (`computer/egress.ts`, `computer/fly/egress.ts`, `app/connect/egress.ts`, [architecture §10](architecture.md#connected-accounts-from-the-terminal)), for every app the person has connected, with no per-app table.
 
 ### Jev reviews every command
 
-`computer_exec` is a `mutate` call, so Jev reviews every command before it runs, with the Turn's conversation: what a command reads and where it sends it are both the person's to have asked for, and that is also what stops a prompt-injected `curl` from carrying data out. A credentialed write the command then makes (anything but GET and HEAD, and GitHub GraphQL mutations) is reviewed again as a `credentialed_request` call before it is sent, because Jev saw `python sync.py`, not what the script posts. Jev's latency and price are negligible, so this is the default, not a cost to optimise.
+`computer_exec` is a `mutate` call, so Jev reviews every command before it runs, with the Turn's conversation: what a command reads and where it sends it are both the person's to have asked for, and that is also what stops a prompt-injected `curl` from carrying data out. Every request the command then makes as the person is reviewed again as a `credentialed_request` call before it is sent, because Jev saw `python sync.py`, not what the script reads or posts: a read once per API path for the command, so paging through a list is one review, and each write on its own. Jev's latency and price are negligible, so this is the default, not a cost to optimise.
 
 ### Effects
 
@@ -230,7 +230,7 @@ A foreground command returns at most 30 KB of stdout and stderr to the model, an
 
 ### Open questions
 
-- Which apps join next, each with a read classifier for its API, and whether each then leaves Composio's tools.
+- When each app's Composio tools can go, once the terminal has taken over its use.
 - Whether a deny-by-default egress allowlist is worth adding under Jev's review.
 - How a Bot discovers the CLIs available to it, beyond what the image lists and its Skills teach.
 

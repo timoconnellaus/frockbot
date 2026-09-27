@@ -41,6 +41,8 @@ export async function sendAsConnectedAccountV1(
   client: Pick<ComposioClient, "proxyRequest" | "readBinary">,
   connectedAccountId: string,
   request: ComputerEgressRequestV1,
+  /** Absolute, or a path the provider resolves against the account's base URL. */
+  endpoint: string,
 ): Promise<ComputerEgressResponseV1> {
   const url = new URL(request.url);
   let body: Record<string, unknown> | undefined;
@@ -71,7 +73,7 @@ export async function sendAsConnectedAccountV1(
   }
   const result = await client.proxyRequest({
     connectedAccountId,
-    endpoint: `${url.origin}${url.pathname}`,
+    endpoint,
     method: request.method as ProxyRequestInputV1["method"],
     ...(body ? { body } : {}),
     parameters,
