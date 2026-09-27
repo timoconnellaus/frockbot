@@ -1576,8 +1576,10 @@ test("verified return associations name the existing Android signer and the Appl
     return f.auth.route(f.request("/.well-known/apple-app-site-association"));
   };
   const f = fixture();
-  const android = await f.auth.route(f.request("/.well-known/assetlinks.json"));
-  expect(await android!.text()).toContain(
+  const android = await (await f.auth.route(
+    f.request("/.well-known/assetlinks.json"),
+  ))!.text();
+  expect(android).toContain(
     "61:E6:47:9F:9C:57:55:15:4C:1F:93:9C:DE:48:E8:A7:57:EF:F3:13:6E:54:ED:1D:DA:5F:61:E7:8B:3C:1E:37",
   );
   // The FrockBot Dev returns are never claimed: Safari would offer them to
@@ -1614,7 +1616,7 @@ test("verified return associations name the existing Android signer and the Appl
   // No Apple app signs in to an Android-only deployment, so no path is
   // offered to one as a link that would reach a 404.
   expect((await association("android"))!.status).toBe(404);
-  expect(JSON.parse(await android!.text())).toEqual([
+  expect(JSON.parse(android)).toEqual([
     {
       relation: ["delegate_permission/common.handle_all_urls"],
       target: {
@@ -1644,9 +1646,11 @@ test("a deployment names only the signed apps its profile names", async () => {
     nativeApps: other,
     returnUris: nativeReturnUris("android,ios", NATIVE_ORIGIN),
   });
-  const android = await f.auth.route(f.request("/.well-known/assetlinks.json"));
-  expect(await android!.text()).toContain("com.example.wallet");
-  expect(await android!.text()).not.toContain("frockbot");
+  const android = await (await f.auth.route(
+    f.request("/.well-known/assetlinks.json"),
+  ))!.text();
+  expect(android).toContain("com.example.wallet");
+  expect(android).not.toContain("frockbot");
   const apple = await f.auth.route(
     f.request("/.well-known/apple-app-site-association"),
   );
