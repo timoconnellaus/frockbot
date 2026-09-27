@@ -1,9 +1,6 @@
 import { expect, test } from "bun:test";
-import type {
-  AccountUsage,
-  UsageReservation,
-  UsageSettlement,
-} from "../billing/ledger.js";
+import type { UsageReservation, UsageSettlement } from "../billing/ledger.js";
+import type { AccountUsage } from "../billing/model.js";
 import type { HostedModelRatesV1 } from "../billing/rates.js";
 import {
   MEMORY_EXTRACTION_MAX_FACTS_V1,
@@ -23,7 +20,10 @@ const dispatch: MemoryExtractionDispatchV1 = {
     sessionId: "user-1:bot-1",
     runId: "run-9",
   } as MemoryExtractionDispatchV1["principal"],
-  scope: { kind: "bot", id: "bot-1" } as MemoryExtractionDispatchV1["scope"],
+  scope: {
+    kind: "bot",
+    id: "bot-1",
+  } as unknown as MemoryExtractionDispatchV1["scope"],
 };
 
 test("the request names its prompt version, asks for the schema and runs on the summary model", () => {
