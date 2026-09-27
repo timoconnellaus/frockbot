@@ -165,6 +165,8 @@ export function dispatchMemoryOperateV1(
 export interface DurableMemoryIndexBindingsV1 {
   vectors?: MemoryVectorIndex;
   ai?: MemoryAiBinding;
+  /** What a Turn's words hold worth remembering; absent, extraction waits. */
+  extract?: MemoryProcessingAdaptersV1["extract"];
 }
 
 export async function drainDurableMemoryV1(
@@ -174,5 +176,6 @@ export async function drainDurableMemoryV1(
   const adapters: MemoryProcessingAdaptersV1 = {};
   if (bindings.vectors) adapters.vectors = bindings.vectors;
   if (bindings.ai) adapters.embed = createMemoryEmbedder(bindings.ai);
+  if (bindings.extract) adapters.extract = bindings.extract;
   return drainMemoryProcessingV1(engine, adapters);
 }

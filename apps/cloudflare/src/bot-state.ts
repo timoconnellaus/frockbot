@@ -363,6 +363,7 @@ import {
 import { createMemoryEmbedder } from "@frockbot/app/memory/embeddings";
 import { MemoryRecordsV1 } from "@frockbot/app/memory/owner";
 import { createVectorMemorySearchV1 } from "@frockbot/app/memory/semantic";
+import { createHostedMemoryExtractorV1 } from "@frockbot/app/memory/extraction-host";
 import {
   createBotMemoryEngineV1,
   createUserMemoryRecordsRemoteV1,
@@ -1163,11 +1164,18 @@ export class BotState
 
   private async drainMemoryProcessing(): Promise<void> {
     if (!durableObjectHasSqlV1(this.ctx.storage)) return;
+    const extract = createHostedMemoryExtractorV1({
+      ...(this.backendEnv.FROCK_AI
+        ? { gateway: this.backendEnv.FROCK_AI }
+        : {}),
+      ...(this.backendEnv.BILLING ? { billing: this.backendEnv.BILLING } : {}),
+    });
     await drainDurableMemoryV1(this.memoryEngine(), {
       ...(this.env.MEMORY_INDEX
         ? { vectors: this.env.MEMORY_INDEX as MemoryVectorIndex }
         : {}),
       ...(this.env.AI ? { ai: this.env.AI as MemoryAiBinding } : {}),
+      ...(extract ? { extract } : {}),
     });
   }
 
