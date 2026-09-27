@@ -6,10 +6,13 @@ import { resolve } from "node:path";
 import { format } from "prettier";
 
 const root = resolve(import.meta.dirname, "..");
-const sourcePath = resolve(root, "deployments/profile.schema.json");
+const sourcePath = resolve(
+  root,
+  "apps/cloudflare/deployment-config/profile.schema.json",
+);
 const outputPath = resolve(
   root,
-  "scripts/deployment-config/profile-schema.generated.ts",
+  "apps/cloudflare/deployment-config/profile-schema.generated.ts",
 );
 
 const schema = JSON.parse(readFileSync(sourcePath, "utf8")) as unknown;

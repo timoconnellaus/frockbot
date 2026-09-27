@@ -100,6 +100,9 @@
     "apps/cloudflare": {
       "name": "@frockbot/cloudflare",
       "version": "0.0.1",
+      "bin": {
+        "frockbot-deployment-config": "./deployment-config/cli.ts",
+      },
       "dependencies": {
         "@frockbot/app": "workspace:*",
         "@frockbot/applets": "workspace:*",
@@ -107,14 +110,16 @@
         "@frockbot/core": "workspace:*",
         "@frockbot/frock-compose": "workspace:*",
         "@frockbot/providers": "workspace:*",
+        "@rive-app/flutter-native-wasm": "44.0.0",
         "agents": "0.24.0",
         "ai": "^7.0.107",
+        "ajv": "8.20.0",
+        "json-schema-to-ts": "^3.1.1",
       },
       "devDependencies": {
         "@cloudflare/vitest-plugin": "^1.1.10",
         "@cloudflare/workers-types": "5.20260920.1",
         "@playwright/test": "1.63.0",
-        "@rive-app/flutter-native-wasm": "44.0.0",
         "@types/bun": "1.4.2",
         "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2",
         "vitest": "^4.1.0",

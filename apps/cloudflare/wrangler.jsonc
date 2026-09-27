@@ -1,7 +1,7 @@
 // Bindings, migrations, and the environments `wrangler dev` and the test
 // harnesses run. No deployment identity: the account, the Worker names, the
 // routes, the resource names and the identity vars belong to
-// `deployments/<profile>.json`, and `scripts/deployment-config.ts` joins the
+// `deployments/<profile>.json`, and `bun run deployment:config` joins the
 // two into the config `wrangler deploy -c` takes (ADR 0028).
 {
   "$schema": "./node_modules/wrangler/config-schema.json",

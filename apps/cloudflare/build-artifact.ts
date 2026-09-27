@@ -1,10 +1,33 @@
+/**
+ * The application artifact: `src/user-application.ts` bundled with a brand, for
+ * the Worker to load from R2.
+ *
+ *   bun build-artifact.ts [--brand <module>] [--dist <directory>]
+ *
+ * `--dist` is where `build-flutter-web.ts` staged the client and where
+ * `artifacts/foundation-v1.mjs` is written: this package's own `dist` by
+ * default, and a white-label's own directory when it builds from the published
+ * package ([ADR 0038](../../docs/adr/0038-white-label-deployments.md) §4).
+ */
 import { readFile, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { decodeBrandV1 } from "@frockbot/core/contracts";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
-const outdir = resolve(root, "dist/artifacts");
+
+/** The value after `flag`, or undefined when the flag is absent. */
+function flagValue(flag: string): string | undefined {
+  const index = process.argv.indexOf(flag);
+  if (index === -1) return undefined;
+  const value = process.argv[index + 1];
+  if (!value || value.startsWith("--"))
+    throw new Error(`${flag} names nothing`);
+  return value;
+}
+
+const dist = resolve(flagValue("--dist") ?? resolve(root, "dist"));
+const outdir = resolve(dist, "artifacts");
 await rm(outdir, { recursive: true, force: true });
 
 // The document the artifact renders names the client's payload, which is
@@ -13,9 +36,7 @@ await rm(outdir, { recursive: true, force: true });
 let flutterBuild: string;
 try {
   flutterBuild = (
-    JSON.parse(
-      await readFile(resolve(root, "dist/flutter-web.json"), "utf8"),
-    ) as {
+    JSON.parse(await readFile(resolve(dist, "flutter-web.json"), "utf8")) as {
       buildHash: string;
     }
   ).buildHash;
@@ -31,16 +52,11 @@ try {
 // a build can still refuse it: every look through the ThemeDocument decoder
 // and its contrast floor. Its icon is a path beside the brand module, which the
 // shell serves as the site icon.
-const brandFlag = process.argv.indexOf("--brand");
+const brandFlag = flagValue("--brand");
 const brandModule =
-  brandFlag === -1
+  brandFlag === undefined
     ? fileURLToPath(import.meta.resolve("#brand"))
-    : resolve(
-        process.argv[brandFlag + 1] ??
-          (() => {
-            throw new Error("--brand names no module");
-          })(),
-      );
+    : resolve(brandFlag);
 const brand = decodeBrandV1(
   ((await import(brandModule)) as { BRAND_V1?: unknown }).BRAND_V1,
 );

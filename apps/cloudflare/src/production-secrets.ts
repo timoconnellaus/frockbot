@@ -25,11 +25,18 @@
  * holds it: no deploy is going to close it.
  *
  * One list here is not the same for every deployment: a required secret may
- * belong to one auth Package (ADR 0028). Both Packages' names are classified,
- * because the Worker's `Env` declares both, and only the built Package's are
- * required, checked and deployed.
+ * belong to one auth Package (ADR 0028). Both built-in Packages' names are
+ * classified, because the Worker's `Env` declares both, and only the built
+ * Package's are required, checked and deployed. A white-label's own Package is
+ * not in this file at all (ADR 0038 §3): its profile names the secrets it
+ * requires, and every function below takes them as the `auth` it checks.
  */
-import type { AuthPackageIdV1 } from "@frockbot/core/contracts";
+import {
+  isBuiltInAuthPackageIdV1,
+  type AuthPackageIdV1,
+  type AuthPackageSettingV1,
+  type BuiltInAuthPackageIdV1,
+} from "@frockbot/core/contracts";
 import { AUTH_PACKAGE_V1 } from "#auth-package";
 
 /** One setting the deploy hands the Worker. */
@@ -49,7 +56,18 @@ export interface ProductionSecretV1 {
    * neither reads it nor deploys it, so it is required nowhere until that
    * build is the one being released.
    */
-  readonly authPackage?: AuthPackageIdV1;
+  readonly authPackage?: BuiltInAuthPackageIdV1;
+}
+
+/**
+ * The auth Package a deploy is checked for: its name, and the secrets it
+ * requires. The build's own chooser by default; for a white-label's Package,
+ * what its profile names, since this module cannot import a chooser it was
+ * not built with.
+ */
+export interface ProductionAuthPackageV1 {
+  readonly id: AuthPackageIdV1;
+  readonly required: readonly AuthPackageSettingV1[];
 }
 
 /**
@@ -59,11 +77,11 @@ export interface ProductionSecretV1 {
  * for every deployment, and these are required for one and unknown to the
  * other.
  */
-function belongsToThisBuildV1(secret: ProductionSecretV1): boolean {
-  return (
-    secret.authPackage === undefined ||
-    secret.authPackage === AUTH_PACKAGE_V1.id
-  );
+function belongsToBuildV1(
+  secret: ProductionSecretV1,
+  auth: ProductionAuthPackageV1,
+): boolean {
+  return secret.authPackage === undefined || secret.authPackage === auth.id;
 }
 
 /** One setting the deploy may omit, and what the product loses when it does. */
@@ -315,15 +333,26 @@ export const NON_SECRET_WORKER_SETTINGS_V1: readonly NonSecretWorkerSettingV1[] 
     },
   ];
 
-/** What this build must be given, the other auth Package's names aside. */
-export function requiredSecretsV1(): ProductionSecretV1[] {
-  return REQUIRED_PRODUCTION_SECRETS_V1.filter(belongsToThisBuildV1);
+/** What this build must be given, the other auth Packages' names aside. */
+export function requiredSecretsV1(
+  auth: ProductionAuthPackageV1 = AUTH_PACKAGE_V1,
+): ProductionSecretV1[] {
+  const required = REQUIRED_PRODUCTION_SECRETS_V1.filter((secret) =>
+    belongsToBuildV1(secret, auth),
+  );
+  if (isBuiltInAuthPackageIdV1(auth.id)) return required;
+  return [
+    ...required,
+    ...auth.required.map(({ name, why }) => ({ name, why })),
+  ];
 }
 
 /** Every name the deploy's secrets file may carry, required first. */
-export function deployedSecretNamesV1(): string[] {
+export function deployedSecretNamesV1(
+  auth: ProductionAuthPackageV1 = AUTH_PACKAGE_V1,
+): string[] {
   return [
-    ...requiredSecretsV1().map((secret) => secret.name),
+    ...requiredSecretsV1(auth).map((secret) => secret.name),
     ...OPTIONAL_PRODUCTION_SECRETS_V1.map((secret) => secret.name),
   ];
 }
@@ -331,8 +360,9 @@ export function deployedSecretNamesV1(): string[] {
 /** Required names the given environment does not supply. */
 export function missingRequiredSecretsV1(
   present: Readonly<Record<string, string | undefined>>,
+  auth: ProductionAuthPackageV1 = AUTH_PACKAGE_V1,
 ): ProductionSecretV1[] {
-  return requiredSecretsV1().filter(
+  return requiredSecretsV1(auth).filter(
     (secret) => (present[secret.name] ?? "").trim() === "",
   );
 }
@@ -372,9 +402,10 @@ export interface LiveSecretPlanV1 {
 /** The names this environment's deploy carries, non-empty values only. */
 function carriedSecretNamesV1(
   present: Readonly<Record<string, string | undefined>>,
+  auth: ProductionAuthPackageV1,
 ): Set<string> {
   return new Set(
-    deployedSecretNamesV1().filter(
+    deployedSecretNamesV1(auth).filter(
       (name) => (present[name] ?? "").trim() !== "",
     ),
   );
@@ -384,8 +415,9 @@ function carriedSecretNamesV1(
 export function liveSecretPlanV1(
   live: readonly string[],
   present: Readonly<Record<string, string | undefined>>,
+  auth: ProductionAuthPackageV1 = AUTH_PACKAGE_V1,
 ): LiveSecretPlanV1 {
-  const carried = carriedSecretNamesV1(present);
+  const carried = carriedSecretNamesV1(present, auth);
   const held = new Set(live);
   const forbidden = NON_SECRET_WORKER_SETTINGS_V1.filter(
     (setting) => setting.forbiddenLive !== undefined && held.has(setting.name),
@@ -410,12 +442,13 @@ function revokeInstructionV1(name: string): string {
 export function productionSecretsReportV1(
   present: Readonly<Record<string, string | undefined>>,
   live?: readonly string[],
+  auth: ProductionAuthPackageV1 = AUTH_PACKAGE_V1,
 ): { ok: boolean; failures: string[]; warnings: string[]; notices: string[] } {
-  const failures = missingRequiredSecretsV1(present).map(
+  const failures = missingRequiredSecretsV1(present, auth).map(
     (secret) =>
       `Missing production configuration: ${secret.name} — ${secret.why} Add it to the repository's production environment, then re-run this release.`,
   );
-  const plan = live ? liveSecretPlanV1(live, present) : undefined;
+  const plan = live ? liveSecretPlanV1(live, present, auth) : undefined;
   const held = new Set(live ?? []);
   const warnings = missingOptionalSecretsV1(present).map((secret) =>
     held.has(secret.name)

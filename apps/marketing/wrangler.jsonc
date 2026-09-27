@@ -1,6 +1,6 @@
 // The hosted marketing site. No deployment identity: the account, the Worker
 // name and the hostnames belong to `deployments/<profile>.json`, and
-// `scripts/deployment-config.ts` joins the two into the config
+// `bun run deployment:config` joins the two into the config
 // `wrangler deploy -c` takes (ADR 0028).
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",

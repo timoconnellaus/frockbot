@@ -11,8 +11,8 @@
 import type {
   DeploymentProfileV1,
   DeploymentRegionV1,
-} from "../deployment-config/profile.ts";
-import { resourceNamesV1 } from "../deployment-config/generate.ts";
+} from "../../apps/cloudflare/deployment-config/profile.ts";
+import { resourceNamesV1 } from "../../apps/cloudflare/deployment-config/generate.ts";
 import {
   OPTIONAL_PRODUCTION_SECRETS_V1,
   REQUIRED_PRODUCTION_SECRETS_V1,

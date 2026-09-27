@@ -20,22 +20,58 @@ import {
   BRAND_ALIAS_V1,
   CONTAINER_IMAGE_REPOSITORIES_V1,
   DEPLOYABLE_WORKERS_V1,
-  generateProfileConfigsV1,
-  generateWorkerConfigV1,
+  generateProfileConfigsV1 as generateProfileConfigsInV1,
+  generateWorkerConfigV1 as generateWorkerConfigInV1,
   profileWorkersV1,
   PUBLISHED_IMAGE_REGISTRY_V1,
+  validateProfileAuthPackageV1,
   validateProfileBrandV1,
   type DeployableWorkerV1,
-} from "./deployment-config/generate.ts";
-import { parseJsoncV1 } from "./deployment-config/jsonc.ts";
+  type GenerateOptionsV1,
+} from "../apps/cloudflare/deployment-config/generate.ts";
+import { parseJsoncV1 } from "../apps/cloudflare/deployment-config/jsonc.ts";
 import {
   DEPLOYMENT_PROFILE_SCHEMA_V1,
   DEPLOYMENT_REGIONS_V1,
   deploymentRegionV1,
-  loadProfileV1,
-  REPO_ROOT_V1,
+  loadProfileV1 as loadProfileFromV1,
+  PROFILE_SCHEMA_FILE_V1,
   validateProfileV1,
-} from "./deployment-config/profile.ts";
+} from "../apps/cloudflare/deployment-config/profile.ts";
+import {
+  PROFILE_DIRECTORY_V1,
+  REPO_ROOT_V1,
+} from "./deployment-config/repository.ts";
+
+/** This repository's own profiles, as `bun run deployment:config` reads them. */
+function loadProfileV1(name: string) {
+  return loadProfileFromV1(name, PROFILE_DIRECTORY_V1);
+}
+
+type TestOptionsV1 = Omit<
+  GenerateOptionsV1,
+  "profileDirectory" | "outputRoot"
+> &
+  Partial<Pick<GenerateOptionsV1, "profileDirectory" | "outputRoot">>;
+
+function withRepositoryDefaults(options: TestOptionsV1): GenerateOptionsV1 {
+  return {
+    profileDirectory: PROFILE_DIRECTORY_V1,
+    outputRoot: join(REPO_ROOT_V1, ".deployment"),
+    ...options,
+  };
+}
+
+function generateWorkerConfigV1(
+  worker: DeployableWorkerV1,
+  options: TestOptionsV1,
+) {
+  return generateWorkerConfigInV1(worker, withRepositoryDefaults(options));
+}
+
+function generateProfileConfigsV1(options: TestOptionsV1) {
+  return generateProfileConfigsInV1(withRepositoryDefaults(options));
+}
 
 const FIXTURE_DIRECTORY = join(
   import.meta.dirname,
@@ -88,7 +124,7 @@ function fixture(worker: DeployableWorkerV1): Config {
 
 /** Where a fixture's relative paths were relative to: the app it was copied from. */
 function fixtureBase(worker: DeployableWorkerV1): string {
-  return join(REPO_ROOT_V1, DEPLOYABLE_WORKERS_V1[worker].directory);
+  return join(REPO_ROOT_V1, "apps", DEPLOYABLE_WORKERS_V1[worker].directory);
 }
 
 /**
@@ -329,12 +365,7 @@ describe("the generator", () => {
 
   test("the generated profile type is the schema file", () => {
     expect(DEPLOYMENT_PROFILE_SCHEMA_V1).toEqual(
-      JSON.parse(
-        readFileSync(
-          join(REPO_ROOT_V1, "deployments/profile.schema.json"),
-          "utf8",
-        ),
-      ),
+      JSON.parse(readFileSync(PROFILE_SCHEMA_FILE_V1, "utf8")),
     );
   });
 
@@ -465,7 +496,133 @@ describe("the generator", () => {
       validateProfileBrandV1({ ...hosted, brand: "./brand.ts" }, directory),
     ).rejects.toThrow(/brand must carry exactly/);
     // A hosted profile names none, and FrockBot's own is the tracked default.
-    await validateProfileBrandV1(hosted);
+    await validateProfileBrandV1(hosted, PROFILE_DIRECTORY_V1);
+  });
+
+  describe("a white-label's own auth Package", () => {
+    const fixtures = join(import.meta.dirname, "deployment-config", "fixtures");
+    const external = {
+      ...loadProfileV1("hosted"),
+      name: "white-label",
+      authPackage: "./white-label/auth-package.ts",
+      authEnvironment: {
+        secrets: [{ name: "STUB_SIGN_IN_SECRET", why: "Signs every session." }],
+        vars: { STUB_SIGN_IN_APP_ID: "app-123" },
+      },
+    };
+    const { d1DatabaseId: _none, ...withoutDatabase } = external;
+
+    test("is aliased by path, relative to the profile", async () => {
+      validateProfileV1(withoutDatabase, "a profile");
+      await validateProfileAuthPackageV1(withoutDatabase, fixtures);
+      const app = generateWorkerConfigV1("app", {
+        profile: withoutDatabase,
+        profileDirectory: fixtures,
+      });
+      const alias = app.config.alias as Config;
+      expect(String(alias["#auth-package"])).toStartWith("../");
+      expect(resolve(dirname(app.file), String(alias["#auth-package"]))).toBe(
+        join(fixtures, "white-label", "auth-package.ts"),
+      );
+      // Its vars are written; its secrets are the deploy's, never the config's.
+      const vars = app.config.vars as Config;
+      expect(vars.STUB_SIGN_IN_APP_ID).toBe("app-123");
+      expect(vars).not.toHaveProperty("STUB_SIGN_IN_SECRET");
+      expect(vars).not.toHaveProperty("ACCESS_AUD");
+      // Nothing to store in unless the profile names a database for it.
+      expect(app.config.d1_databases).toBeUndefined();
+    });
+
+    test("binds AUTH_DB when the profile names a database", () => {
+      const app = generateWorkerConfigV1("app", {
+        profile: external,
+        profileDirectory: fixtures,
+      });
+      expect((app.config.d1_databases as Config[])[0]!.database_id).toBe(
+        external.d1DatabaseId,
+      );
+    });
+
+    test("must be told where every setting it requires comes from", async () => {
+      await expect(
+        validateProfileAuthPackageV1(
+          {
+            ...withoutDatabase,
+            authEnvironment: { vars: { STUB_SIGN_IN_APP_ID: "app-123" } },
+          },
+          fixtures,
+        ),
+      ).rejects.toThrow(/Required and not named: STUB_SIGN_IN_SECRET/);
+      await expect(
+        validateProfileAuthPackageV1(
+          {
+            ...withoutDatabase,
+            authEnvironment: {
+              ...withoutDatabase.authEnvironment,
+              vars: { STUB_SIGN_IN_APP_ID: "a", UNREAD: "b" },
+            },
+          },
+          fixtures,
+        ),
+      ).rejects.toThrow(/Named and not required: UNREAD/);
+    });
+
+    test("is refused when missing, or when it claims a built-in name", async () => {
+      await expect(
+        validateProfileAuthPackageV1(
+          { ...withoutDatabase, authPackage: "./absent.ts" },
+          fixtures,
+        ),
+      ).rejects.toThrow(/no .*absent\.ts/);
+      const directory = mkdtempSync(join(tmpdir(), "frockbot-auth-"));
+      writeFileSync(
+        join(directory, "chooser.ts"),
+        "export const AUTH_PACKAGE_V1 = { id: 'access', required: [] };\n",
+      );
+      await expect(
+        validateProfileAuthPackageV1(
+          {
+            ...withoutDatabase,
+            authPackage: "./chooser.ts",
+            authEnvironment: {},
+          },
+          directory,
+        ),
+      ).rejects.toThrow(/names itself "access"/);
+    });
+
+    test("the schema requires authEnvironment for a path and refuses it otherwise", () => {
+      const { authEnvironment: _unnamed, ...bare } = withoutDatabase;
+      expect(() => validateProfileV1(bare, "a profile")).toThrow(
+        /authEnvironment/,
+      );
+      expect(() =>
+        validateProfileV1(
+          { ...loadProfileV1("hosted"), authEnvironment: {} },
+          "a profile",
+        ),
+      ).toThrow(/authEnvironment/);
+      expect(() =>
+        validateProfileV1(
+          { ...withoutDatabase, authPackage: "my-sign-in" },
+          "a profile",
+        ),
+      ).toThrow(/authPackage/);
+    });
+  });
+
+  test("uploads a profile's own web client, relative to the profile", () => {
+    const fixtures = join(import.meta.dirname, "deployment-config", "fixtures");
+    const app = generateWorkerConfigV1("app", {
+      profile: { ...loadProfileV1("hosted"), webClient: "./white-label/web" },
+      profileDirectory: fixtures,
+    });
+    const assets = app.config.assets as Config;
+    expect(resolve(dirname(app.file), String(assets.directory))).toBe(
+      join(fixtures, "white-label", "web"),
+    );
+    // Everything else about the assets is the tracked file's.
+    expect(assets.html_handling).toBe("none");
   });
 
   test("hands the Worker the signed native apps as one var", () => {

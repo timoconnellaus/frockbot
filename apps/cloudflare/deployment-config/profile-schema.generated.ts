@@ -5,7 +5,7 @@ export const DEPLOYMENT_PROFILE_SCHEMA_V1 = {
   $id: "https://frockbot.com/schemas/deployment-profile-v1.json",
   title: "FrockBot deployment profile",
   description:
-    "Who a deployment is: the Cloudflare account, the Worker names, the hostnames, the auth Package and the resources that carry identity. `scripts/deployment-config.ts` reads one of these and writes the deployable wrangler configs from the tracked ones, which hold bindings and migrations and no identity at all.",
+    "Who a deployment is: the Cloudflare account, the Worker names, the hostnames, the auth Package and the resources that carry identity. `frockbot-deployment-config` (`bun run deployment:config` in the FrockBot repository) reads one of these and writes the deployable wrangler configs from the tracked ones, which hold bindings and migrations and no identity at all.",
   type: "object",
   additionalProperties: false,
   required: ["schemaVersion", "name", "accountId", "prefix", "authPackage"],
@@ -105,14 +105,63 @@ export const DEPLOYMENT_PROFILE_SCHEMA_V1 = {
     },
     authPackage: {
       description:
-        "Which sign-in Package this deployment builds. The value `apps/cloudflare/src/auth-package.ts` carries.",
-      enum: ["better-auth", "access"],
+        "Which sign-in Package this deployment builds: one of the two `@frockbot/cloudflare` ships, or a path, relative to this profile file, to a chooser module a white-label wrote — a module exporting `AUTH_PACKAGE_V1: AuthPackageBuildV1` and the `AuthPackageEnvironmentV1` type, as `apps/cloudflare/src/auth-package.ts` does (ADR 0038 §3). Written as a wrangler `alias` for `#auth-package` unless it is `better-auth`, which the tracked source already resolves.",
+      anyOf: [
+        {
+          enum: ["better-auth", "access"],
+        },
+        {
+          type: "string",
+          pattern: "^\\.{1,2}/\\S+\\.(ts|mts|js|mjs)$",
+        },
+      ],
+    },
+    authEnvironment: {
+      description:
+        "What a white-label's own auth Package reads off `env`, which this repository cannot know: `secrets` are required by the production-secrets check and carried by the deploy's secrets file, and `vars` are written into the app Worker's `vars`. Together they must name exactly the settings the chooser's `AUTH_PACKAGE_V1.required` lists. Only for an auth Package named by path.",
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        secrets: {
+          type: "array",
+          uniqueItems: true,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["name", "why"],
+            properties: {
+              name: {
+                $ref: "#/$defs/envName",
+              },
+              why: {
+                type: "string",
+                minLength: 1,
+              },
+            },
+          },
+        },
+        vars: {
+          type: "object",
+          propertyNames: {
+            $ref: "#/$defs/envName",
+          },
+          additionalProperties: {
+            type: "string",
+          },
+        },
+      },
     },
     brand: {
       description:
         "The brand module this deployment builds, relative to this profile file: a TypeScript module exporting `BRAND_V1: BrandV1` (`core/contracts/brand.ts`). Written as a wrangler `alias` for `#brand`. Absent, the Worker resolves `#brand` to FrockBot's own, `apps/cloudflare/src/brand.ts`.",
       type: "string",
       pattern: "^\\S+\\.ts$",
+    },
+    webClient: {
+      description:
+        "The directory the app Worker's static assets are uploaded from, relative to this profile file: the web client `build-flutter-web.ts` staged for this deployment's own application. Absent, the package's own `dist/web`, which is where FrockBot's build stages FrockBot's client.",
+      type: "string",
+      minLength: 1,
     },
     access: {
       description:
@@ -226,7 +275,7 @@ export const DEPLOYMENT_PROFILE_SCHEMA_V1 = {
     },
     email: {
       description:
-        "Email to and from Bots, both directions on one domain. Each Bot's address is `<bot-slug>.<username>@<domain>`. The domain becomes the app Worker's `EMAIL_DOMAIN` var, which the `email()` handler receives mail for, and the app Worker gains a `send_email` binding named `SEND_EMAIL`, through which each Bot sends from its own address on that domain and no other. Absent, no Bot has an address, every message is refused and nothing is sent. The domain's Email Routing catch-all and its onboarding for Email Sending are set up in Cloudflare by hand: see `scripts/deployment-config/README.md`.",
+        "Email to and from Bots, both directions on one domain. Each Bot's address is `<bot-slug>.<username>@<domain>`. The domain becomes the app Worker's `EMAIL_DOMAIN` var, which the `email()` handler receives mail for, and the app Worker gains a `send_email` binding named `SEND_EMAIL`, through which each Bot sends from its own address on that domain and no other. Absent, no Bot has an address, every message is refused and nothing is sent. The domain's Email Routing catch-all and its onboarding for Email Sending are set up in Cloudflare by hand: see `apps/cloudflare/deployment-config/README.md`.",
       type: "object",
       additionalProperties: false,
       required: ["domain"],
@@ -274,6 +323,27 @@ export const DEPLOYMENT_PROFILE_SCHEMA_V1 = {
         required: ["access"],
       },
     },
+    {
+      if: {
+        properties: {
+          authPackage: {
+            enum: ["better-auth", "access"],
+          },
+        },
+        required: ["authPackage"],
+      },
+      then: {
+        properties: {
+          authEnvironment: false,
+        },
+      },
+      else: {
+        properties: {
+          authEnvironment: true,
+        },
+        required: ["authEnvironment"],
+      },
+    },
   ],
   $defs: {
     worker: {
@@ -307,6 +377,10 @@ export const DEPLOYMENT_PROFILE_SCHEMA_V1 = {
       type: "string",
       pattern: "^[a-z0-9][a-z0-9-]*$",
       maxLength: 63,
+    },
+    envName: {
+      type: "string",
+      pattern: "^[A-Z][A-Z0-9_]*$",
     },
   },
 } as const;

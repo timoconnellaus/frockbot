@@ -21,8 +21,10 @@ export const BRAND_V1: BrandV1 = {
   homepage: "https://frockbot.com",
   builtInModelName: "Frock AI",
   emailSenderName: "FrockBot",
-  // The one canonical icon the marketing site and the app-icon script share.
-  iconPng: "../../../assets/marketing/app-icon/frockbot-icon-64.png",
+  // A copy of the canonical `assets/marketing/app-icon/frockbot-icon-64.png`,
+  // kept inside the package so the published `@frockbot/cloudflare` builds
+  // its default brand too; `brand.test.ts` holds the two to the same bytes.
+  iconPng: "./brand-icon.png",
   pageLogo: FROCKBOT_PAGE_LOGO_V1,
   looks: {
     ink: INK_DOCUMENT_V1,

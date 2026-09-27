@@ -7,12 +7,15 @@
  * step. Nothing wider — the Bot, the Turn and the User Durable Objects know a
  * User id and never how it was established.
  *
- * Two implementations exist: `app/auth/better-auth` (Google, D1, a session
+ * Two implementations ship here: `app/auth/better-auth` (Google, D1, a session
  * cookie) and `app/auth/access` (a Cloudflare Access token, no storage). Each
  * has one chooser beside the bindings — `apps/cloudflare/src/auth-package.ts`
  * and `auth-package.access.ts` — and a deployment's generated wrangler config
  * decides which one `#auth-package` resolves to, the way the Computer host is
- * chosen (ADR 0028).
+ * chosen (ADR 0028). A white-label writes a third in its own repository: a
+ * chooser module exporting `AUTH_PACKAGE_V1` and `AuthPackageEnvironmentV1`,
+ * which its profile names by path (ADR 0038 §3). Everything in this file is
+ * that Package's published contract.
  */
 
 /** Who a request is, once sign-in has identified them. */
@@ -158,8 +161,25 @@ export interface AuthPackageNativeSecretV1<
  */
 export type AuthPackageAdmissionV1 = "authority" | "package";
 
-/** Which implementation of sign-in a deployment built. */
-export type AuthPackageIdV1 = "better-auth" | "access";
+/** The two implementations of sign-in this repository ships. */
+export const BUILT_IN_AUTH_PACKAGE_IDS_V1 = ["better-auth", "access"] as const;
+export type BuiltInAuthPackageIdV1 =
+  (typeof BUILT_IN_AUTH_PACKAGE_IDS_V1)[number];
+
+export function isBuiltInAuthPackageIdV1(
+  id: string,
+): id is BuiltInAuthPackageIdV1 {
+  return (BUILT_IN_AUTH_PACKAGE_IDS_V1 as readonly string[]).includes(id);
+}
+
+/**
+ * Which implementation of sign-in a deployment built: one of the two this
+ * repository ships, or the name a white-label's own Package gives itself
+ * (ADR 0038 §3). Open because an external Package names itself; the two
+ * built-in names are reserved, and the deployment-config generator refuses an
+ * external chooser that claims one.
+ */
+export type AuthPackageIdV1 = BuiltInAuthPackageIdV1 | (string & {});
 
 /** One implementation of sign-in, as a deployment's choosing file names it. */
 export interface AuthPackageBuildV1<EnvironmentV1> {

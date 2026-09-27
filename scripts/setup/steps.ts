@@ -11,14 +11,16 @@ import { join } from "node:path";
 import {
   generateProfileConfigsV1,
   writeGeneratedConfigsV1,
-} from "../deployment-config/generate.ts";
+} from "../../apps/cloudflare/deployment-config/generate.ts";
 import {
   deploymentRegionV1,
-  PROFILE_DIRECTORY_V1,
-  REPO_ROOT_V1,
   validateProfileV1,
   type DeploymentProfileV1,
-} from "../deployment-config/profile.ts";
+} from "../../apps/cloudflare/deployment-config/profile.ts";
+import {
+  PROFILE_DIRECTORY_V1,
+  REPO_ROOT_V1,
+} from "../deployment-config/repository.ts";
 import {
   accessApplicationsV1,
   accessDashboardStepsV1,

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { existsSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { decodeBrandV1 } from "@frockbot/core/contracts";
 import {
@@ -23,7 +23,16 @@ test("the tracked brand is FrockBot's, and valid", () => {
 });
 
 test("its icon is the one the site already served", () => {
+  // Inside the package, so a consumer's install has it; the same bytes as the
+  // canonical marketing icon, so the hosted document's icon is unchanged.
   const icon = fileURLToPath(new URL(BRAND_V1.iconPng, import.meta.url));
-  expect(icon).toEndWith("assets/marketing/app-icon/frockbot-icon-64.png");
-  expect(existsSync(icon)).toBe(true);
+  const canonical = fileURLToPath(
+    new URL(
+      "../../../assets/marketing/app-icon/frockbot-icon-64.png",
+      import.meta.url,
+    ),
+  );
+  expect(new Uint8Array(readFileSync(icon))).toEqual(
+    new Uint8Array(readFileSync(canonical)),
+  );
 });

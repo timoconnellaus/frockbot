@@ -201,10 +201,46 @@ deployment unchanged in behaviour.
 3. **External auth Packages.** §3: `authPackage` accepts a chooser path, the
    generator aliases it, and the profile names the chooser's required
    secrets. Rides with step 5, whose fixture is what proves it.
+
+   **Built.** `AuthPackageIdV1` is open: `BuiltInAuthPackageIdV1` is the two
+   names this repository ships, reserved, and any other string is an external
+   Package's. The profile's `authEnvironment` names where each setting the
+   chooser's `required` lists comes from — `secrets` the deploy carries and the
+   production-secrets check requires, `vars` the config carries — and the
+   generator imports the chooser and refuses a profile that names more or
+   fewer, or a chooser that calls itself `better-auth` or `access`. The
+   manifest in `production-secrets.ts` takes the Package it checks as an
+   argument, and `frockbot-deployment-config secrets <profile>` hands it the
+   profile's, since the manifest cannot import a chooser it was not built with.
+   An external Package gets `AUTH_DB` only when its profile names a
+   `d1DatabaseId`. The chooser needs nothing but `@frockbot/core/contracts`: the
+   fixture's stub typechecks against the published package with stock
+   TypeScript and no shim.
+
 4. **Client package.** §4. Ships as a full APK.
 5. **Publishing and the consumer path.** §5: manifests, the release job, the
    generator's move, the build scripts' arguments and the fixture gate. After
    step 2, which it wires.
+
+   **Built.** `scripts/npm-publish.ts` is the one list of published workspaces,
+   read by `publish-npm`, `bootstrap-npm-trust.ts` and the fixture, and the one
+   manifest rewrite. Each package's `files` publishes its sources without tests;
+   `@frockbot/cloudflare` adds the tracked `wrangler.jsonc`, `migrations/`, the
+   generator and the two build scripts, and its default brand's icon now lives
+   in `src/brand-icon.png`, a copy of the marketing icon held to the same bytes,
+   because the package cannot reach `assets/`. The generator and
+   `profile.schema.json` are `apps/cloudflare/deployment-config/`, reading the
+   app template from the package and the other Workers' from beside it, which
+   only a FrockBot checkout has: a white-label deploys the Computer host and the
+   build service from a FrockBot checkout of the same release, whose profile may
+   pull the published images. A profile's
+   `webClient` names the directory its own staged client is uploaded from.
+   `build-flutter-web.ts` takes `--app` and `--dist` and `build-artifact.ts`
+   takes `--brand` and `--dist`; the client brand itself is step 4's. The
+   fixture is `scripts/white-label-fixture/`, run by
+   `bun run build:white-label` in the build category and `main.yml`'s
+   `Validate` job, and it installs the tarballs with npm, not Bun.
+
 6. **By hand, by Tim.** `bun run bootstrap:npm-trust` for the newly published
    names, which needs an interactive npm session; then the white-label
    repository itself, from the fixture.

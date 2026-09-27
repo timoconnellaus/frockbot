@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { REPO_ROOT_V1 } from "./deployment-config/profile.ts";
-import { validateProfileV1 } from "./deployment-config/profile.ts";
-import { PUBLISHED_IMAGE_REGISTRY_V1 as GENERATOR_REGISTRY_V1 } from "./deployment-config/generate.ts";
+import { REPO_ROOT_V1 } from "./deployment-config/repository.ts";
+import { validateProfileV1 } from "../apps/cloudflare/deployment-config/profile.ts";
+import { PUBLISHED_IMAGE_REGISTRY_V1 as GENERATOR_REGISTRY_V1 } from "../apps/cloudflare/deployment-config/generate.ts";
 import {
   accessApplicationsV1,
   accessBuildSecretNamesV1,

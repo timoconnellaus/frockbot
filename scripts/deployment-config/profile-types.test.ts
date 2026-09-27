@@ -1,4 +1,4 @@
-import type { DeploymentProfileV1 } from "./profile-schema.generated.ts";
+import type { DeploymentProfileV1 } from "../../apps/cloudflare/deployment-config/profile.ts";
 
 const ACCOUNT_ID = "0123456789abcdef0123456789abcdef";
 
@@ -47,4 +47,24 @@ export const accessProfileWithoutAccess: DeploymentProfileV1 = {
   accountId: ACCOUNT_ID,
   prefix: "simple",
   authPackage: "access",
+};
+
+export const externalProfile: DeploymentProfileV1 = {
+  schemaVersion: 1,
+  name: "wallet-pal",
+  accountId: ACCOUNT_ID,
+  prefix: "wallet-pal",
+  authPackage: "./auth/chooser.ts",
+  authEnvironment: {
+    secrets: [{ name: "SIGN_IN_SECRET", why: "Signs every session." }],
+  },
+};
+
+// @ts-expect-error an auth Package named by path says where its settings come from
+export const externalProfileWithoutEnvironment: DeploymentProfileV1 = {
+  schemaVersion: 1,
+  name: "wallet-pal",
+  accountId: ACCOUNT_ID,
+  prefix: "wallet-pal",
+  authPackage: "./auth/chooser.ts",
 };

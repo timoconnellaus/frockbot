@@ -94,7 +94,7 @@ jobs:
   validate:
     name: Validate
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Check out repository
@@ -128,6 +128,13 @@ jobs:
 
       - name: Build the admin portal
         run: bun run build:admin-portal
+
+      # ADR 0038's gate: every published workspace, packed and installed by
+      # npm into a stub white-label that names its own brand and auth Package,
+      # then `wrangler deploy --dry-run` from its own generated config. Needs
+      # no Flutter, so it rides this job rather than the integration one.
+      - name: Build a white-label from the packed packages
+        run: bun run build:white-label
 
   # The Flutter client's own analysis and tests. `apps/native` is the phone
   # app, the macOS app and the web client at once, and neither `bun test` nor

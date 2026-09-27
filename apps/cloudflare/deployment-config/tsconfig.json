@@ -8,14 +8,18 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "allowImportingTsExtensions": true,
-    "types": ["bun"]
+    "lib": ["ES2023", "WebWorker"],
+    "types": ["bun", "@cloudflare/workers-types"]
   },
   "include": [
+    "./cli.ts",
     "./generate.ts",
     "./jsonc.ts",
     "./profile.ts",
     "./profile-schema.generated.ts",
-    "./profile-types.test.ts",
-    "../deployment-config.ts"
+    "../../../scripts/deployment-config.ts",
+    "../../../scripts/deployment-config/repository.ts",
+    "../../../scripts/deployment-config/profile-types.test.ts",
+    "../../../scripts/deployment-config/fixtures/white-label/auth-package.ts"
   ]
 }
