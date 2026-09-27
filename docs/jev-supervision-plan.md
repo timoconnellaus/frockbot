@@ -432,7 +432,9 @@ set becomes a compact prompt section on the next conversational Turn.
 
 The supervisor has no permissive failure mode. Each Jev call is retried once;
 a second failure fails the Turn before anything it would have judged runs, and
-the person is told the reply failed. `JEV_API_KEY` is a required production
+the person is told the reply failed. The one exception is the debug-only
+outcome judgment: one attempt of two seconds (`JEV_OUTCOME_BUDGET_V1`), left
+out when it fails. `JEV_API_KEY` is a required production
 secret; without it no Turn runs. Test harnesses answer through a
 supervision-only Jev fake (`app/supervision/testing.ts`).
 
@@ -591,8 +593,9 @@ _Done, enforced._
 
 ### 6. Mentor and continuation
 
-- Built: loop health and the per-send claim check (see Loop health and
-  claims); the thinking specialist is the Mentor a stuck Turn is offered.
+- Built: loop health, the per-send claim check and the debug-only outcome
+  judgment (see Loop health and claims); the thinking specialist is the Mentor
+  a stuck Turn is offered.
 - Add bounded continuation candidates and final-step classification.
 - Inject open continuation state into the next Turn.
 
