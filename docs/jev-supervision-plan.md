@@ -397,6 +397,14 @@ thing or say plainly that it is not done. Such a send does not end the Turn,
 even as a finish, and the check runs at most once per Turn, so a Turn is
 corrected once and never held in a loop.
 
+When the Turn read pages (`web_fetch`, `web_search`, `computer_browser`, named
+by the tool that ran rather than `call_dynamic_tool`), the same call also asks
+whether the message says a page said something that none of the latest three
+pages says. `unsupported` at 0.7 or above withholds it with reason
+`unsupported_fact`, and the model is told to say only what the pages say or
+that it could not find it. It shares the claim check's once-per-Turn limit and
+does not end the Turn.
+
 A weighted failure score with decay was not built. Loop signals and the
 per-send claim check cover the cases it was for.
 
@@ -561,9 +569,11 @@ _Done, enforced._
 - _Done._ Faithful relay: when a subagent's work is in the Turn — a blocking
   `Task` result, or the completion a Turn was opened for — each send is first
   asked whether the person wanted the words themselves and whether it gives
-  them as written. A condensed or reworded version is withheld with feedback,
-  and the Turn goes on to send the work; a change the person asked for
-  ("make it punchier") passes, and a Turn withholds a rewrite at most once.
+  them as written. A condensed or reworded version, or one that describes the
+  work instead of giving it, is withheld with feedback, and the Turn goes on to
+  send the work; a change the person asked for ("make it punchier") passes, a
+  send after the work was already given whole this Turn is not asked, and a
+  Turn withholds a rewrite at most once.
 - _Done._ `task_ask`: a subagent hands its parent one question and ends its
   Turn; the parent's notice says to answer with `task_resume`. When a Turn
   opens on such a question, Jev judges whether what the person already said

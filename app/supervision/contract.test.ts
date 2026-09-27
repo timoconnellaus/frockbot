@@ -378,6 +378,76 @@ describe("the Jev adapter's relay check", () => {
     ]);
   });
 
+  test("lets a word about work already given whole go by", async () => {
+    const seen: unknown[] = [];
+    const decision = await jevSupervisor(
+      jevFetch(
+        (answers) =>
+          "relay" in answers
+            ? {
+                wantsTheWork: { type: "noul", noul: 0.9 },
+                relay: choice(
+                  [
+                    "relays",
+                    "edits_as_asked",
+                    "unrelated",
+                    "describes",
+                    "condenses",
+                    "rewrites",
+                  ],
+                  "describes",
+                ),
+              }
+            : answers,
+        seen,
+      ),
+    ).reviewSend({
+      ...withWork,
+      shown: [`Here it is:\n\n${toast}`],
+      message: "It leans on the goat story. Want it shorter?",
+    });
+    expect(decision.send).toBe("release");
+    expect(
+      seen.map((body) =>
+        Object.keys((body as { questions: object }).questions),
+      ),
+    ).not.toContainEqual(["wantsTheWork", "relay"]);
+  });
+
+  test("still judges a word about earlier work when only the latest was given whole", async () => {
+    const email = "Hi Sam, thanks for today. Could we meet Tuesday at 10?";
+    const decision = await jevSupervisor(
+      jevFetch((answers) =>
+        "relay" in answers
+          ? {
+              wantsTheWork: { type: "noul", noul: 0.9 },
+              relay: choice(
+                [
+                  "relays",
+                  "edits_as_asked",
+                  "unrelated",
+                  "describes",
+                  "condenses",
+                  "rewrites",
+                ],
+                "describes",
+              ),
+            }
+          : answers,
+      ),
+    ).reviewSend({
+      ...withWork,
+      objective: "Write me an email to Sam and a toast for Mia's wedding.",
+      work: [email, toast],
+      shown: [`Here it is:\n\n${toast}`],
+      message: "The email thanks Sam and proposes Tuesday.",
+    });
+    expect(decision).toMatchObject({
+      send: "withhold",
+      reason: "paraphrased_work",
+    });
+  });
+
   test("asks nothing about relay when no subagent worked this Turn", async () => {
     const seen: unknown[] = [];
     await jevSupervisor(jevFetch(undefined, seen)).reviewSend(sendEvidence);
@@ -404,6 +474,58 @@ describe("the Jev adapter's claim check", () => {
       },
     ],
   };
+
+  test("checks what a message says pages said, only when the Turn read some", async () => {
+    const seen: unknown[] = [];
+    const read = {
+      ...sendEvidence,
+      checkClaim: true,
+      priorResults: [
+        {
+          callId: "tool:1:1:0",
+          tool: "web_fetch",
+          content: "Annual fee: A$715.",
+          isError: false,
+        },
+      ],
+    };
+    const decision = await jevSupervisor(
+      jevFetch(
+        (answers) =>
+          "facts" in answers
+            ? {
+                claim: claim("no_claim"),
+                facts: choice(
+                  ["no_page_facts", "supported", "unsupported"],
+                  "unsupported",
+                ),
+              }
+            : answers,
+        seen,
+      ),
+    ).reviewSend({ ...read, message: "The site says it is A$590." });
+    expect(decision).toMatchObject({
+      send: "withhold",
+      reason: "unsupported_fact",
+    });
+    const asked = seen.map((body) =>
+      Object.keys((body as { questions: object }).questions).join(","),
+    );
+    expect(asked).toContain("claim,facts");
+    // No page read: facts are not asked.
+    const plain: unknown[] = [];
+    await jevSupervisor(jevFetch(undefined, plain)).reviewSend(failed);
+    expect(
+      plain.map((body) =>
+        Object.keys((body as { questions: object }).questions).join(","),
+      ),
+    ).toContain("claim");
+    expect(
+      plain.map((body) =>
+        Object.keys((body as { questions: object }).questions).join(","),
+      ),
+    ).not.toContain("claim,facts");
+  });
 
   test("withholds a claim the results do not show, whatever the vetoes say", async () => {
     const decision = await jevSupervisor(

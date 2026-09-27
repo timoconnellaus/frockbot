@@ -266,19 +266,25 @@ function shownThisTurn(
   });
 }
 
+/** The Turn's results, each named by the tool that ran, not its wrapper. */
 function priorResults(events: readonly SessionEvent[], turn: number) {
-  return turnEvents(events, turn).flatMap((event) =>
-    event.type === "tool/result"
+  const inputs = new Map<string, unknown>();
+  return turnEvents(events, turn).flatMap((event) => {
+    if (event.type === "tool/call") inputs.set(event.occurrenceId, event.input);
+    return event.type === "tool/result"
       ? [
           {
             callId: event.occurrenceId,
-            tool: event.name,
+            tool: resolveDynamicToolNameV1(
+              event.name,
+              inputs.get(event.occurrenceId),
+            ),
             content: event.content,
             isError: event.isError,
           },
         ]
-      : [],
-  );
+      : [];
+  });
 }
 
 /** The Turn's settled calls, oldest first, each with what it was given. */
@@ -427,14 +433,15 @@ export function withheldFinishV1(
 function withheldForV1(
   events: readonly SessionEvent[],
   turn: number,
-  reason: "paraphrased_work" | "unsupported_claim",
+  ...reasons: ("paraphrased_work" | "unsupported_claim" | "unsupported_fact")[]
 ): boolean {
   return events.some(
     (event) =>
       event.type === "supervision/send" &&
       event.turn === turn &&
       event.decision.send === "withhold" &&
-      event.decision.reason === reason,
+      event.decision.reason !== undefined &&
+      (reasons as string[]).includes(event.decision.reason),
   );
 }
 
@@ -478,10 +485,17 @@ function clip(text: string, max = 280): string {
 
 function withheldResult(
   reason:
-    "off_task" | "redundant_text" | "paraphrased_work" | "unsupported_claim",
+    | "off_task"
+    | "redundant_text"
+    | "paraphrased_work"
+    | "unsupported_claim"
+    | "unsupported_fact",
   finish: boolean,
   addressed: boolean,
 ): string {
+  if (reason === "unsupported_fact") {
+    return `${SUPERVISION_WITHHELD_SEND_PREFIX_V1} because it says a page said something that the pages this Turn read do not say. Say only what they say, or say plainly that you could not find it.`;
+  }
   if (reason === "unsupported_claim") {
     return `${SUPERVISION_WITHHELD_SEND_PREFIX_V1} because it says something was done that this Turn's results do not show done. Do it now, or tell the person plainly that it is not done and why.`;
   }
@@ -801,6 +815,7 @@ export function createSupervisionRuntimeFeatureV1(
                       events,
                       at.turn,
                       "unsupported_claim",
+                      "unsupported_fact",
                     ),
                   },
                   context.signal,
@@ -831,7 +846,8 @@ export function createSupervisionRuntimeFeatureV1(
             content: withheldResult(
               verdict.reason === "redundant_text" ||
                 verdict.reason === "paraphrased_work" ||
-                verdict.reason === "unsupported_claim"
+                verdict.reason === "unsupported_claim" ||
+                verdict.reason === "unsupported_fact"
                 ? verdict.reason
                 : "off_task",
               send.finish,

@@ -23,6 +23,7 @@ import { shellAgentFeature } from "../shell/agent.js";
 import { createReplyToRequestToolV1 } from "../shell/reply-to-caller.js";
 import type { FoundationFeature } from "../runtime.js";
 import { pendingBotInputPreambleV1 } from "../routines/inbox.js";
+import { claimEvidenceV1 } from "./claim-check.js";
 import {
   ACKNOWLEDGE_NOTE_V1,
   createSupervisionRuntimeFeatureV1,
@@ -975,4 +976,126 @@ test("a send claiming undone work is withheld once, and the Turn goes on to say 
     type: "turn/end",
     outcome: "completed",
   });
+});
+
+test("a send saying a page said what it did not is withheld once, even when web_fetch ran behind call_dynamic_tool", async () => {
+  const reviewed: SendReviewEvidenceV1[] = [];
+  const events = await run(
+    scripted([
+      [
+        {
+          id: "fetch",
+          name: "call_dynamic_tool",
+          input: {
+            namespace: "frockbot",
+            toolName: "web_fetch",
+            arguments: { url: "https://example.com/fees" },
+          },
+        },
+      ],
+      [
+        {
+          id: "a",
+          name: "send_to_user",
+          input: text("The site says the fee is A$590.", "finish"),
+        },
+      ],
+      [
+        {
+          id: "b",
+          name: "send_to_user",
+          input: text("I couldn't find the fee on that page.", "finish"),
+        },
+      ],
+    ]),
+    createFakeTurnSupervisorV1({
+      reviewSend: async (evidence) => {
+        reviewed.push(evidence);
+        const pages = claimEvidenceV1(evidence).pagesThisTurn;
+        return evidence.checkClaim && pages.length > 0
+          ? { send: "withhold", reason: "unsupported_fact", judgments: [] }
+          : { send: "release", judgments: [] };
+      },
+    }),
+  );
+  // The wrapper's result is named by the tool that ran, so it is a page.
+  expect(claimEvidenceV1(reviewed[0]!).pagesThisTurn).toEqual([
+    {
+      tool: "web_fetch",
+      text: expect.stringContaining("Example result"),
+      clipped: false,
+    },
+  ]);
+  // The same limit as the claim check: corrected once, never held in a loop.
+  expect(reviewed.map((evidence) => evidence.checkClaim)).toEqual([
+    true,
+    false,
+  ]);
+  expect(sent(events)).toEqual(["I couldn't find the fee on that page."]);
+  const withheld = events.find(
+    (event) =>
+      event.type === "tool/result" &&
+      event.name === "send_to_user" &&
+      event.content.startsWith(SUPERVISION_WITHHELD_SEND_PREFIX_V1),
+  );
+  expect(withheld).toMatchObject({
+    content: expect.stringContaining("Say only what they say"),
+  });
+  expect(
+    events.filter((event) => event.type === "supervision/send"),
+  ).toMatchObject([
+    { decision: { send: "withhold", reason: "unsupported_fact" } },
+    { decision: { send: "release" } },
+  ]);
+  // Not ending the Turn: the second send is what completes it.
+  expect(events.at(-1)).toMatchObject({
+    type: "turn/end",
+    outcome: "completed",
+  });
+});
+
+test("a send withheld for an undone claim turns the facts check off for the rest of the Turn", async () => {
+  const reviewed: SendReviewEvidenceV1[] = [];
+  await run(
+    scripted([
+      [
+        {
+          id: "fetch",
+          name: "call_dynamic_tool",
+          input: {
+            namespace: "frockbot",
+            toolName: "web_fetch",
+            arguments: { url: "https://example.com/fees" },
+          },
+        },
+      ],
+      [
+        {
+          id: "a",
+          name: "send_to_user",
+          input: text("I've emailed Dana the fee.", "finish"),
+        },
+      ],
+      [
+        {
+          id: "b",
+          name: "send_to_user",
+          input: text("The site says the fee is A$590.", "finish"),
+        },
+      ],
+    ]),
+    createFakeTurnSupervisorV1({
+      reviewSend: async (evidence) => {
+        reviewed.push(evidence);
+        return evidence.checkClaim
+          ? { send: "withhold", reason: "unsupported_claim", judgments: [] }
+          : { send: "release", judgments: [] };
+      },
+    }),
+  );
+  expect(reviewed.map((evidence) => evidence.checkClaim)).toEqual([
+    true,
+    false,
+  ]);
+  expect(claimEvidenceV1(reviewed[1]!).pagesThisTurn).toHaveLength(1);
 });

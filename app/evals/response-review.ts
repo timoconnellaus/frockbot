@@ -27,6 +27,7 @@ import type {
 import {
   claimStateV1,
   claimUnsupportedV1,
+  factsUnsupportedV1,
   type ClaimJudgmentEvidenceV1,
   type ClaimReviewV1,
 } from "../supervision/claim-check.js";
@@ -179,13 +180,15 @@ export function gradeClaimV1(
   fixture: ClaimFixtureV1,
   review: ClaimReviewV1,
 ): ResponseReviewCheckV1[] {
-  const withheld = claimUnsupportedV1(review.answers);
+  const withheld =
+    claimUnsupportedV1(review.answers) || factsUnsupportedV1(review.answers);
   const claim = review.answers.claim;
+  const facts = review.answers.facts;
   return [
     {
       question: "claim",
       expected: fixture.expected.send,
-      actual: `${withheld ? "withhold" : "release"} (claim ${claim.choice} p ${round(claim.probabilities[claim.choice] ?? 0)})`,
+      actual: `${withheld ? "withhold" : "release"} (claim ${claim.choice} p ${round(claim.probabilities[claim.choice] ?? 0)}${facts ? `, facts ${facts.choice} p ${round(facts.probabilities[facts.choice] ?? 0)}` : ""})`,
       passed: (withheld ? "withhold" : "release") === fixture.expected.send,
     },
   ];

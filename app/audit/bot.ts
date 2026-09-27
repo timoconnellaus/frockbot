@@ -145,7 +145,9 @@ function supervisionRefusalsV1(
             ? "rewrote the work"
             : event.decision.reason === "unsupported_claim"
               ? "claimed undone work"
-              : "off task",
+              : event.decision.reason === "unsupported_fact"
+                ? "said a page said what it did not"
+                : "off task",
       );
     }
     if (
