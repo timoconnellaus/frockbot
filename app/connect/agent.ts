@@ -36,6 +36,8 @@ import {
   CONNECT_STALE_CONTRACT_MESSAGE_V1,
 } from "./account-catalog.js";
 import { connectResultV1 } from "./result.js";
+import { registerComputerEgressAccountV1 } from "@frockbot/computer/egress";
+import { sendAsConnectedAccountV1 } from "./egress.js";
 import { connectSafeMetadataV1 } from "./user.js";
 
 /** Longest argument bag sent to the provider. */
@@ -129,6 +131,19 @@ export function createConnectFeature(
         useInstructions: `Tools for the User's ${labelOf(config, metadata)} account. Find a tool with get_dynamic_tools({ "namespace": "${metadata.namespace}", "pattern": "<words in its name>" }) and read its schema with get_dynamic_tools({ "namespace": "${metadata.namespace}", "toolName": "<tool>" }) before calling it. Each call acts on the real account, so confirm anything that sends, posts or deletes.`,
         resolveTool: (toolName) =>
           resolveConnectTool(config, client, metadata, toolName),
+      }),
+      // The same account, for a CLI in the Computer's terminal: requests to
+      // this app's API go out through the provider as this account.
+      registerComputerEgressAccountV1(runtime.tools, {
+        toolkit: metadata.toolkitSlug,
+        label: labelOf(config, metadata),
+        ...(config.permitConnection ? { permit: config.permitConnection } : {}),
+        send: (request) =>
+          sendAsConnectedAccountV1(
+            client,
+            metadata.connectedAccountId,
+            request,
+          ),
       }),
     ];
     return cleanups;

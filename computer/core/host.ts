@@ -918,6 +918,12 @@ export interface ComputerHostCapabilitiesV1 {
    * the easy one.
    */
   refuseGuiCommand?(command: string): string | undefined;
+  /**
+   * The shell lines that point one command's clients at the host's
+   * connected-account proxy under `token`. Absent, the host has no such
+   * proxy and a command reaches no connected account.
+   */
+  egressShellPrelude?(token: string): string;
   /** The desktop's shape, when this host has one. Descriptive; see above. */
   desktop?: { slots: number; width: number; height: number };
   /**

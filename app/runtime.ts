@@ -568,6 +568,7 @@ export function createFoundationHostedRuntimePackages(
           ? { demonstrations: host.computerDemonstrations }
           : {}),
         ...(host.computerSecrets ? { secrets: host.computerSecrets } : {}),
+        ...(host.computerEgress ? { egress: host.computerEgress } : {}),
         ...(host.computerPageJudge
           ? { judgePage: host.computerPageJudge }
           : {}),
