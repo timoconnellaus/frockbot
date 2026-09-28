@@ -60,6 +60,11 @@ import {
   type ClientRunStopReceiptV1,
 } from "@frockbot/app/shell/run-protocol";
 import {
+  decodeWorkLogQueryV1,
+  type WorkLogQueryV1,
+} from "@frockbot/app/shell/work-log";
+import type { WorkLogPage } from "@frockbot/core/protocol-schemas";
+import {
   decodeBotNotificationDirectoryViewV1,
   decodeBotUnreadDirectoryViewV1,
   decodeBotUnreadReceiptV1,
@@ -504,6 +509,7 @@ interface BotStateRpc extends BotConfigurationBinding {
     command: BotTurnCommandRequestV1<OwnedBotTurnCommand>,
   ): Promise<{ schemaVersion: 1; runId: string }>;
   listRuns(query: ClientRunListQueryV1): Promise<ClientRunListV1>;
+  workLog(query: WorkLogQueryV1): Promise<WorkLogPage>;
   debugSnapshot(query: BotDebugQueryV1): Promise<unknown>;
   lookupRun(query: ClientRunLookupQueryV1): Promise<ClientRunLookupV1>;
   runQuestions(query: ClientRunLookupQueryV1): Promise<ClientRunQuestionsV1>;
@@ -691,6 +697,7 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
     admitRun: (command) => rpc.admitRun(botTurnRpcV1(command)),
     listRuns: (query) =>
       rpc.listRuns({ schemaVersion: 1, userId, botId, query }),
+    workLog: (query) => rpc.workLog({ schemaVersion: 1, userId, botId, query }),
     debugSnapshot: (query) =>
       rpc.debugSnapshot({ schemaVersion: 1, userId, botId, query }),
     lookupRun: (query) =>
@@ -1294,6 +1301,18 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
       this.ctx.props.userId,
       request.botId as string,
     ).listRuns(request.query as ClientRunListQueryV1);
+  }
+
+  async workLog(input: unknown): Promise<WorkLogPage> {
+    const request = decodeRpcEnvelopeV1(input, {
+      botId: rpcBotId,
+      query: rpcDecoded(decodeWorkLogQueryV1),
+    });
+    return botStateStub(
+      this.env,
+      this.ctx.props.userId,
+      request.botId as string,
+    ).workLog(request.query as WorkLogQueryV1);
   }
 
   async lookupRun(input: unknown): Promise<ClientRunLookupV1> {

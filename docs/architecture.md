@@ -598,6 +598,15 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
 - `AuditPage` — `lib/audit/page.dart`: Activity, each Turn's effects and each
   use of the microphone by a Plugin's page, narrowed by a Bot picker and four
   filters, with a row's Turn opening on the Work view
+- `WorkLogPage` — `lib/work_log/page.dart`: one Bot's Work log, opened from
+  the Bot page. Every Turn, step by step — model requests, Jev checks, tool
+  calls, memory and skills, plugin effects, Computer operations, retries,
+  compaction and sends — with kind filters, search, and an inspector beside
+  the log at wide widths and a page of its own on the phone. It reads
+  `GET /api/bots/{botId}/work-log?before=<run cursor>`, which
+  `app/shell/work-log.ts` projects from each run's bounded event projections
+  (never a full prompt) into `WorkLogPage`, eight Turns a page. The server
+  writes every row's words; the client draws them.
 - `WhatsNewPage` — `lib/whats_new/page.dart`: the curated list of what
   production shipped, from `GET /api/whats-new`. Reached from the megaphone
   beside the profile in the sidebar, which wears an unread mark; it never

@@ -29,6 +29,7 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
       return { schemaVersion: 1 as const, runId: turn.runId };
     },
     listRuns: ({ botId, query }) => state.listRuns(botId, query),
+    workLog: async () => ({ schemaVersion: 1 as const, turns: [] }),
     lookupRun: ({ botId, query }) => state.lookupRun(botId, query),
     runQuestions: ({ botId, query }) => state.runQuestions(botId, query),
     fenceRunAdmission: ({ botId, query }) =>
@@ -707,6 +708,51 @@ describe("user application Bot seam", () => {
       );
       expect(response.status).toBe(400);
     }
+  });
+
+  test("reads the Work log a page at a time, and refuses a bad cursor", async () => {
+    const queries: unknown[] = [];
+    const env: UserApplicationEnv = {
+      BOT_STATE: {
+        ...rpcBindingFor({} as BotStateBinding),
+        workLog: async ({ botId, query }) => {
+          queries.push({ botId, query });
+          return { schemaVersion: 1 as const, turns: [] };
+        },
+      },
+      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+    };
+    const fetchUserApplication = createUserApplication();
+    const before = "run-index:2026-09-28T09:14:18.000Z:run-42";
+    const read = await fetchUserApplication(
+      new Request(
+        `https://frockbot.test/api/bots/primary/work-log?before=${encodeURIComponent(before)}`,
+      ),
+      env,
+    );
+    expect(read.status).toBe(200);
+    expect((await read.json()) as unknown).toEqual({
+      schemaVersion: 1,
+      turns: [],
+    });
+    expect(queries).toEqual([
+      { botId: "primary", query: { schemaVersion: 1, before } },
+    ]);
+    for (const suffix of ["?before=nope", "?before=a&before=b", "?limit=3"]) {
+      const refused = await fetchUserApplication(
+        new Request(`https://frockbot.test/api/bots/primary/work-log${suffix}`),
+        env,
+      );
+      expect(refused.status).toBe(400);
+    }
+    const posted = await fetchUserApplication(
+      new Request("https://frockbot.test/api/bots/primary/work-log", {
+        method: "POST",
+      }),
+      env,
+    );
+    expect(posted.status).toBe(405);
+    expect(queries).toHaveLength(1);
   });
 
   test("delegates an exact Stop command to the Bot owner", async () => {

@@ -324,6 +324,7 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
       return { schemaVersion: 1 as const, runId: turn.runId };
     },
     listRuns: ({ botId, query }) => state.listRuns(botId, query),
+    workLog: async () => ({ schemaVersion: 1 as const, turns: [] }),
     lookupRun: ({ botId, query }) => state.lookupRun(botId, query),
     runQuestions: ({ botId, query }) => state.runQuestions(botId, query),
     fenceRunAdmission: ({ botId, query }) =>

@@ -79,6 +79,7 @@ import '../voice/route.dart';
 import '../voice/protocol.dart' show voiceUnavailableMessage;
 import '../voice/socket.dart';
 import '../voice/speech_classifier.dart';
+import '../work_log/page.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import 'bot_actions.dart';
 import 'bot_page.dart';
@@ -1980,6 +1981,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         inbox: routineInbox,
         onOpenRun: (run) => _openRoutineRun(botId, run),
         onOpenRoutines: () => _openPanel('routines', push: true),
+        onOpenWorkLog: () => _push(
+          WorkLogPage(api: widget.api, botId: botId, botName: _name(bot)),
+        ),
         panels: panelCanvas,
         panelDoors: _panelDoors(),
       ),

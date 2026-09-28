@@ -231,6 +231,7 @@ import {
   type ClientRunLookupQueryV1,
   type ClientRunStopCommandV1,
 } from "@frockbot/app/shell/run-protocol";
+import { decodeWorkLogQueryV1 } from "@frockbot/app/shell/work-log";
 import {
   decodeBotUnreadCommandV1,
   type BotUnreadCommandV1,
@@ -3804,6 +3805,22 @@ export class BotState
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
     return shell.listRuns(request.query as ClientRunListQueryV1);
+  }
+
+  /** The Work log: a page of this Bot's Turns, every step of each. */
+  async workLog(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      query: rpcDecoded(decodeWorkLogQueryV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return shell.workLog(request.query);
   }
 
   /**

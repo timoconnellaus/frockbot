@@ -170,6 +170,13 @@ declare const validators: {
   isAuditPage(value: unknown): value is ProtocolTypes["AuditPage"];
   isActivityRow(value: unknown): value is ProtocolTypes["ActivityRow"];
   isActivityPage(value: unknown): value is ProtocolTypes["ActivityPage"];
+  isWorkLogTokens(value: unknown): value is ProtocolTypes["WorkLogTokens"];
+  isWorkLogField(value: unknown): value is ProtocolTypes["WorkLogField"];
+  isWorkLogSection(value: unknown): value is ProtocolTypes["WorkLogSection"];
+  isWorkLogEntry(value: unknown): value is ProtocolTypes["WorkLogEntry"];
+  isWorkLogTotals(value: unknown): value is ProtocolTypes["WorkLogTotals"];
+  isWorkLogTurn(value: unknown): value is ProtocolTypes["WorkLogTurn"];
+  isWorkLogPage(value: unknown): value is ProtocolTypes["WorkLogPage"];
   isSetupHistory(value: unknown): value is ProtocolTypes["SetupHistory"];
   isMessageCursor(value: unknown): value is ProtocolTypes["MessageCursor"];
   isGroupId(value: unknown): value is ProtocolTypes["GroupId"];

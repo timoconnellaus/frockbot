@@ -31,6 +31,8 @@ import {
 import type { BotNotificationIntent } from "./backend-contracts.js";
 import { ShellBotStateV1, type ShellBotBackendHost } from "./backend-state.js";
 import { debugSnapshot } from "./debug.js";
+import { readWorkLogV1 } from "./work-log.js";
+import type { WorkLogPage } from "@frockbot/core/protocol-schemas";
 import { type BotDebugSnapshotV1 } from "./debug-protocol.js";
 import { validateIdentity } from "./identity.js";
 import {
@@ -174,6 +176,11 @@ export class ShellBotBackendContribution {
 
   async listRunEventPage(cursor?: string): ReturnType<typeof listRunEventPage> {
     return listRunEventPage(this.state, cursor);
+  }
+
+  /** @see readWorkLogV1 in `work-log.ts`. */
+  async workLog(input: unknown): Promise<WorkLogPage> {
+    return readWorkLogV1(this.state, input);
   }
 
   /** @see debugSnapshot in `debug.ts`. */

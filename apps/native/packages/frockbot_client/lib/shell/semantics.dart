@@ -297,6 +297,9 @@ abstract final class SettingsIds {
   /// The row under the recent runs, which opens the whole Routines surface.
   static const botPageRoutinesAll = 'bot-page-routines-all';
 
+  /// The row that opens the Bot's Work log.
+  static const botPageWorkLog = 'bot-page-work-log';
+
   /// One recent Routine run on the Bot page, which opens its run log.
   static String botPageRun(String entryId) => 'bot-page-run-$entryId';
 
@@ -513,6 +516,15 @@ abstract final class EmailIds {
   static const usernameConfirm = 'email-username-confirm';
   static const usernameRemove = 'email-username-remove';
   static const usernameRemoveConfirm = 'email-username-remove-confirm';
+}
+
+/// The Work log: everything one Bot did, Turn by Turn.
+abstract final class WorkLogIds {
+  static const refresh = 'work-log-refresh';
+  static const search = 'work-log-search';
+  static const showEarlier = 'work-log-show-earlier';
+  static const inspector = 'work-log-inspector';
+  static String filter(String slug) => 'work-log-filter-$slug';
 }
 
 /// Activity: what the Bots did outside the conversation.

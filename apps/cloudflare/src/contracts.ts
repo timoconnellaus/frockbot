@@ -20,6 +20,7 @@ import type {
   SettingsFrame,
   ConnectionsFrame,
   SettingsChangeCommand,
+  WorkLogPage,
 } from "@frockbot/core/protocol-schemas";
 import {
   type AuthPackageV1,
@@ -28,6 +29,7 @@ import {
   type SessionEvent,
 } from "@frockbot/core/contracts";
 import type { MachineResultDeliveryV1 } from "@frockbot/app/machine/delivery";
+import type { WorkLogQueryV1 } from "@frockbot/app/shell/work-log";
 import type { DebugGatewaySurface } from "./debug.js";
 import type { BotTurnCommandRequestV1 } from "./durable-rpc.js";
 import type {
@@ -275,6 +277,12 @@ export interface UserBotStateBinding {
     botId: string;
     query: ClientRunListQueryV1;
   }): Promise<ClientRunListV1>;
+  /** Everything the Bot did, a page of Turns at a time. */
+  workLog(input: {
+    schemaVersion: 1;
+    botId: string;
+    query: WorkLogQueryV1;
+  }): Promise<WorkLogPage>;
   lookupRun(input: {
     schemaVersion: 1;
     botId: string;
