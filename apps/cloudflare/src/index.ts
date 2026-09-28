@@ -441,7 +441,12 @@ function debugSurface(env: Env): DebugGatewaySurface {
       return (
         identity != null &&
         isDeploymentAdminV1(
-          { id: identity.id, email: identity.email, mode: "better-auth" },
+          {
+            id: identity.id,
+            email: identity.email,
+            emailVerified: identity.emailVerified,
+            mode: "better-auth",
+          },
           env.FROCKBOT_ADMIN_EMAILS,
         )
       );
@@ -849,7 +854,12 @@ async function storedAdmissionIdentity(
     ...(email === undefined ? {} : { email }),
     emailVerified: identity.emailVerified,
     isAdmin: isDeploymentAdminV1(
-      { id: identity.id, email: identity.email, mode: "better-auth" },
+      {
+        id: identity.id,
+        email: identity.email,
+        emailVerified: identity.emailVerified,
+        mode: "better-auth",
+      },
       env.FROCKBOT_ADMIN_EMAILS,
     ),
   };
@@ -914,7 +924,12 @@ async function mayCreateIdentity(
   if (email === undefined) return false;
   if (
     isDeploymentAdminV1(
-      { id: email, email, mode: "better-auth" },
+      {
+        id: email,
+        email,
+        emailVerified: candidate.emailVerified,
+        mode: "better-auth",
+      },
       env.FROCKBOT_ADMIN_EMAILS,
     )
   ) {
