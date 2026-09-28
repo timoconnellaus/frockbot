@@ -11,8 +11,9 @@ works while nobody is signed in and while a Bot is wedged.
 
 It is **read-only except for `send`, which is owner-only**: every read still
 never recovers an active run, reconciles an effect, or writes storage. `send`
-requires both the debug token and a User whose stored email is in
-`FROCKBOT_ADMIN_EMAILS`, then uses the ordinary client Turn path. Looking at a
+requires both the debug token and a deployment admin — a User whose stored,
+verified email is in `FROCKBOT_ADMIN_EMAILS` or whose id is in
+`FROCKBOT_ADMIN_USER_IDS` — then uses the ordinary client Turn path. Looking at a
 stuck Bot must not be what unsticks it.
 
 ## Run

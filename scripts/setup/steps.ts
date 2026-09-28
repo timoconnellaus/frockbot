@@ -494,6 +494,12 @@ export async function askHumanSecretsV1(
   context.runner.say(
     `  FROCKBOT_ADMIN_EMAILS ${values.FROCKBOT_ADMIN_EMAILS} (from the profile)`,
   );
+  if (profile.adminUserIds?.length) {
+    values.FROCKBOT_ADMIN_USER_IDS = profile.adminUserIds.join(",");
+    context.runner.say(
+      `  FROCKBOT_ADMIN_USER_IDS ${values.FROCKBOT_ADMIN_USER_IDS} (from the profile)`,
+    );
+  }
   const skipped: string[] = [];
   for (const secret of HUMAN_SECRETS_V1) {
     const answer = await askOneSecretV1(context, secret);
@@ -560,8 +566,8 @@ function secretsFilesV1(
     if (values[secret.name] === undefined) continue;
     for (const worker of secret.workers) addTo(worker, secret.name);
   }
-  if (values.FROCKBOT_ADMIN_EMAILS !== undefined) {
-    addTo("app", "FROCKBOT_ADMIN_EMAILS");
+  for (const name of ["FROCKBOT_ADMIN_EMAILS", "FROCKBOT_ADMIN_USER_IDS"]) {
+    if (values[name] !== undefined) addTo("app", name);
   }
 
   const files = new Map<SetupWorkerV1, string>();

@@ -181,11 +181,21 @@ export const DEPLOYMENT_PROFILE_SCHEMA_V1 = {
     },
     adminEmails: {
       description:
-        "The deployment's admins: they bypass admission, and a debug Turn may act as one of them. The debug surface itself is gated on `DEBUG_TOKEN`. The installer sets it as the Worker secret `FROCKBOT_ADMIN_EMAILS`; no generated config carries it, which is why the hosted profile leaves it to the repository secret it already has.",
+        "The deployment's admins: they bypass admission, and a debug Turn may act as one of them. The debug surface itself is gated on `DEBUG_TOKEN`. Only a verified email counts. The installer sets it as the Worker secret `FROCKBOT_ADMIN_EMAILS`; no generated config carries it, which is why the hosted profile leaves it to the repository secret it already has.",
       type: "array",
       minItems: 1,
       items: {
         $ref: "#/$defs/email",
+      },
+    },
+    adminUserIds: {
+      description:
+        "Admins by User id, beside `adminEmails`, for a deployment whose people have no verified email: an id here is an admin exactly as a verified email on `adminEmails` is. The installer sets it as the Worker secret `FROCKBOT_ADMIN_USER_IDS`; no generated config carries it.",
+      type: "array",
+      minItems: 1,
+      items: {
+        type: "string",
+        pattern: "^[^,\\s]+$",
       },
     },
     d1DatabaseId: {

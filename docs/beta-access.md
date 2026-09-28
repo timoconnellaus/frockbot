@@ -16,7 +16,7 @@ Each account may have an **access record** keyed by its User id, in one of five 
 
 The authority applies these checks in order:
 
-1. A deployment admin is admitted: an account whose **verified** email is in `FROCKBOT_ADMIN_EMAILS`. An unverified address on the list admits nobody, since some providers let an account carry any address. No record is read or written. The Worker answers for an admin without calling the authority, so admins still get in while it is down.
+1. A deployment admin is admitted: an account whose **verified** email is in `FROCKBOT_ADMIN_EMAILS`, or whose User id is in `FROCKBOT_ADMIN_USER_IDS`, which is how a deployment whose people have no email names one. An unverified address on the list admits nobody, since some providers let an account carry any address. No record is read or written. The Worker answers for an admin without calling the authority, so admins still get in while it is down.
 2. An account with a record is decided by that record. `active` is admitted. `paused`, `ended` and `blocked` are refused in every mode, including `open`. `invited` becomes `active` unless the mode is `closed`.
 3. An account with no record is admitted if an email invitation matches its **verified** email. The invitation is spent in the same transaction, unless the mode is `closed`, which keeps it for later.
 4. Otherwise the mode decides. `open` activates the account. `invite-only` refuses it as `invitation-required`, and `closed` refuses it as `admission-closed`.

@@ -121,9 +121,13 @@ the local Worker, and every generated config overrides it from the profile.
 
 Some fields keep a placeholder rather than nothing: wrangler's validator refuses a `services` entry with no target and a `vectorize` entry with no index even in a config it never deploys, so the app Worker's two services and its Vectorize binding, and the admin portal's one service, all say `named-by-deployment-config`. Nothing reads those values — `wrangler dev --env development` and the `e2e` harness resolve their own environments, and the generator writes the deployment's own names. A bucket or database name is left out entirely, because wrangler does not ask for one.
 
-`adminEmails` is in the schema and in no generated config. It is the
-`FROCKBOT_ADMIN_EMAILS` secret the installer sets; the hosted deployment already
-carries it as a repository secret, which is why `hosted.json` omits it.
+`adminEmails` and `adminUserIds` are in the schema and in no generated config.
+They are the `FROCKBOT_ADMIN_EMAILS` and `FROCKBOT_ADMIN_USER_IDS` secrets the
+installer sets; the hosted deployment already carries the first as a repository
+secret, which is why `hosted.json` omits it. An email makes an admin only once
+the auth Package's provider verified it, so a deployment whose people have no
+email names its admins by User id; `frockbot-deployment-config secrets` carries
+`FROCKBOT_ADMIN_USER_IDS` like any other optional secret.
 
 ## Brand
 
