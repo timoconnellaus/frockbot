@@ -1,5 +1,9 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:frockbot_client/client/transport.dart';
 import 'package:frockbot_client/settings/billing.dart';
 import 'package:frockbot_client/settings/spending.dart';
@@ -427,6 +431,34 @@ void main() {
     );
     api.close();
   });
+
+  test(
+    'a payments Package refusal reaches the person in its own words',
+    () async {
+      final api = NativeApi(
+        MemoryStore(),
+        client: MockClient(
+          (request) async => http.Response(
+            jsonEncode({'error': 'That plan is not available yet'}),
+            409,
+            headers: {'content-type': 'application/json'},
+          ),
+        ),
+      );
+      await expectLater(
+        api.request(_planPath, body: {'id': 'a', 'plan': 'plus'}),
+        throwsA(
+          isA<RequestFailure>()
+              .having((e) => e.status, 'status', 409)
+              .having(
+                (e) => e.message,
+                'message',
+                'That plan is not available yet',
+              ),
+        ),
+      );
+    },
+  );
 
   testWidgets('under a week of history: the share, and no date', (
     tester,
