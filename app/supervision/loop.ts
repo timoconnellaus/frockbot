@@ -126,11 +126,39 @@ export function acknowledgeNoteV1(productName: string): string {
 export function stuckNoteV1(
   productName: string,
   thinking?: { slug: string },
+  options: { origin?: TurnInputOriginV1; narrowed?: boolean } = {},
 ): string {
+  const label = runtimeNoteLabelV1(productName, "not getting anywhere");
+  const nobodyToAsk = !personPresentV1(options.origin ?? "user");
+  if (options.narrowed) {
+    return nobodyToAsk
+      ? `${label}\nThis work has been judged stuck again. Nothing but a hand-off will run now: hand off what you have, and say plainly what you could not do and why.`
+      : `${label}\nThis work has been judged stuck again. Nothing but speaking to the person will run now: tell them what you have, what is blocking you, and ask how to go on.`;
+  }
   const mentor = thinking
     ? `, hand the problem to the thinking specialist (call Task with model "${thinking.slug}" and a brief of what you tried and what happened)`
     : "";
-  return `${runtimeNoteLabelV1(productName, "not getting anywhere")}\nYour last few steps have not moved the work forward. Stop repeating what has not worked. Try a different approach${mentor}, or tell the person what is blocking you and ask how to go on.`;
+  const out = nobodyToAsk
+    ? "or hand off what you have and say what is blocking you"
+    : "or tell the person what is blocking you and ask how to go on";
+  return `${label}\nYour last few steps have not moved the work forward. Stop repeating what has not worked. Try a different approach${mentor}, ${out}.`;
+}
+
+/** Whether someone is there to be asked while this Turn runs. */
+function personPresentV1(origin: TurnInputOriginV1): boolean {
+  return origin !== "schedule" && origin !== "subagent" && origin !== "agent";
+}
+
+/**
+ * How many stuck verdicts narrow a Turn to speaking. One is a nudge to change
+ * course; a second means the nudge did not work, and more steps of the same
+ * only spend.
+ */
+export const STUCK_NARROW_AFTER_V1 = 2;
+
+function stuckCount(events: readonly SessionEvent[], turn: number): number {
+  return progressChecksOf(events, turn).filter((check) => check.decision.stuck)
+    .length;
 }
 
 /** How a Turn is steered to answer a question its subagent asked. */
@@ -726,6 +754,9 @@ function withheldResult(
   return `${SUPERVISION_WITHHELD_SEND_PREFIX_V1} ${why}${next}`;
 }
 
+const SUPERVISION_STUCK_PREFIX_V1 =
+  "Not run: this Turn was judged stuck twice, so only speaking runs now.";
+
 function withheldHandoffResult(
   reason: SupervisionReasonCode | undefined,
 ): string {
@@ -881,7 +912,12 @@ export function createSupervisionRuntimeFeatureV1(
             .find((offered) => offered.name === "thinking");
           return appendRuntimeNoteV1(
             request,
-            stuckNoteV1(host.productName, thinking),
+            stuckNoteV1(host.productName, thinking, {
+              origin: host.origin,
+              narrowed:
+                stuckCount(agent.session.activeRunJournal, turn) >=
+                STUCK_NARROW_AFTER_V1,
+            }),
           );
         }
         const session = agent.session;
@@ -1043,6 +1079,21 @@ export function createSupervisionRuntimeFeatureV1(
         }
         const send = textSendV1(call.name, call.input);
         if (!send) {
+          if (
+            !speaks(call.name) &&
+            stuckCount(events, at.turn) >= STUCK_NARROW_AFTER_V1
+          ) {
+            return {
+              kind: "denied",
+              call,
+              result: {
+                content: personPresentV1(host.origin)
+                  ? `${SUPERVISION_STUCK_PREFIX_V1} Tell the person what you have, what is blocking you, and ask how to go on.`
+                  : `${SUPERVISION_STUCK_PREFIX_V1} Hand off what you have, and say what you could not do and why.`,
+                isError: true,
+              },
+            };
+          }
           if (
             decision.responseAlignment === "wrong-objective" &&
             !speaks(call.name)

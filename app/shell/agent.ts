@@ -243,13 +243,10 @@ export const TIME_BUDGET_WARNING_MS_V1 = 2 * 60_000;
 export function stepBudgetPromptTextV1(context: {
   step?: { current: number; max: number };
   replyToCaller?: boolean;
+  /** A background Turn, whose only voice is its hand-off. */
+  handsOff?: boolean;
 }): string {
-  const target = context.replyToCaller
-    ? "reply_to_request"
-    : SEND_TO_USER_TOOL_V1;
-  const disposition = context.replyToCaller
-    ? "the answer"
-    : 'disposition:"finish"';
+  const { target, disposition } = budgetVoiceV1(context);
   const step = context.step;
   if (!step) return "";
   const remaining = step.max - step.current;
@@ -268,17 +265,31 @@ export function stepBudgetPromptTextV1(context: {
   ].join("\n");
 }
 
+/**
+ * The call a Turn ends on, named the way this Turn can make it. Naming a tool
+ * the Turn does not have sends the model hunting for it.
+ */
+function budgetVoiceV1(context: {
+  replyToCaller?: boolean;
+  handsOff?: boolean;
+}): { target: string; disposition: string } {
+  if (context.replyToCaller) {
+    return { target: "reply_to_request", disposition: "the answer" };
+  }
+  if (context.handsOff) {
+    return { target: WAKE_PARENT_TOOL_V1, disposition: "a message" };
+  }
+  return { target: SEND_TO_USER_TOOL_V1, disposition: 'disposition:"finish"' };
+}
+
 /** Warns by wall-clock budget even when the model has used few steps. */
 export function timeBudgetPromptTextV1(context: {
   deadline?: { at: number; now: number };
   replyToCaller?: boolean;
+  /** A background Turn, whose only voice is its hand-off. */
+  handsOff?: boolean;
 }): string {
-  const target = context.replyToCaller
-    ? "reply_to_request"
-    : SEND_TO_USER_TOOL_V1;
-  const disposition = context.replyToCaller
-    ? "the answer"
-    : 'disposition:"finish"';
+  const { target, disposition } = budgetVoiceV1(context);
   const deadline = context.deadline;
   if (!deadline) return "";
   const remaining = deadline.at - deadline.now;
@@ -312,14 +323,19 @@ export const turnBudgetHooksV1 = (productName: string): LoopHooksV1 => ({
     const replyToCaller = request.tools.some(
       (tool) => tool.name === "reply_to_request",
     );
+    const handsOff = request.tools.some(
+      (tool) => tool.name === WAKE_PARENT_TOOL_V1,
+    );
     const note = [
       stepBudgetPromptTextV1({
         step: { current: step, max: budget.maxSteps },
         replyToCaller,
+        handsOff,
       }),
       timeBudgetPromptTextV1({
         deadline: { at: budget.deadlineAt, now: budget.now },
         replyToCaller,
+        handsOff,
       }),
     ]
       .filter(Boolean)

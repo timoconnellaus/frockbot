@@ -1103,6 +1103,58 @@ test("a long Turn going in circles is told, at that request's tail, to change co
   ]);
 });
 
+test("a Turn judged stuck twice runs nothing but speaking", async () => {
+  // 2026-09-27: progress said stuck seven times and the Routine ran on for 61
+  // steps, because a stuck verdict only ever added a note.
+  const events = await run(
+    scripted([
+      ...["a", "b", "c", "d", "e", "f", "g"].map(fetchStep),
+      [
+        {
+          id: "h",
+          name: "send_to_user",
+          input: text("Stuck on fetch.", "finish"),
+        },
+      ],
+    ]),
+    createFakeTurnSupervisorV1({
+      reviewProgress: async (evidence) => ({
+        stuck: true,
+        signals: [...evidence.signals],
+        judgments: [],
+      }),
+    }),
+  );
+  const stuckAt = events
+    .filter((event) => event.type === "supervision/progress")
+    .map((event) => (event as { step: number }).step);
+  expect(stuckAt).toEqual([5, 7]);
+  // From the second verdict on, the fetch is not run and the Turn is told why.
+  expect(
+    events.find(
+      (event) =>
+        event.type === "tool/result" &&
+        event.step === 7 &&
+        event.name === "web_fetch",
+    ),
+  ).toMatchObject({
+    content: expect.stringMatching(
+      /^Not run: this Turn was judged stuck twice/,
+    ),
+  });
+  expect(sent(events)).toEqual(["Stuck on fetch."]);
+});
+
+test("a stuck Routine is told to hand off, never to ask a person who is not there", () => {
+  expect(stuckNoteV1("FrockBot", undefined, { origin: "schedule" })).toContain(
+    "hand off what you have",
+  );
+  expect(
+    stuckNoteV1("FrockBot", undefined, { origin: "schedule", narrowed: true }),
+  ).toContain("Nothing but a hand-off will run now");
+  expect(stuckNoteV1("FrockBot")).toContain("ask how to go on");
+});
+
 test("a stuck Turn offered no thinking specialist is told to try another way or ask", () => {
   const note = stuckNoteV1("FrockBot");
   expect(note).not.toContain("Task");
