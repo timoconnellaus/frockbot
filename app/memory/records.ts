@@ -276,6 +276,8 @@ export interface MemoryExtractedProposalV1 {
   subjectKey?: string;
   occurredAt?: string;
   confidence?: number;
+  /** A kept item this fact corrects, as the write judgment found it. */
+  replaces?: string;
 }
 
 export interface MemoryConsolidatedObservationV1 {

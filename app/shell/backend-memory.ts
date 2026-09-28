@@ -45,6 +45,8 @@ export interface BotMemoryTurn {
   runId: string;
   turnId: string;
   sessionId: string;
+  /** The person's own words, on a Turn a person sent; nothing else is extracted. */
+  personText?: string;
 }
 
 /**
@@ -98,6 +100,7 @@ export function createBotMemoryHost(
       turnId: turn.turnId,
       runId: turn.runId,
     },
+    ...(turn.personText !== undefined ? { personText: turn.personText } : {}),
     ...(bindings.MEMORY_GROUPS ? { groups: bindings.MEMORY_GROUPS } : {}),
     ...(group ? { group } : {}),
     ...(bindings.MEMORY_CHUNK_INDEX

@@ -364,6 +364,8 @@ import { createMemoryEmbedder } from "@frockbot/app/memory/embeddings";
 import { MemoryRecordsV1 } from "@frockbot/app/memory/owner";
 import { createVectorMemorySearchV1 } from "@frockbot/app/memory/semantic";
 import { createHostedMemoryExtractorV1 } from "@frockbot/app/memory/extraction-host";
+import { hostedJevClientV1 } from "@frockbot/app/supervision";
+import { judgeMemoryWriteV1 } from "@frockbot/app/supervision/memory-write";
 import {
   createBotMemoryEngineV1,
   createUserMemoryRecordsRemoteV1,
@@ -1171,12 +1173,18 @@ export class BotState
         : {}),
       ...(this.backendEnv.BILLING ? { billing: this.backendEnv.BILLING } : {}),
     });
+    const jev = hostedJevClientV1(
+      this.backendEnv as unknown as Record<string, string | undefined>,
+    );
     await drainDurableMemoryV1(this.memoryEngine(), {
       ...(this.env.MEMORY_INDEX
         ? { vectors: this.env.MEMORY_INDEX as MemoryVectorIndex }
         : {}),
       ...(this.env.AI ? { ai: this.env.AI as MemoryAiBinding } : {}),
       ...(extract ? { extract } : {}),
+      ...(jev
+        ? { judgeWrite: (evidence) => judgeMemoryWriteV1(jev, evidence) }
+        : {}),
     });
   }
 
