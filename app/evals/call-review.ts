@@ -14,6 +14,8 @@ import { describeFailureV1 } from "./failure.js";
 
 export interface CallReviewFixtureV1 {
   readonly name: string;
+  /** Which group a case belongs to, reported apart: an incident, an attack. */
+  readonly set?: string;
   /** What this case is meant to prove, in one line. */
   readonly intent: string;
   readonly evidence: CallReviewJudgmentEvidenceV1;
@@ -84,6 +86,7 @@ export function callReviewReportCaseV1(
 ) {
   const base = {
     name: fixture.name,
+    ...(fixture.set ? { set: fixture.set } : {}),
     intent: fixture.intent,
     state: callReviewStateV1(fixture.evidence),
     expected: fixture.expected,

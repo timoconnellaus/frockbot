@@ -13,6 +13,12 @@ import {
   responseReviewReportCaseV1,
 } from "./response-review.js";
 import { describeFailureV1 } from "./failure.js";
+import {
+  evalRepeatV1,
+  evalSelectedV1,
+  repeatLineV1,
+  repeatSummaryV1,
+} from "./repeat.js";
 import { reviewQuestionRouteV1 } from "../supervision/question-route.js";
 import {
   CLAIM_UNSUPPORTED_MIN_V1,
@@ -77,11 +83,18 @@ async function runResponseReviewEvalV1() {
     Bun.spawnSync(["git", ...args])
       .stdout.toString()
       .trim();
-  // One pass, one call per case, no repetition: a rerun is a deliberate act.
-  const signal = AbortSignal.timeout(RESPONSE_REVIEW_RUN_TIMEOUT_MS_V1);
-  const cases = [];
-  for (const fixture of responseReviewFixturesV1) {
-    const started = performance.now();
+  // Each case is asked `EVAL_REPEAT` times (default once), so a decision
+  // sitting on a threshold shows up as a flip rather than a lucky pass.
+  const repeat = evalRepeatV1(process.env);
+  const signal = AbortSignal.timeout(
+    RESPONSE_REVIEW_RUN_TIMEOUT_MS_V1 * repeat,
+  );
+  const thresholds = {
+    alignment: RESPONSE_REVIEW_ALIGNMENT_MIN_V1,
+    messageNeeded: RESPONSE_REVIEW_NEEDED_NO_V1,
+    progressing: PROGRESS_STUCK_NO_V1,
+  };
+  async function askOnce(fixture: (typeof responseReviewFixturesV1)[number]) {
     let entry;
     try {
       if (fixture.kind === "response") {
@@ -144,11 +157,45 @@ async function runResponseReviewEvalV1() {
     } catch (error) {
       entry = responseReviewReportCaseV1(fixture, { failure: error });
     }
-    const elapsedMs = Math.round(performance.now() - started);
-    cases.push({ ...entry, elapsedMs });
-    console.log(
-      `${entry.passed ? "PASS" : "FAIL"} ${fixture.name} (${elapsedMs} ms)`,
+    return entry;
+  }
+  type CaseEntry = Awaited<ReturnType<typeof askOnce>> & {
+    elapsedMs: number;
+    stability?: ReturnType<typeof repeatSummaryV1>;
+  };
+  const cases: CaseEntry[] = [];
+  for (const fixture of responseReviewFixturesV1) {
+    if (!evalSelectedV1(process.env, fixture)) continue;
+    const started = performance.now();
+    const attempts = [];
+    for (let attempt = 0; attempt < repeat; attempt++)
+      attempts.push(await askOnce(fixture));
+    const entry = attempts.find((attempt) => !attempt.passed) ?? attempts[0]!;
+    const stability = repeatSummaryV1(
+      attempts.map((attempt) => ({
+        passed: attempt.passed,
+        decision:
+          "checks" in attempt
+            ? (attempt.checks[0]?.actual.split(" ")[0] ?? "graded")
+            : "failure",
+        ...("answers" in attempt
+          ? { answers: attempt.answers as Record<string, unknown> }
+          : {}),
+      })),
+      thresholds,
     );
+    const elapsedMs = Math.round(performance.now() - started);
+    const passed = attempts.every((attempt) => attempt.passed);
+    cases.push({
+      ...entry,
+      passed,
+      elapsedMs,
+      ...(repeat > 1 ? { stability } : {}),
+    });
+    console.log(
+      `${passed ? "PASS" : "FAIL"} ${fixture.set ? `[${fixture.set}] ` : ""}${fixture.name} (${elapsedMs} ms)`,
+    );
+    if (repeat > 1) console.log(repeatLineV1(stability));
     if ("failure" in entry) console.log(`  failure: ${entry.failure.message}`);
     for (const check of "checks" in entry ? entry.checks : [])
       if (!check.passed)
@@ -206,6 +253,21 @@ async function runResponseReviewEvalV1() {
         ];
       }),
     ),
+    repeat,
+    // Per set, so an incident is read on its own.
+    bySet: Object.fromEntries(
+      [...new Set(cases.map((c) => c.set ?? "core"))].map((set) => {
+        const inSet = cases.filter((c) => (c.set ?? "core") === set);
+        return [
+          set,
+          {
+            passed: inSet.filter((c) => c.passed).length,
+            cases: inSet.length,
+            flipped: inSet.filter((c) => c.stability?.flipped).length,
+          },
+        ];
+      }),
+    ),
     passed: cases.every((c) => c.passed),
     cases,
   };
@@ -217,6 +279,10 @@ async function runResponseReviewEvalV1() {
   );
   for (const [question, tally] of Object.entries(report.byQuestion))
     console.log(`  ${question}: ${tally.passed}/${tally.graded}`);
+  for (const [set, tally] of Object.entries(report.bySet))
+    console.log(
+      `  set ${set}: ${tally.passed}/${tally.cases}${repeat > 1 ? `, ${tally.flipped} flipped across ${repeat} repeats` : ""}`,
+    );
   console.log(`Trace: ${path}`);
   process.exitCode = report.passed ? 0 : 1;
 }

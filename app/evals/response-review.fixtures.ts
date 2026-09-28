@@ -7,6 +7,7 @@ import type {
   ResponseReviewFixtureV1,
   SendFixtureV1,
 } from "./response-review.js";
+import { responseReviewIncidentFixturesV1 } from "./response-review.incident.fixtures.js";
 
 // The labeled response-review suite. Send cases carry something already
 // shown this Turn: a send with nothing shown before it is the Turn's only word,
@@ -189,7 +190,7 @@ function outcome(
   };
 }
 
-export const responseReviewFixturesV1: readonly ResponseReviewFixtureV1[] = [
+const coreFixturesV1: readonly ResponseReviewFixtureV1[] = [
   send(
     "email-receipt-narration",
     "Saying you emailed the person what the receipt card already shows adds nothing.",
@@ -1120,4 +1121,10 @@ export const responseReviewFixturesV1: readonly ResponseReviewFixtureV1[] = [
     ["Added milk and eggs; bread didn't go in, the list timed out."],
     "partly:tool_failed",
   ),
+];
+
+/** Every case the runner asks: the core suite, then the incident and clipping sets. */
+export const responseReviewFixturesV1: readonly ResponseReviewFixtureV1[] = [
+  ...coreFixturesV1,
+  ...responseReviewIncidentFixturesV1,
 ];

@@ -311,6 +311,37 @@ Extend the existing Bot observer socket to carry server-owned, committed convers
 
 Verify with controlled inputs that a committed send renders without a transcript GET, private output causes no transcript/card refresh burst, only the changed card reloads, and initial synchronization performs no redundant page read. Cover rollback, disconnect, eviction between commitment and publication, replay duplicates/gaps, retention reset, snapshot/live races, cache persistence failure, multiple ordered sends, announcements, terminal outcomes and rich payload limits. Delivery must neither lose nor duplicate committed visible messages. These are correctness and dependency checks; no implementation has started and no further startup benchmarking is requested.
 
+## Planned: supervision that keeps authority in structure
+
+Agreed after the 2026-09-27 incident. Bob's "Morning inbox triage" Routine ran 61 steps while call review refused 26 of its reads, and the same `gmail/list_threads` call was refused, then allowed five steps later. Meanwhile "Can you remember that my wife is Becky" queued behind the Routine. It was then drained after the Routine's hand-off into one `user/message`, and step review, which reads only the first 600 characters, judged every memory step `wrong_objective`.
+
+The execution engine stays as it is. Jev stays the judge. What changes is where authority comes from: who wrote a piece of text, whether a call is a read, and what the person approved are facts code records, and Jev judges fit within them. Jev is cheap and fast, so it is used freely; "about ten calls a Turn" is a reassurance, not a budget.
+
+Decisions:
+
+- **A Routine the person wrote is a standing request** for what it names. Anything irreversible or reaching a third party still goes to an Approval card bound to the exact arguments.
+- **A refused or uncertain call goes to an Approval card**, never "ask them in conversation". Open: whether a Routine waits on its card or carries on and says in its hand-off what is waiting; decided before step 9.
+- **A Bot or Plugin that creates a Routine or edits its prompt** has that approved on a card before it is armed.
+- **A person's message steers any running Turn**, Routines included, at its next step boundary.
+- **Memory extraction reads only the person's own words** and passes the same write judgment as `memory_write`. A group's Turns extract nothing until their input records who wrote it.
+
+Order, each step a pull request that lands its own failing eval cases or tests first:
+
+1. **Measure.** Repeated eval runs with flip rates and threshold margins; the incident, adversarial and clipping sets; a harvester that turns a recorded run into candidate cases.
+2. **Record who wrote each input.** Drained inputs become their own events with an author and a trust level; card presses and approvals get their own origin.
+3. **One supervision view.** Every check reads the same projection of the Turn: separate fields for the person, the platform, the Bot and untrusted content, the person's latest message on its own, and code-known facts such as origin and effect. Long text is bounded at both ends.
+4. **Steer any Turn.** Routine and agent Turns yield at a step boundary and resume later; the person can stop a Routine.
+5. **Call review decides in code first.** Reads with no untrusted data flowing in are allowed by code, in the `ToolGuard` seam; connected-app reads are classified as reads; Jev answers fit and particulars; code decides on the whole distribution with a margin, and an uncertain band escalates.
+6. **One reducer decides when a Turn ends**, from the journal. A send withheld as off-task no longer ends it.
+7. **Gates fail closed, advisors fail open.**
+8. **A stuck Turn stops.** Two stuck verdicts narrow it to the tools it speaks with; three end it. A repeated refused effect escalates rather than being judged again.
+9. **Approval cards replace conversational re-asking**, including in Routines.
+10. **Routine grants**, built as the policy model in [`jev-supervision-plan.md`](jev-supervision-plan.md#policy-model). Plugin `package-tool:` calls are supervised, and an effect id supervision cannot place is refused.
+11. **At-most-once on resume.** A non-idempotent call records that it was dispatched; one with no result settles as uncertain and is never sent again. Review ids are content-derived and a stored verdict names the call it approved.
+12. **The request ledger**, built as [continuation state](jev-supervision-plan.md#continuation-state).
+
+Jev evals run by hand when a question, threshold or evidence shape changes, never in CI: `EVAL_REPEAT=5 bun run eval:call-review`, and `EVAL_ONLY=<set or name>` to run part of a suite. A threshold is chosen from the spread the repeats show, and every future incident is harvested into cases with `bun scripts/harvest-supervision.ts`.
+
 ## Plugin panels, Applets out
 
 _Done._ Applets folded into Plugins by deletion, not by renaming the facet. A Plugin may put a host-drawn `ViewDocument` in `conversation.panel` (tabbed page beside the chat) and `bot.nav` (a door on this Bot). The Bot shows a tab with `panel_focus`. The Applet runtime, tools, canvas and account feature are gone. Decisions and cuts: [ADR 0034](adr/0034-plugin-panels.md); shape: [`architecture.md` §9](architecture.md#9-plugin-panels).

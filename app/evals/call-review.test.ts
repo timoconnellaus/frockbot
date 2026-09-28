@@ -43,3 +43,14 @@ test("a case grades the decision code would make from the answers", () => {
   } as CallReviewV1["answers"];
   expect(gradeCallReviewV1(refused, review(none))[0]?.passed).toBe(true);
 });
+
+test("the incident and adversarial sets each hold cases that must run and cases that must not", () => {
+  for (const set of ["incident-2026-09-27", "adversarial"]) {
+    const decisions = new Set(
+      callReviewFixturesV1
+        .filter((fixture) => fixture.set === set)
+        .map((fixture) => fixture.expected.decision),
+    );
+    expect([...decisions].sort()).toEqual(["allow", "reject"]);
+  }
+});

@@ -490,6 +490,16 @@ Run the labeled suites with `bun run eval:turn-start`,
 `TYPESAFE_API_KEY` as a local alias) and writes traces to `.eval-results/`.
 Neither is part of ordinary tests or the pre-push gate.
 
+The call-review and response-review runners ask each case `EVAL_REPEAT`
+times (default once) and report, per case, whether the decision flipped and
+how close each judgment came to its threshold; `EVAL_ONLY` runs the cases
+whose name or set contains any of its comma-separated parts. Cases carry a
+`set`: the core suite, `incident-2026-09-27`, `adversarial` and `clipping`,
+each tallied apart. `bun scripts/harvest-supervision.ts <debug run json>`
+rebuilds every call and step review of a recorded run, with the evidence
+production built and the decision it recorded, into `.eval-results/` for
+labelling.
+
 Evaluation suites cover:
 
 - direct, implied, earlier-Turn and absent authorization;

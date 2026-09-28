@@ -52,6 +52,8 @@ import {
 export interface ResponseAlignmentFixtureV1 {
   readonly kind: "response";
   readonly name: string;
+  /** Which group a case belongs to, reported apart: an incident, say. */
+  readonly set?: string;
   /** What this case is meant to prove, in one line. */
   readonly intent: string;
   readonly evidence: ResponseReviewEvidenceV1;
@@ -63,6 +65,8 @@ export interface ResponseAlignmentFixtureV1 {
 export interface SendFixtureV1 {
   readonly kind: "send";
   readonly name: string;
+  /** Which group a case belongs to, reported apart: an incident, say. */
+  readonly set?: string;
   readonly intent: string;
   readonly evidence: SendReviewJudgmentEvidenceV1;
   readonly expected: {
@@ -76,6 +80,8 @@ export interface SendFixtureV1 {
 export interface RelayFixtureV1 {
   readonly kind: "relay";
   readonly name: string;
+  /** Which group a case belongs to, reported apart: an incident, say. */
+  readonly set?: string;
   readonly intent: string;
   readonly evidence: RelayJudgmentEvidenceV1;
   readonly expected: { readonly send: "release" | "withhold" };
@@ -85,6 +91,8 @@ export interface RelayFixtureV1 {
 export interface QuestionFixtureV1 {
   readonly kind: "question";
   readonly name: string;
+  /** Which group a case belongs to, reported apart: an incident, say. */
+  readonly set?: string;
   readonly intent: string;
   readonly evidence: QuestionRouteEvidenceV1;
   readonly expected: { readonly answerer: "conversation" | "person" };
@@ -94,6 +102,8 @@ export interface QuestionFixtureV1 {
 export interface ClaimFixtureV1 {
   readonly kind: "claim";
   readonly name: string;
+  /** Which group a case belongs to, reported apart: an incident, say. */
+  readonly set?: string;
   readonly intent: string;
   readonly evidence: ClaimJudgmentEvidenceV1;
   readonly expected: { readonly send: "release" | "withhold" };
@@ -103,6 +113,8 @@ export interface ClaimFixtureV1 {
 export interface ProgressFixtureV1 {
   readonly kind: "progress";
   readonly name: string;
+  /** Which group a case belongs to, reported apart: an incident, say. */
+  readonly set?: string;
   readonly intent: string;
   readonly evidence: ProgressEvidenceV1;
   readonly expected: { readonly stuck: boolean };
@@ -112,6 +124,8 @@ export interface ProgressFixtureV1 {
 export interface OutcomeFixtureV1 {
   readonly kind: "outcome";
   readonly name: string;
+  /** Which group a case belongs to, reported apart: an incident, say. */
+  readonly set?: string;
   readonly intent: string;
   readonly evidence: OutcomeEvidenceV1;
   readonly expected: string;
@@ -293,6 +307,7 @@ export function responseReviewReportCaseV1(
 ) {
   const base = {
     name: fixture.name,
+    ...(fixture.set ? { set: fixture.set } : {}),
     kind: fixture.kind,
     intent: fixture.intent,
     state:

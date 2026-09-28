@@ -5,6 +5,12 @@ import { callReviewFixturesV1 } from "./call-review.fixtures.js";
 import { callReviewReportCaseV1, gradeCallReviewV1 } from "./call-review.js";
 import { describeFailureV1 } from "./failure.js";
 import {
+  evalRepeatV1,
+  evalSelectedV1,
+  repeatLineV1,
+  repeatSummaryV1,
+} from "./repeat.js";
+import {
   RESPONSE_REVIEW_ATTEMPT_TIMEOUT_MS_V1,
   RESPONSE_REVIEW_RETRY_V1,
   RESPONSE_REVIEW_RUN_TIMEOUT_MS_V1,
@@ -57,26 +63,63 @@ async function runCallReviewEvalV1() {
     Bun.spawnSync(["git", ...args])
       .stdout.toString()
       .trim();
-  // One pass, one call per case, no repetition: a rerun is a deliberate act.
-  const signal = AbortSignal.timeout(RESPONSE_REVIEW_RUN_TIMEOUT_MS_V1);
-  const cases = [];
+  // Each case is asked `EVAL_REPEAT` times (default once), so a decision
+  // sitting on a threshold shows up as a flip rather than a lucky pass.
+  const repeat = evalRepeatV1(process.env);
+  const thresholds = {
+    argumentsMatchRequest: CALL_REVIEW_ARGUMENTS_YES_V1,
+    consequence: CALL_REVIEW_IMPLIED_CONSEQUENCE_MAX_V1,
+    instructsReviewer: CALL_REVIEW_INSTRUCTS_REVIEWER_YES_V1,
+  };
+  const signal = AbortSignal.timeout(
+    RESPONSE_REVIEW_RUN_TIMEOUT_MS_V1 * repeat,
+  );
+  type CaseEntry = ReturnType<typeof callReviewReportCaseV1> & {
+    elapsedMs: number;
+    stability?: ReturnType<typeof repeatSummaryV1>;
+  };
+  const cases: CaseEntry[] = [];
   for (const fixture of callReviewFixturesV1) {
+    if (!evalSelectedV1(process.env, fixture)) continue;
     const started = performance.now();
-    let entry;
-    try {
-      const review = await reviewCallV1(client, fixture.evidence, { signal });
-      entry = callReviewReportCaseV1(fixture, {
-        review,
-        checks: gradeCallReviewV1(fixture, review),
-      });
-    } catch (error) {
-      entry = callReviewReportCaseV1(fixture, { failure: error });
+    const attempts = [];
+    for (let attempt = 0; attempt < repeat; attempt++) {
+      try {
+        const review = await reviewCallV1(client, fixture.evidence, { signal });
+        attempts.push(
+          callReviewReportCaseV1(fixture, {
+            review,
+            checks: gradeCallReviewV1(fixture, review),
+          }),
+        );
+      } catch (error) {
+        attempts.push(callReviewReportCaseV1(fixture, { failure: error }));
+      }
     }
-    const elapsedMs = Math.round(performance.now() - started);
-    cases.push({ ...entry, elapsedMs });
-    console.log(
-      `${entry.passed ? "PASS" : "FAIL"} ${fixture.name} (${elapsedMs} ms)`,
+    const entry = attempts.find((attempt) => !attempt.passed) ?? attempts[0]!;
+    const stability = repeatSummaryV1(
+      attempts.map((attempt) => ({
+        passed: attempt.passed,
+        ...("checks" in attempt
+          ? { decision: attempt.checks[0]!.actual.split(" ")[0]! }
+          : { decision: "failure" }),
+        ...("answers" in attempt
+          ? { answers: attempt.answers as Record<string, unknown> }
+          : {}),
+      })),
+      thresholds,
     );
+    const elapsedMs = Math.round(performance.now() - started);
+    cases.push({
+      ...entry,
+      passed: attempts.every((attempt) => attempt.passed),
+      elapsedMs,
+      ...(repeat > 1 ? { stability } : {}),
+    });
+    console.log(
+      `${attempts.every((attempt) => attempt.passed) ? "PASS" : "FAIL"} ${fixture.set ? `[${fixture.set}] ` : ""}${fixture.name} (${elapsedMs} ms)`,
+    );
+    if (repeat > 1) console.log(repeatLineV1(stability));
     if ("failure" in entry) console.log(`  failure: ${entry.failure.message}`);
     for (const check of "checks" in entry ? entry.checks : [])
       if (!check.passed)
@@ -129,6 +172,27 @@ async function runCallReviewEvalV1() {
         ];
       }),
     ),
+    repeat,
+    // Per set, so an incident or an attack suite is read on its own.
+    bySet: Object.fromEntries(
+      [
+        ...new Set(
+          cases.map((c) => ("set" in c ? c.set : undefined) ?? "core"),
+        ),
+      ].map((set) => {
+        const inSet = cases.filter(
+          (c) => (("set" in c ? c.set : undefined) ?? "core") === set,
+        );
+        return [
+          set,
+          {
+            passed: inSet.filter((c) => c.passed).length,
+            cases: inSet.length,
+            flipped: inSet.filter((c) => c.stability?.flipped).length,
+          },
+        ];
+      }),
+    ),
     passed: cases.every((c) => c.passed),
     cases,
   };
@@ -140,6 +204,10 @@ async function runCallReviewEvalV1() {
   );
   for (const [question, tally] of Object.entries(report.byQuestion))
     console.log(`  ${question}: ${tally.passed}/${tally.graded}`);
+  for (const [set, tally] of Object.entries(report.bySet))
+    console.log(
+      `  set ${set}: ${tally.passed}/${tally.cases}${repeat > 1 ? `, ${tally.flipped} flipped across ${repeat} repeats` : ""}`,
+    );
   console.log(`Trace: ${path}`);
   process.exitCode = report.passed ? 0 : 1;
 }
