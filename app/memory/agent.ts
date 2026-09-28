@@ -114,6 +114,12 @@ export interface MemoryRuntimeHostV1 {
   owner: MemoryOwnerV1;
   store: MemoryStore;
   writer?: MemoryWriterIdentityV1;
+  /**
+   * What the person typed or said, on a Turn they sent. The only text
+   * extraction reads: a Turn's input may also carry a Routine's hand-off, a
+   * card press or another Bot's words, and none of those is the person's.
+   */
+  personText?: string;
   /** The Group Chats this Bot is a member of: the group scopes it may use. */
   groups?: MemoryGroupsV1;
   /**
@@ -1352,29 +1358,15 @@ export function createMemoryRuntimeFeature(
       const writer = host.writer;
       disposers.push(
         runtime.hooks.add({
-          turnStopping: async (agent, turn) => {
-            const text = agent.session.activeRunJournal
-              .flatMap((event) =>
-                event.type === "user/message" && event.turn === turn
-                  ? [event.text]
-                  : [],
-              )
-              .join("\n")
-              .trim()
-              .slice(0, 8_000);
+          turnStopping: async (_agent, turn) => {
+            const text = (host.personText ?? "").trim().slice(0, 8_000);
             if (!text || isControlOnlyMemoryInputV1(text)) return;
             try {
-              const authority = await turnAuthorityV1(host);
-              // A group's thread is the group's to remember: what its Turns
-              // read is extracted into the group's shared Memory.
-              const destination =
-                host.group && authority.joinedGroupChatIds.includes(host.group)
-                  ? productScopeToEngineV1("group", host.owner, host.group)
-                  : undefined;
+              // A group Turn carries no personText, so what one member said is
+              // never extracted as another's until its words say who wrote them.
               records.captureExtraction({
-                authority,
+                authority: await turnAuthorityV1(host),
                 scope: productScopeToEngineV1("bot", host.owner),
-                ...(destination ? { destinationScope: destination } : {}),
                 principal: {
                   userId: host.owner.userId,
                   botId: host.owner.botId,

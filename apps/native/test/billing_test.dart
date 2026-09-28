@@ -13,20 +13,28 @@ const _dayMs = 86400000;
 final _now = DateTime.now().millisecondsSinceEpoch;
 final _renews = _now + 20 * _dayMs;
 
-const _standard = {
-  'id': 'standard',
-  'monthlyCents': 2000,
-  'includedMicros': 20000000,
+const _plan = {
+  'subscriptions': [
+    {
+      'id': 'standard',
+      'name': 'Standard',
+      'monthlyCents': 2000,
+      'includedMicros': 20000000,
+    },
+    {
+      'id': 'plus',
+      'name': 'Plus',
+      'monthlyCents': 5000,
+      'includedMicros': 60000000,
+    },
+  ],
+  'trial': {'days': 7, 'creditMicros': 3000000},
   'topUpCents': [1000, 2500, 5000],
-  'pricingVersion': 'test',
+  'purchasedCreditNeedsSubscription': true,
 };
-const _plus = {
-  'id': 'plus',
-  'monthlyCents': 5000,
-  'includedMicros': 60000000,
-  'topUpCents': [1000, 2500, 5000],
-  'pricingVersion': 'test',
-};
+
+const _checkout = '/api/billing/provider/checkout';
+const _planPath = '/api/billing/provider/plan';
 
 /// A month of history: the pace of the last week means something.
 final _history = [
@@ -38,9 +46,96 @@ final _history = [
   },
 ];
 
+Map<String, Object?> _changePlan(String plan, String label) => {
+  'purpose': 'change-plan',
+  'plan': plan,
+  'label': label,
+  'target': {
+    'kind': 'command',
+    'path': _planPath,
+    'body': {'plan': plan},
+  },
+  'opens': 'in-app',
+  'hosts': <String>[],
+};
+
+/// What the Stripe payments Package offers an account in this state, as
+/// `stripeActionsV1` does: each plan to a new or ended account, the other
+/// plan to a subscriber, starting now to a trial, top-ups to a subscriber and
+/// the portal to any account with a subscription. Plus only where [plus].
+List<Map<String, Object?>> _actions(
+  Map<String, Object?> account, {
+  bool plus = true,
+}) {
+  final subscription = account['subscription'] as Map?;
+  final plans = ['standard', if (plus) 'plus'];
+  String name(String plan) => plan == 'plus' ? 'Plus' : 'Standard';
+  final canSubscribe =
+      subscription == null ||
+      {'canceled', 'incomplete_expired'}.contains(subscription['status']);
+  final trialing = subscription?['status'] == 'trialing';
+  return [
+    if (canSubscribe)
+      for (final plan in plans)
+        {
+          'purpose': 'subscribe',
+          'plan': plan,
+          'label': 'Start ${name(plan)}',
+          'target': {
+            'kind': 'command',
+            'path': _checkout,
+            'body': {'kind': 'subscription', 'plan': plan},
+          },
+          'opens': 'browser',
+          'hosts': ['checkout.stripe.com'],
+        },
+    if (trialing)
+      for (final plan in plans)
+        _changePlan(
+          plan,
+          plan == subscription!['planId']
+              ? 'Start now'
+              : 'Start ${name(plan)} now',
+        )
+    else if (account['subscribed'] == true)
+      for (final plan in plans)
+        if (plan != subscription?['planId'])
+          _changePlan(plan, 'Move to ${name(plan)}'),
+    if (account['subscribed'] == true)
+      {
+        'purpose': 'top-up',
+        'label': 'Add',
+        'target': {
+          'kind': 'command',
+          'path': _checkout,
+          'body': {'kind': 'topup'},
+        },
+        'opens': 'browser',
+        'hosts': ['checkout.stripe.com'],
+      },
+    if (subscription != null)
+      {
+        'purpose': 'manage',
+        'label': 'Plan, invoices & card',
+        'target': {'kind': 'command', 'path': '/api/billing/provider/portal'},
+        'opens': 'browser',
+        'hosts': ['billing.stripe.com'],
+      },
+  ];
+}
+
 /// What `/api/billing` answers, with [overrides] on top.
-Map<String, Object?> billing(Map<String, Object?> overrides) => {
+Map<String, Object?> billing(
+  Map<String, Object?> overrides, {
+  bool plus = true,
+}) {
+  final account = _billing(overrides);
+  return {'actions': _actions(account, plus: plus), ...account};
+}
+
+Map<String, Object?> _billing(Map<String, Object?> overrides) => {
   'paymentsAvailable': true,
+  'paymentsProvider': 'Stripe',
   'metered': true,
   'canSpend': true,
   'subscribed': false,
@@ -51,9 +146,9 @@ Map<String, Object?> billing(Map<String, Object?> overrides) => {
   'purchasedMicros': 0,
   'reservedMicros': 0,
   'payments': <Object>[],
-  'plan': _standard,
-  'plans': [_standard, _plus],
+  'plan': _plan,
   'trial': null,
+  'trialUsed': false,
   'computerRate': {
     'activeUsdPerHour': 2.75,
     'storageIncludedGb': 100,
@@ -74,15 +169,17 @@ Map<String, Object?> billing(Map<String, Object?> overrides) => {
 /// A subscribed account on [plan], with [overrides] on top.
 Map<String, Object?> subscribed(
   Map<String, Object?> overrides, {
-  Map<String, Object?> plan = _standard,
+  String plan = 'standard',
 }) => billing({
   'subscribed': true,
   'subscription': {
     'status': 'active',
+    'planId': plan,
     'periodEnd': _renews,
     'cancelAtPeriodEnd': false,
+    'trialEnd': null,
   },
-  'plan': plan,
+  'trialUsed': true,
   'payments': _history,
   ...overrides,
 });
@@ -134,7 +231,7 @@ SettingsApi _api(
     return spending(Uri.parse(path), runsOutIn: runsOutIn);
   }
   if (path == '/api/billing') return account;
-  if (path == '/api/billing/plan' && onPlan != null) return onPlan(body);
+  if (path == _planPath && onPlan != null) return onPlan(body);
   throw StateError('Payments are not reachable in a test');
 });
 
@@ -228,7 +325,7 @@ void main() {
     await tester.pump();
     await tester.tap(find.widgetWithText(FilledButton, 'Add US\$50'));
     await tester.pumpAndSettle();
-    expect(asked.last.$1, '/api/billing/checkout');
+    expect(asked.last.$1, _checkout);
     expect(asked.last.$2, containsPair('cents', 5000));
     expect(asked.last.$2, containsPair('kind', 'topup'));
     expect(
@@ -262,7 +359,7 @@ void main() {
       subscribed({'includedMicros': 4000000}),
       asked: asked,
       runsOutIn: 6,
-      onPlan: (body) async => {'plan': 'plus'},
+      onPlan: (body) async => {'plan': 'plus', 'url': '/billing'},
     );
     await _show(tester, api, size: const Size(390, 1800));
     final runsOut = spendDate(_now + 6 * _dayMs);
@@ -293,7 +390,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    final change = asked.firstWhere((a) => a.$1 == '/api/billing/plan');
+    final change = asked.firstWhere((a) => a.$1 == _planPath);
     expect(change.$2, containsPair('plan', 'plus'));
     expect((change.$2! as Map)['id'], isA<String>());
     expect(
@@ -390,12 +487,22 @@ void main() {
     tester,
   ) async {
     final ends = _now + 5 * _dayMs - 3600000;
+    final asked = <(String, Object?)>[];
     final api = _api(
       billing({
-        'complimentaryMicros': 3000000,
-        'subscription': {'status': 'trialing', 'periodEnd': ends},
-        'trial': {'endsAt': ends, 'creditMicros': 5000000},
+        'complimentaryMicros': 1800000,
+        'subscription': {
+          'status': 'trialing',
+          'planId': 'standard',
+          'periodEnd': ends,
+          'trialEnd': ends,
+          'cancelAtPeriodEnd': false,
+        },
+        'trial': {'endsAt': ends, 'creditMicros': 3000000},
+        'trialUsed': true,
       }),
+      asked: asked,
+      onPlan: (body) async => {'plan': 'standard', 'url': '/billing'},
     );
     await _show(tester, api);
     expect(find.text('Trial · 5 days left'), findsOneWidget);
@@ -406,8 +513,34 @@ void main() {
       findsOneWidget,
     );
     expect(_inPlans(find.text('Your plan · trial')), findsOneWidget);
-    expect(_inPlans(find.textContaining('Choose')), findsNothing);
     expect(identifiedBy(BillingIds.blocked), findsNothing);
+    // Either plan ends the trial and starts paying now.
+    expect(
+      _inPlans(find.widgetWithText(FilledButton, 'Start Plus now')),
+      findsOneWidget,
+    );
+    expect(
+      _inPlans(find.text('Ends the trial and charges the first month now.')),
+      findsNWidgets(2),
+    );
+    await tester.tap(_inPlans(find.widgetWithText(FilledButton, 'Start now')));
+    await tester.pumpAndSettle();
+    expect(find.text('Start now?'), findsOneWidget);
+    await tester.tap(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.widgetWithText(FilledButton, 'Start now'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final start = asked.firstWhere((a) => a.$1 == _planPath);
+    expect(start.$2, containsPair('plan', 'standard'));
+    expect(
+      find.text(
+        'Your Standard plan has started. Your new billing month starts today.',
+      ),
+      findsOneWidget,
+    );
     api.close();
   });
 
@@ -434,27 +567,61 @@ void main() {
       find.text('They reply once you subscribe or receive credit.'),
       findsOneWidget,
     );
-    await tester.tap(find.widgetWithText(FilledButton, 'Choose Plus'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Start Plus'));
     await tester.pumpAndSettle();
-    expect(asked.last.$1, '/api/billing/checkout');
+    expect(asked.last.$1, _checkout);
     expect(asked.last.$2, containsPair('kind', 'subscription'));
     expect(asked.last.$2, containsPair('plan', 'plus'));
     api.close();
   });
 
-  testWidgets('on Plus: nothing to move to, and the way back is at renewal', (
+  testWidgets(
+    'on Plus: nothing to move up to, and the way back is at renewal',
+    (tester) async {
+      final api = _api(subscribed({'includedMicros': 30000000}, plan: 'plus'));
+      await _show(tester, api, size: const Size(390, 1800));
+      expect(find.text('50% left'), findsOneWidget);
+      expect(find.text('of this month’s Plus plan'), findsOneWidget);
+      expect(find.text('Move to Plus'), findsNothing);
+      expect(_inPlans(find.text('Your plan')), findsOneWidget);
+      expect(
+        _inPlans(find.widgetWithText(OutlinedButton, 'Move to Standard')),
+        findsOneWidget,
+      );
+      expect(
+        _inPlans(find.text('Starts when your plan renews.')),
+        findsOneWidget,
+      );
+      api.close();
+    },
+  );
+
+  testWidgets('Plus is not for sale where the Package offers no way to it', (
     tester,
   ) async {
-    final api = _api(subscribed({'includedMicros': 30000000}, plan: _plus));
-    await _show(tester, api, size: const Size(390, 1800));
-    expect(find.text('50% left'), findsOneWidget);
-    expect(find.text('of this month’s Plus plan'), findsOneWidget);
-    expect(find.text('Move to Plus'), findsNothing);
-    expect(_inPlans(find.text('Your plan')), findsOneWidget);
-    expect(
-      _inPlans(find.text('Move back at renewal, from Plan, invoices & card.')),
-      findsOneWidget,
+    final api = _api(billing({'canSpend': false}, plus: false));
+    await _show(tester, api);
+    expect(_inPlans(find.text('Standard')), findsOneWidget);
+    expect(_inPlans(find.text('Plus')), findsNothing);
+    expect(find.textContaining('Plus'), findsNothing);
+    api.close();
+  });
+
+  testWidgets('a deployment that sells no plan shows none', (tester) async {
+    final api = _api(
+      billing({
+        'canSpend': false,
+        'plan': {
+          'subscriptions': <Object>[],
+          'trial': null,
+          'topUpCents': [1000],
+          'purchasedCreditNeedsSubscription': false,
+        },
+      }),
     );
+    await _show(tester, api);
+    expect(identifiedBy(BillingIds.plan), findsNothing);
+    expect(find.text('They reply once you add credit.'), findsOneWidget);
     api.close();
   });
 
@@ -534,7 +701,7 @@ void main() {
       expect(
         tester
             .widget<FilledButton>(
-              find.widgetWithText(FilledButton, 'Choose Standard'),
+              find.widgetWithText(FilledButton, 'Start Standard'),
             )
             .onPressed,
         isNotNull,
@@ -578,7 +745,7 @@ void main() {
       }),
     );
     await _show(tester, api);
-    expect(find.textContaining('Choose '), findsNothing);
+    expect(find.textContaining('Start '), findsNothing);
     expect(find.text('Plans'), findsOneWidget);
     expect(find.text('Plan, invoices & card'), findsOneWidget);
     api.close();
@@ -591,7 +758,7 @@ void main() {
     await _show(tester, api);
     expect(find.text('Payments are not available yet.'), findsWidgets);
     final choose = tester.widget<FilledButton>(
-      find.widgetWithText(FilledButton, 'Choose Standard'),
+      find.widgetWithText(FilledButton, 'Start Standard'),
     );
     expect(choose.onPressed, isNull);
     api.close();

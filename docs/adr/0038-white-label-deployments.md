@@ -53,11 +53,15 @@ open for this: every deployment choice goes through a build-time seam, never an
 the other workspaces are, because wrangler bundles it. A white-label's wrangler
 config sets `main` to `@frockbot/cloudflare/src/index.ts` and resolves the
 Worker's seams with `alias`, which is exactly how the Access build already
-works. Two seams exist, and adding a third is a change to this ADR:
+works. Three seams exist, and adding another is a change to this ADR:
 
 - `#auth-package` — the auth Package chooser. The profile's `authPackage`
   names one of the two this repository ships, or a path (relative to the
   profile) to a chooser module the white-label wrote (§3).
+- `#payments` — the payments Package chooser, which the profile's `payments`
+  names as it names `authPackage`: one of the two this repository ships, or a
+  path to a chooser module the white-label wrote. Its Package credits the
+  account's ledger only through the port `core/contracts` publishes.
 - `#brand` — a module exporting `BRAND_V1: BrandV1` (§2). The tracked default
   is `apps/cloudflare/src/brand.ts`, FrockBot's brand, which is what
   `wrangler dev`, every suite and the hosted deploy resolve. A profile names a

@@ -11,15 +11,16 @@ import {
   type UsageReservation,
   type UsageSettlement,
 } from "@frockbot/app/billing/ledger";
+import { boundedText, object } from "@frockbot/app/billing/wire";
+import type {
+  PaymentsAccountV1,
+  PaymentsPackageV1,
+  PaymentsRouteContextV1,
+} from "@frockbot/core/contracts";
 import {
-  AccountPayments,
-  StripeClient,
-  boundedText,
-  object,
-  stripeId,
-  verifyStripeEvent,
-  type StripeConfig,
-} from "@frockbot/app/billing/stripe";
+  PAYMENTS_PACKAGE_V1,
+  type PaymentsPackageEnvironmentV1,
+} from "#payments";
 import {
   billingPageV1,
   billingScript,
@@ -35,44 +36,56 @@ import {
 } from "@frockbot/app/billing/spending";
 import type { BackendRouteContribution } from "./contracts.js";
 
-export interface BillingEnv {
-  STRIPE_SECRET_KEY?: string;
-  STRIPE_WEBHOOK_SECRET?: string;
-  STRIPE_MONTHLY_PRICE_ID?: string;
+export interface BillingEnv extends PaymentsPackageEnvironmentV1 {
   BETTER_AUTH_URL?: string;
 }
-export function stripeConfig(env: BillingEnv): StripeConfig {
-  if (
-    !env.STRIPE_SECRET_KEY ||
-    !env.STRIPE_WEBHOOK_SECRET ||
-    !env.STRIPE_MONTHLY_PRICE_ID ||
-    !env.BETTER_AUTH_URL
-  )
-    throw new BillingError(
-      "Payments are not available yet. Please check back soon.",
-      503,
-    );
-  const origin = new URL(env.BETTER_AUTH_URL).origin;
-  if (!/^price_[a-zA-Z0-9]+$/.test(env.STRIPE_MONTHLY_PRICE_ID))
-    throw new BillingError("Payment plan is not configured", 503);
-  return {
+
+/** The payments Package this build deploys, over this Worker's `env`. */
+export function paymentsPackageV1(env: BillingEnv): PaymentsPackageV1 {
+  return PAYMENTS_PACKAGE_V1.create(env, {
     productName: BRAND_V1.productName,
-    secretKey: env.STRIPE_SECRET_KEY,
-    webhookSecret: env.STRIPE_WEBHOOK_SECRET,
-    monthlyPriceId: env.STRIPE_MONTHLY_PRICE_ID,
-    origin,
-  };
+  });
 }
-export function accountPayments(
-  ledger: BillingLedger,
-  env: BillingEnv,
-  userId: string,
-) {
-  return new AccountPayments(
-    ledger,
-    new StripeClient(stripeConfig(env)),
-    userId,
-  );
+
+/** The billing routes that are the app's own, which no Package may serve. */
+const APP_BILLING_PATHS_V1 = new Set([
+  "/api/billing",
+  "/api/billing/spending",
+  "/api/billing/limits",
+  "/api/billing/reconcile",
+]);
+
+/**
+ * The addresses outside `/api/billing/provider/` a Package also serves, held
+ * to the contract: under `/api/billing/`, and none the app's own.
+ */
+export function paymentsPathsV1(payments: PaymentsPackageV1): Set<string> {
+  const paths = new Set<string>(payments.paths ?? []);
+  for (const path of paths)
+    if (
+      !/^\/api\/billing\/[a-z0-9/_-]+$/.test(path) ||
+      path.startsWith("/api/billing/provider/") ||
+      APP_BILLING_PATHS_V1.has(path)
+    )
+      throw new Error(
+        `The payments Package cannot serve ${path}: its own paths are under /api/billing/ and none is the app's`,
+      );
+  return paths;
+}
+
+/** The account as the payments Package reads it, from a ledger snapshot. */
+export function paymentsAccountV1(snapshot: {
+  subscription: PaymentsAccountV1["subscription"];
+  paidAccess: PaymentsAccountV1["paidPeriod"];
+  subscribed: boolean;
+  suspended: boolean;
+}): PaymentsAccountV1 {
+  return {
+    subscription: snapshot.subscription,
+    paidPeriod: snapshot.paidAccess,
+    subscribed: snapshot.subscribed,
+    suspended: snapshot.suspended,
+  };
 }
 export interface BillingAccountRpc {
   reconcileBilling(input: {
@@ -83,18 +96,13 @@ export interface BillingAccountRpc {
     userId: string;
     before?: number;
   }): Promise<ReturnType<BillingLedger["snapshot"]>>;
-  billingCheckout(input: {
+  /** One of the payments Package's account commands, in the ledger's object. */
+  paymentsCommand(input: {
     userId: string;
-    command: { id: string; kind: "subscription" | "topup"; cents?: number };
-  }): Promise<{ url: string }>;
-  billingPortal(input: {
-    userId: string;
-    commandId: string;
-  }): Promise<{ url: string }>;
-  billingWebhook(input: {
-    userId: string;
-    event: Record<string, unknown>;
-  }): Promise<void>;
+    command: string;
+    input: unknown;
+    signedIn: boolean;
+  }): Promise<unknown>;
   reserveUsage(input: {
     userId: string;
     reservation: UsageReservation;
@@ -200,9 +208,17 @@ export function billingRoutes(
   account: (userId: string) => BillingAccountRpc,
   modelRates: () => Promise<HostedModelRatesV1>,
 ): BackendRouteContribution {
+  const payments = paymentsPackageV1(env);
+  const providerPaths = paymentsPathsV1(payments);
+  const page = () =>
+    billingPageV1({
+      productName: BRAND_V1.productName,
+      plan: PAYMENTS_PACKAGE_V1.plan,
+      providerName: payments.providerName,
+    });
   return {
     packageId: "billing",
-    async publicRoute(request, url) {
+    async publicRoute(request, url, routeContext) {
       if (
         request.method === "GET" &&
         ["/billing", "/billing.js", "/billing.css"].includes(url.pathname)
@@ -217,7 +233,7 @@ export function billingRoutes(
             ? billingScript
             : url.pathname.endsWith(".css")
               ? billingStyles
-              : billingPageV1(BRAND_V1.productName),
+              : page(),
           {
             headers: {
               "content-type": `${type}; charset=utf-8`,
@@ -229,56 +245,37 @@ export function billingRoutes(
           },
         );
       }
-      if (url.pathname !== "/api/billing/stripe/webhook") return;
-      if (request.method !== "POST") return new Response(null, { status: 405 });
-      try {
-        const config = stripeConfig(env);
-        const event = await verifyStripeEvent(
-          await boundedText(request),
-          request.headers.get("stripe-signature"),
-          config.webhookSecret,
-        );
-        const supported = new Set([
-          "invoice.paid",
-          "invoice.payment_failed",
-          "customer.subscription.created",
-          "customer.subscription.updated",
-          "customer.subscription.deleted",
-          "checkout.session.completed",
-          "checkout.session.async_payment_succeeded",
-          "charge.refunded",
-          "charge.dispute.created",
-        ]);
-        if (!supported.has(String(event.type)))
-          return Response.json({ received: true });
-        const stripe = new StripeClient(config);
-        const data = object(object(event.data).object);
-        // Dispute payloads identify the charge rather than its customer.
-        if (!data.customer && event.type === "charge.dispute.created") {
-          const charge = await stripe.call(`charges/${stripeId(data.charge)}`);
-          data.customer = charge.customer;
-        }
-        const customer = await stripe.call(
-          `customers/${stripeId(data.customer)}`,
-        );
-        // Deleting an account deletes its customer, and Stripe then reports
-        // the subscription that took with it. There is nobody left to tell,
-        // and refusing would only have Stripe retry for days.
-        if (customer.deleted === true) return Response.json({ received: true });
-        const userId = object(customer.metadata).frockbot_user_id;
-        if (
-          typeof userId !== "string" ||
-          !/^[a-zA-Z0-9_-]{1,128}$/.test(userId)
-        )
-          throw new BillingError("Unknown payment account", 400);
-        await account(userId).billingWebhook({ userId, event });
-        return Response.json({ received: true });
-      } catch (error) {
-        // An event that raced the account's deletion has nothing to apply to.
-        if (error instanceof Error && error.name === "AccountDeletedError")
-          return Response.json({ received: true });
-        return failure(error);
-      }
+      // Everything under here is the payments Package's: provider events,
+      // and the purchases the signed-in person starts, which ask the session
+      // themselves.
+      if (
+        !url.pathname.startsWith("/api/billing/provider/") &&
+        !providerPaths.has(url.pathname)
+      )
+        return;
+      const context: PaymentsRouteContextV1 = {
+        sessionUserId: () =>
+          routeContext.sessionUserId?.() ?? Promise.resolve(undefined),
+        account: (userId, { signedIn }) => ({
+          command: async (command, input) => {
+            if (signedIn && BILLING_LAUNCH_BLOCKERS.length)
+              throw new BillingError(
+                "Payments are not open yet. Launch qualification is still in progress.",
+                503,
+              );
+            return account(userId).paymentsCommand({
+              userId,
+              command,
+              input,
+              signedIn,
+            });
+          },
+        }),
+      };
+      return (
+        (await payments.route?.(request, url, context)) ??
+        new Response(null, { status: 404 })
+      );
     },
     async route(request, url, context) {
       if (
@@ -300,7 +297,7 @@ export function billingRoutes(
       };
       if (request.method === "GET") {
         if (url.pathname === "/billing")
-          return new Response(billingPageV1(BRAND_V1.productName), {
+          return new Response(page(), {
             headers: { ...headers, "content-type": "text/html; charset=utf-8" },
           });
         if (url.pathname === "/billing.js")
@@ -326,12 +323,13 @@ export function billingRoutes(
             (!Number.isSafeInteger(before) || before < 0)
           )
             throw new BillingError("Invalid usage cursor", 400);
+          const snapshot = await account(userId).readBilling({
+            userId,
+            ...(before === undefined ? {} : { before }),
+          });
           return Response.json(
             {
-              ...(await account(userId).readBilling({
-                userId,
-                ...(before === undefined ? {} : { before }),
-              })),
+              ...snapshot,
               // A table that cannot be read just now lists no rates; the
               // balance and history are still the account's to see.
               modelRates: customerModelRatesV1(
@@ -348,12 +346,11 @@ export function billingRoutes(
               // meaningless: nothing is charged and nothing is refused.
               metered: hostedBillingEnabledV1(env),
               paymentsAvailable:
-                BILLING_LAUNCH_BLOCKERS.length === 0 &&
-                !!(
-                  env.STRIPE_SECRET_KEY &&
-                  env.STRIPE_WEBHOOK_SECRET &&
-                  env.STRIPE_MONTHLY_PRICE_ID
-                ),
+                BILLING_LAUNCH_BLOCKERS.length === 0 && payments.available,
+              // Who handles payments, and what the Billing page offers this
+              // account: the payments Package's, drawn as data.
+              paymentsProvider: payments.providerName,
+              actions: payments.actions(paymentsAccountV1(snapshot)),
             },
             { headers },
           );
@@ -418,40 +415,6 @@ export function billingRoutes(
           });
           return Response.json({ ok: true }, { headers });
         }
-        if (url.pathname === "/api/billing/checkout") {
-          if (BILLING_LAUNCH_BLOCKERS.length)
-            throw new BillingError(
-              "Payments are not open yet. Launch qualification is still in progress.",
-              503,
-            );
-          if (
-            typeof body.id !== "string" ||
-            !["subscription", "topup"].includes(String(body.kind)) ||
-            (body.cents !== undefined && typeof body.cents !== "number")
-          )
-            throw new BillingError("Invalid checkout", 400);
-          return Response.json(
-            await account(userId).billingCheckout({
-              userId,
-              command: {
-                id: body.id,
-                kind: body.kind as "subscription" | "topup",
-                ...(body.cents === undefined
-                  ? {}
-                  : { cents: body.cents as number }),
-              },
-            }),
-            { headers },
-          );
-        }
-        if (
-          url.pathname === "/api/billing/portal" &&
-          typeof body.id === "string"
-        )
-          return Response.json(
-            await account(userId).billingPortal({ userId, commandId: body.id }),
-            { headers },
-          );
         return new Response(null, { status: 404 });
       } catch (error) {
         return failure(error);

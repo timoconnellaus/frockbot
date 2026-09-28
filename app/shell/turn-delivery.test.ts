@@ -23,7 +23,7 @@ import {
 import { failedTurnRecordsV1 } from "../notifications/bot.js";
 import type { ShellBotStateV1 } from "./backend-state.js";
 import { shellTerminalRecordsV1 } from "./terminal-records.js";
-import { turnInputTextV1 } from "./turn.js";
+import { personWordsV1, turnInputTextV1 } from "./turn.js";
 
 function stateWith(inbox: RoutineInboxStore): ShellBotStateV1 {
   // SAFETY: the input text a Turn runs on is drawn from the pending-input
@@ -165,6 +165,39 @@ function chatAdmission(): SessionEvent[] {
   ]);
   return [...session.activeRunJournal];
 }
+
+describe("the person's own words on a Turn", () => {
+  const text = "Can you remember that my wife is Becky";
+
+  test("are the text of a Turn the person sent in the app, by voice or by email", () => {
+    expect(personWordsV1({ text })).toEqual({ personText: text });
+    for (const kind of ["voice", "email"] as const) {
+      expect(
+        personWordsV1({
+          text,
+          // SAFETY: only the origin's kind is read.
+          origin: { kind } as never,
+        }),
+      ).toEqual({ personText: text });
+    }
+  });
+
+  test("are absent on a Turn someone or something else started", () => {
+    for (const kind of [
+      "routine",
+      "routine-delivery",
+      "input-delivery",
+      "subagent",
+      "handoff",
+      "bot",
+      "group",
+    ] as const) {
+      // SAFETY: only the origin's kind is read.
+      expect(personWordsV1({ text, origin: { kind } as never })).toEqual({});
+    }
+    expect(personWordsV1({ text, turnType: "automation" })).toEqual({});
+  });
+});
 
 describe("a delivery Turn that did not deliver", () => {
   test("a failed delivery leaves the hand-off deliverable", async () => {

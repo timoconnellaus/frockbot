@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { BILLING_PLAN } from "@frockbot/app/billing/ledger";
+import { PAYMENTS_PACKAGE_V1 } from "#payments";
 import {
   billingRoutes,
+  paymentsPathsV1,
   type BillingAccountRpc,
   type BillingEnv,
 } from "./billing";
@@ -23,7 +24,7 @@ function account(
   return {
     async readBilling() {
       return {
-        plan: BILLING_PLAN,
+        plan: PAYMENTS_PACKAGE_V1.plan,
         subscription: null,
         paidAccess: null,
         canSpend: false,
@@ -38,13 +39,9 @@ function account(
         usage: [],
       };
     },
-    async billingCheckout() {
+    async paymentsCommand() {
       return { url: "https://checkout.stripe.com/c/test" };
     },
-    async billingPortal() {
-      return { url: "https://billing.stripe.com/p/test" };
-    },
-    async billingWebhook() {},
     async reconcileBilling() {},
     async reserveUsage() {
       return { status: "reserved", created: true };
@@ -98,8 +95,22 @@ describe("billing HTTP routes", () => {
       "Spent in the last 30 days",
       "Credit history",
       "Recent usage",
+      "Payments are securely handled by Stripe.",
     ])
-      expect(billingPageV1("FrockBot")).toContain(text);
+      expect(
+        billingPageV1({
+          productName: "FrockBot",
+          plan: PAYMENTS_PACKAGE_V1.plan,
+          providerName: "Stripe",
+        }),
+      ).toContain(text);
+    expect(
+      billingPageV1({
+        productName: "FrockBot",
+        plan: PAYMENTS_PACKAGE_V1.plan,
+        providerName: null,
+      }),
+    ).not.toContain("securely handled by");
   });
   test("requires authentication for both the billing page and account API", async () => {
     const routes = billingRoutes(env, () => account(), rates);
@@ -135,7 +146,26 @@ describe("billing HTTP routes", () => {
     expect(seen).toEqual(["user-one"]);
     expect(response?.headers.get("cache-control")).toBe("no-store");
     expect(await response?.json()).toMatchObject({
-      plan: { monthlyCents: 2000 },
+      plan: {
+        subscription: { monthlyCents: 2000, includedMicros: 15_000_000 },
+        topUpCents: [1000, 2500, 5000],
+        purchasedCreditNeedsSubscription: true,
+      },
+      paymentsProvider: "Stripe",
+      // Not subscribed: the plan is for sale, and nothing else is offered.
+      actions: [
+        {
+          purpose: "subscribe",
+          label: "Subscribe",
+          target: {
+            kind: "command",
+            path: "/api/billing/provider/checkout",
+            body: { kind: "subscription" },
+          },
+          opens: "browser",
+          hosts: ["checkout.stripe.com"],
+        },
+      ],
       computerRate: {
         activeUsdPerHour: 2.75,
         storageIncludedGb: 100,
@@ -279,13 +309,13 @@ describe("billing HTTP routes", () => {
     ).toEqual({});
   });
 
-  test("rejects cross-origin mutations before dispatch", async () => {
+  test("rejects cross-origin purchases before dispatch", async () => {
     let calls = 0;
     const routes = billingRoutes(
       env,
       () =>
         account({
-          async billingCheckout() {
+          async paymentsCommand() {
             calls += 1;
             return { url: "https://checkout.stripe.com/c/test" };
           },
@@ -293,7 +323,7 @@ describe("billing HTTP routes", () => {
       rates,
     );
     const request = new Request(
-      "https://app.frockbot.com/api/billing/checkout",
+      "https://app.frockbot.com/api/billing/provider/checkout",
       {
         method: "POST",
         headers: {
@@ -303,13 +333,176 @@ describe("billing HTTP routes", () => {
         body: JSON.stringify({ id: "0123456789abcdef", kind: "subscription" }),
       },
     );
-    const response = await routes.route(
-      request,
-      new URL(request.url),
-      signedIn,
-    );
+    const response = await routes.publicRoute!(request, new URL(request.url), {
+      client: "browser",
+      sessionUserId: async () => "user-one",
+    });
     expect(response?.status).toBe(403);
     expect(calls).toBe(0);
+  });
+
+  test("hands a signed-in purchase to that account, as the person's", async () => {
+    const seen: unknown[] = [];
+    const routes = billingRoutes(
+      env,
+      (userId) =>
+        account({
+          async paymentsCommand(input) {
+            seen.push({ userId, input });
+            return { url: "https://checkout.stripe.com/c/test" };
+          },
+        }),
+      rates,
+    );
+    const post = (path: string, body: unknown, session?: string) => {
+      const request = new Request(`https://app.frockbot.com${path}`, {
+        method: "POST",
+        headers: {
+          origin: "https://app.frockbot.com",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      return routes.publicRoute!(request, new URL(request.url), {
+        client: "browser",
+        sessionUserId: async () => session,
+      });
+    };
+    const bought = await post(
+      "/api/billing/provider/checkout",
+      { id: "0123456789abcdef", kind: "topup", cents: 2500 },
+      "user-one",
+    );
+    expect(bought?.status).toBe(200);
+    expect(bought?.headers.get("cache-control")).toBe("no-store");
+    expect((await bought!.json()) as unknown).toEqual({
+      url: "https://checkout.stripe.com/c/test",
+    });
+    expect(
+      (
+        await post(
+          "/api/billing/provider/portal",
+          { id: "fedcba9876543210" },
+          "user-one",
+        )
+      )?.status,
+    ).toBe(200);
+    expect(seen).toEqual([
+      {
+        userId: "user-one",
+        input: {
+          userId: "user-one",
+          command: "checkout",
+          input: { id: "0123456789abcdef", kind: "topup", cents: 2500 },
+          signedIn: true,
+        },
+      },
+      {
+        userId: "user-one",
+        input: {
+          userId: "user-one",
+          command: "portal",
+          input: { commandId: "fedcba9876543210" },
+          signedIn: true,
+        },
+      },
+    ]);
+    // Nobody signed in, a kind the plan does not sell, and a path the
+    // Package does not serve all stop before any account is asked.
+    expect(
+      (
+        await post("/api/billing/provider/checkout", {
+          id: "0123456789abcdef",
+          kind: "subscription",
+        })
+      )?.status,
+    ).toBe(401);
+    expect(
+      (
+        await post(
+          "/api/billing/provider/checkout",
+          { id: "0123456789abcdef", kind: "gift" },
+          "user-one",
+        )
+      )?.status,
+    ).toBe(400);
+    expect(
+      (await post("/api/billing/provider/elsewhere", {}, "user-one"))?.status,
+    ).toBe(404);
+    expect(seen).toHaveLength(2);
+  });
+
+  test("answers at the addresses Stripe and installed apps already use", async () => {
+    // The registered webhook endpoint and an installed app's checkout reach
+    // the same handlers as the provider routes, so nothing registered moved.
+    const seen: unknown[] = [];
+    const routes = billingRoutes(
+      env,
+      () =>
+        account({
+          async paymentsCommand(input) {
+            seen.push(input);
+            return { url: "https://checkout.stripe.com/c/test" };
+          },
+        }),
+      rates,
+    );
+    const webhook = new Request(
+      "https://app.frockbot.com/api/billing/stripe/webhook",
+      { method: "POST", body: "{}" },
+    );
+    expect(
+      (await routes.publicRoute!(webhook, new URL(webhook.url), {
+        client: "browser",
+      }))!.status,
+    ).toBe(400);
+    for (const [path, body] of [
+      [
+        "/api/billing/checkout",
+        { id: "0123456789abcdef", kind: "subscription" },
+      ],
+      ["/api/billing/portal", { id: "fedcba9876543210" }],
+    ] as const) {
+      const request = new Request(`https://app.frockbot.com${path}`, {
+        method: "POST",
+        headers: {
+          origin: "https://app.frockbot.com",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      expect(
+        (await routes.publicRoute!(request, new URL(request.url), {
+          client: "browser",
+          sessionUserId: async () => "user-one",
+        }))!.status,
+      ).toBe(200);
+    }
+    expect(seen).toMatchObject([
+      { command: "checkout", signedIn: true },
+      { command: "portal", signedIn: true },
+    ]);
+  });
+
+  test("a Package serves no path of the app's own, nor one outside billing", () => {
+    const serving = (paths: string[]) => () =>
+      paymentsPathsV1({
+        available: false,
+        providerName: null,
+        actions: () => [],
+        paths: paths as `/api/billing/${string}`[],
+      });
+    for (const path of [
+      "/api/billing/spending",
+      "/api/billing/reconcile",
+      "/api/billing/provider/x",
+      "/api/account/delete",
+      "/api/billing/../account",
+    ])
+      expect(serving([path])).toThrow("cannot serve");
+    expect(serving(["/api/billing/checkout"])()).toEqual(
+      new Set(["/api/billing/checkout"]),
+    );
   });
 
   test("webhook rejects missing signatures and oversized bodies before account dispatch", async () => {
@@ -323,7 +516,7 @@ describe("billing HTTP routes", () => {
       rates,
     );
     const missing = new Request(
-      "https://app.frockbot.com/api/billing/stripe/webhook",
+      "https://app.frockbot.com/api/billing/provider/webhook",
       { method: "POST", body: "{}" },
     );
     expect(
@@ -332,7 +525,7 @@ describe("billing HTTP routes", () => {
       }))!.status,
     ).toBe(400);
     const huge = new Request(
-      "https://app.frockbot.com/api/billing/stripe/webhook",
+      "https://app.frockbot.com/api/billing/provider/webhook",
       {
         method: "POST",
         headers: { "stripe-signature": "t=1,v1=" + "0".repeat(64) },

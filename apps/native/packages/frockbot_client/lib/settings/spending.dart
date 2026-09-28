@@ -87,7 +87,13 @@ String _perTurn(num micros, num turns) =>
 num? spendAllowance(Map billing) {
   if (billing['metered'] != true) return null;
   if (billing['subscribed'] != true && billing['trial'] is! Map) return null;
-  final included = (billing['plan'] as Map?)?['includedMicros'] as num?;
+  final id = (billing['subscription'] as Map?)?['planId'];
+  final plan =
+      ((billing['plan'] as Map?)?['subscriptions'] as List? ?? const [])
+          .whereType<Map>()
+          .where((plan) => plan['id'] == id)
+          .firstOrNull;
+  final included = plan?['includedMicros'] as num?;
   return included == null || included <= 0 ? null : included;
 }
 

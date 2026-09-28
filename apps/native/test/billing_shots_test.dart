@@ -125,13 +125,6 @@ Map<String, Object?> _spending(
   };
 }
 
-const _plusPlan = {
-  'id': 'plus',
-  'monthlyCents': 5000,
-  'includedMicros': 60000000,
-  'topUpCents': [1000, 2500, 5000],
-};
-
 const _rates = {
   '@frock/auto': {
     'inputUsdPerMillion': 0.6,
@@ -150,15 +143,10 @@ const _rates = {
   },
 };
 
-Map<String, Object?> _on(Map<String, Object?> overrides) => subscribed({
-  'subscription': {
-    'status': 'active',
-    'periodEnd': _renews,
-    'cancelAtPeriodEnd': false,
-  },
-  'modelRates': _rates,
-  ...overrides,
-});
+Map<String, Object?> _on(
+  Map<String, Object?> overrides, {
+  String plan = 'standard',
+}) => subscribed({'modelRates': _rates, ...overrides}, plan: plan);
 
 final _healthy = _on({
   'includedMicros': 12400000,
@@ -172,16 +160,19 @@ final _reserve = _on({'includedMicros': 0, 'purchasedMicros': 8400000});
 
 final _paused = _on({});
 
+final _trialEnds =
+    DateTime.now().millisecondsSinceEpoch + 5 * 86400000 - 3600000;
+
 final _trial = billing({
-  'complimentaryMicros': 3100000,
+  'complimentaryMicros': 1900000,
   'subscription': {
     'status': 'trialing',
-    'periodEnd': DateTime.now().millisecondsSinceEpoch + 5 * 86400000 - 3600000,
+    'planId': 'standard',
+    'periodEnd': _trialEnds,
+    'trialEnd': _trialEnds,
+    'cancelAtPeriodEnd': false,
   },
-  'trial': {
-    'endsAt': DateTime.now().millisecondsSinceEpoch + 5 * 86400000 - 3600000,
-    'creditMicros': 5000000,
-  },
+  'trial': {'endsAt': _trialEnds, 'creditMicros': 3000000},
 });
 
 final _outOfCredit = billing({
@@ -323,7 +314,7 @@ void main() {
     await _scene(
       tester,
       'desktop-plus',
-      _on({'includedMicros': 41000000, 'plan': _plusPlan}),
+      _on({'includedMicros': 41000000}, plan: 'plus'),
       size: const Size(1000, 1100),
     );
   });

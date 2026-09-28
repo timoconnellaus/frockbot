@@ -14,14 +14,6 @@ import '../theme/rows.dart';
 import '../theme/states.dart';
 import 'spending.dart';
 
-/// The plans as `/api/billing` states them; these are only what a reply
-/// without them falls back to.
-const _fallbackPlans = {
-  'standard': (monthlyCents: 2000, includedMicros: 20000000),
-  'plus': (monthlyCents: 5000, includedMicros: 60000000),
-};
-const _defaultTopUps = [1000, 2500, 5000];
-
 const _day = 86400000;
 
 /// How wide Billing reads: one column, the width of the design, centred.
@@ -44,30 +36,37 @@ typedef _Plan = ({
   int includedMicros,
 });
 
-_Plan _readPlan(Object? raw) {
-  final plan = raw is Map ? raw : const {};
-  final id = plan['id'] == 'plus' ? 'plus' : 'standard';
-  final fallback = _fallbackPlans[id]!;
-  return (
-    id: id,
-    name: id == 'plus' ? 'Plus' : 'Standard',
-    monthlyCents:
-        (plan['monthlyCents'] as num?)?.toInt() ?? fallback.monthlyCents,
-    includedMicros:
-        (plan['includedMicros'] as num?)?.toInt() ?? fallback.includedMicros,
-  );
+/// The monthly subscriptions the deployment sells, cheapest first.
+List<_Plan> _plans(Map data) => [
+  for (final plan
+      in ((data['plan'] as Map?)?['subscriptions'] as List? ?? const [])
+          .whereType<Map>())
+    (
+      id: '${plan['id']}',
+      name: '${plan['name']}',
+      monthlyCents: (plan['monthlyCents'] as num?)?.toInt() ?? 0,
+      includedMicros: (plan['includedMicros'] as num?)?.toInt() ?? 0,
+    ),
+];
+
+/// The plan the account's subscription is on, trialling or paid.
+_Plan? _ownPlan(Map data, List<_Plan> plans) {
+  final id = (data['subscription'] as Map?)?['planId'];
+  return plans.where((plan) => plan.id == id).firstOrNull;
 }
 
-/// Both plans, Standard first.
-List<_Plan> _plans(Map data) {
-  final listed = (data['plans'] as List? ?? const []).map(_readPlan).toList();
-  if (listed.length >= 2) return listed;
-  final own = _readPlan(data['plan']);
-  return [
-    own.id == 'standard' ? own : _readPlan(const {'id': 'standard'}),
-    own.id == 'plus' ? own : _readPlan(const {'id': 'plus'}),
-  ];
-}
+/// What the payments Package offers the account for [purpose], and for
+/// [plan] where it names one.
+List<Map> _actions(Map data, String purpose) =>
+    (data['actions'] as List? ?? const [])
+        .whereType<Map>()
+        .where((action) => action['purpose'] == purpose)
+        .toList();
+
+Map? _action(Map data, String purpose, {String? plan}) => _actions(
+  data,
+  purpose,
+).where((action) => plan == null || action['plan'] == plan).firstOrNull;
 
 /// Billing: what the account can spend, how to add more, and where it went.
 class BillingPage extends StatefulWidget {
@@ -141,7 +140,7 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
       setState(() {
         account = response;
         failure = null;
-        if (!tops.contains(topUpCents)) {
+        if (tops.isNotEmpty && !tops.contains(topUpCents)) {
           topUpCents = tops[tops.length ~/ 2];
         }
       });
@@ -177,39 +176,56 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
     });
   }
 
-  Future<void> _openPayment(String kind, {int? cents, String? plan}) async {
+  /// Takes one of the payments Package's actions: opens its page, or asks
+  /// the Package's route for one as the signed-in person and opens that.
+  Future<void> _openPayment(Map action, {int? cents}) async {
     if (busy) return;
     setState(() {
       busy = true;
       message = null;
     });
-    final key = '$kind:${cents ?? plan ?? 0}';
+    final purpose = action['purpose'];
+    final key = '$purpose:${action['plan'] ?? ''}:${cents ?? 0}';
     final id = checkoutIds.putIfAbsent(key, randomId);
+    final inApp = action['opens'] == 'in-app';
     try {
-      final response = await widget.api.request(
-        kind == 'portal' ? '/api/billing/portal' : '/api/billing/checkout',
-        body: {
-          'id': id,
-          if (kind != 'portal') 'kind': kind,
-          'cents': ?cents,
-          'plan': ?plan,
-        },
-      );
-      if (response is! Map || response['url'] is! String) {
+      final target = action['target'] as Map;
+      final Object? link;
+      if (target['kind'] == 'url') {
+        link = target['url'];
+      } else {
+        final response = await widget.api.request(
+          target['path'] as String,
+          body: {
+            'id': id,
+            ...(target['body'] as Map? ?? const {}),
+            'cents': ?cents,
+          },
+        );
+        link = response is Map ? response['url'] : null;
+      }
+      if (link is! String) {
         throw const FormatException('Payment link is unavailable');
       }
-      final uri = Uri.parse(response['url'] as String);
-      if (uri.scheme != 'https' ||
-          !{'checkout.stripe.com', 'billing.stripe.com'}.contains(uri.host)) {
+      final origin = Uri.parse(hostedOrigin);
+      final uri = origin.resolve(link);
+      final hosts = (action['hosts'] as List? ?? const []).whereType<String>();
+      if (uri.origin != origin.origin &&
+          (uri.scheme != 'https' || !hosts.contains(uri.host))) {
         throw const FormatException('Invalid payment link');
       }
-      if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      if (!await launchUrl(
+        uri,
+        mode: inApp
+            ? LaunchMode.inAppBrowserView
+            : LaunchMode.externalApplication,
+      )) {
         throw StateError('Could not open your browser');
       }
       checkoutIds.remove(key);
-      if (mounted) {
+      if (mounted && !inApp) {
         setState(
-          () => message = kind == 'portal'
+          () => message = purpose == 'manage'
               ? 'Your plan, invoices and card are open in your browser.'
               : 'Complete payment in your browser, then return here. Your balance updates once payment is confirmed.',
         );
@@ -225,27 +241,41 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _chooseTopUp(List<int> topUps) async {
+  Future<void> _chooseTopUp(Map action, List<int> topUps) async {
+    if (topUps.isEmpty) return _openPayment(action);
     final cents = await showDialog<int>(
       context: context,
-      builder: (_) => _TopUpDialog(topUps: topUps, initial: topUpCents),
+      builder: (_) => _TopUpDialog(
+        topUps: topUps,
+        initial: topUpCents,
+        label: action['label'] as String? ?? 'Add',
+      ),
     );
     if (cents == null || !mounted) return;
     setState(() => topUpCents = cents);
-    await _openPayment('topup', cents: cents);
+    await _openPayment(action, cents: cents);
   }
 
-  /// Plus takes effect now: it is charged and starts a new billing month, so
-  /// it is confirmed first.
-  Future<void> _moveToPlus(_Plan plus) async {
+  /// A plan change charges now (a move up, or starting early from a trial)
+  /// or at renewal (a move down), so it is confirmed first. It answers the
+  /// plan it moved to, and Billing shows it rather than opening a page.
+  Future<void> _changePlan(Map action, _Plan to, _Plan? from) async {
     if (busy) return;
+    final data = account ?? const {};
+    final trialing = data['trial'] is Map;
+    final up = from == null || to.includedMicros > from.includedMicros;
+    final renews = (data['subscription'] as Map?)?['periodEnd'] as num?;
+    final label = action['label'] as String? ?? 'Move to ${to.name}';
+    final terms = trialing
+        ? 'This ends your trial and charges ${to.name}’s first month, ${_dollars(to.monthlyCents)}, now. A new billing month begins today.'
+        : up
+        ? '${to.name} is ${_dollars(to.monthlyCents)} a month with ${_wholeMicros(to.includedMicros)} of usage. It starts now: you are charged today and a new billing month begins. Top-ups you have stay yours.'
+        : '${to.name} is ${_dollars(to.monthlyCents)} a month with ${_wholeMicros(to.includedMicros)} of usage. You stay on ${from.name} until your plan renews${renews == null ? '' : ' on ${spendDate(renews)}'}.';
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Move to Plus?'),
-        content: Text(
-          'Plus is ${_dollars(plus.monthlyCents)} a month with ${_wholeMicros(plus.includedMicros)} of usage. It starts now: you are charged today and a new billing month begins. Top-ups you have stay yours.',
-        ),
+        title: Text('$label?'),
+        content: Text(terms),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -253,7 +283,7 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Move to Plus'),
+            child: Text(label),
           ),
         ],
       ),
@@ -263,21 +293,27 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
       busy = true;
       message = null;
     });
-    const key = 'plan:plus';
+    final key = 'change-plan:${to.id}';
     final id = checkoutIds.putIfAbsent(key, randomId);
+    const lost =
+        'Couldn’t change your plan just now. Check your connection and try again.';
     try {
+      final target = action['target'] as Map;
       final response = await widget.api.request(
-        '/api/billing/plan',
-        body: {'id': id, 'plan': 'plus'},
+        target['path'] as String,
+        body: {'id': id, ...(target['body'] as Map? ?? const {})},
       );
-      if (response is! Map || response['plan'] != 'plus') {
+      if (response is! Map || response['plan'] != to.id) {
         throw const FormatException('Invalid plan response');
       }
       checkoutIds.remove(key);
       if (mounted) {
         setState(
-          () =>
-              message = 'You’re on Plus. Your new billing month starts today.',
+          () => message = trialing
+              ? 'Your ${to.name} plan has started. Your new billing month starts today.'
+              : up
+              ? 'You’re on ${to.name}. Your new billing month starts today.'
+              : 'You’ll move to ${to.name} when your plan renews.',
         );
       }
       await _refresh();
@@ -285,28 +321,20 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
       // A refusal is an answer, not a lost request: the next try is new.
       if (error.status == 409) checkoutIds.remove(key);
       if (mounted) {
-        setState(
-          () => message = error.status == 409 ? error.message : 'Couldn’t change your plan just now. Check your connection and try again.',
-        );
+        setState(() => message = error.status == 409 ? error.message : lost);
       }
     } catch (_) {
-      if (mounted) {
-        setState(
-          () => message = 'Couldn’t change your plan just now. Check your connection and try again.',
-        );
-      }
+      if (mounted) setState(() => message = lost);
     } finally {
       if (mounted) setState(() => busy = false);
     }
   }
 
-  List<int> _topUps(Map data) {
-    final listed = ((data['plan'] as Map?)?['topUpCents'] as List? ?? const [])
-        .whereType<num>()
-        .map((c) => c.toInt())
-        .toList();
-    return listed.isEmpty ? _defaultTopUps : listed;
-  }
+  List<int> _topUps(Map data) =>
+      ((data['plan'] as Map?)?['topUpCents'] as List? ?? const [])
+          .whereType<num>()
+          .map((c) => c.toInt())
+          .toList();
 
   @override
   Widget build(BuildContext context) {
@@ -368,16 +396,38 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
     final metered = data['metered'] == true;
     final payments = data['paymentsAvailable'] == true;
     final plans = _plans(data);
-    final own = _readPlan(data['plan']);
+    final own = _ownPlan(data, plans);
+    final tops = _topUps(data);
+    final topUp = _action(data, 'top-up');
+    final manage = _action(data, 'manage');
     int micros(String key) => (data[key] as num?)?.toInt() ?? 0;
+    VoidCallback? take(Map? action, void Function(Map action) run) =>
+        action != null && payments && !busy ? () => run(action) : null;
+    VoidCallback? change(_Plan to) => take(
+      _action(data, 'change-plan', plan: to.id),
+      (action) => unawaited(_changePlan(action, to, own)),
+    );
+    // Credit short: the plan with more room is offered beside the answer.
+    final bigger = own == null || trial != null
+        ? null
+        : plans
+              .where((plan) => plan.includedMicros > own.includedMicros)
+              .where(
+                (plan) => _action(data, 'change-plan', plan: plan.id) != null,
+              )
+              .firstOrNull;
     // A subscribed account out of credit is told so in its own gauge; this
     // is for an account with no plan to draw on, or one under review.
     final blocked = !metered
         ? null
         : data['suspended'] == true
         ? 'Payments need review. Contact support before starting more paid work.'
-        : data['canSpend'] != true && !subscribed
-        ? _hadComplimentary(data)
+        : data['canSpend'] != true && !subscribed && trial == null
+        ? plans.isEmpty
+              ? _hadComplimentary(data)
+                    ? 'Your complimentary credit is used up. Add credit to keep them working.'
+                    : 'They reply once you add credit.'
+              : _hadComplimentary(data)
               ? 'Your complimentary credit is used up. Subscribe to keep them working.'
               : 'They reply once you subscribe or receive credit.'
         : null;
@@ -390,12 +440,14 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
           'purchasedMicros',
           'reservedMicros',
         ].any((key) => micros(key) > 0);
-    final topUps = _topUps(data);
-    final canTopUp = payments && subscribed && !busy;
-    final canMove = payments && subscribed && own.id == 'standard' && !busy;
+    final needsSubscription =
+        (data['plan'] as Map?)?['purchasedCreditNeedsSubscription'] != false;
     return [
       if (message case final String text) _Notice(text),
-      if (!payments) const _Notice('Payments are not available yet.'),
+      // A deployment with no payment provider sells nothing, so there is
+      // nothing to be unavailable.
+      if (!payments && data['paymentsProvider'] != null)
+        const _Notice('Payments are not available yet.'),
       if (blocked != null) ...[
         identified(BillingIds.blocked, _Blocked(reason: blocked)),
         const SizedBox(height: 16),
@@ -404,53 +456,73 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
         identified(
           BillingIds.balance,
           _FuelCard(
-            fuel: _fuel(data, pace, DateTime.now().millisecondsSinceEpoch),
+            fuel: _fuel(
+              data,
+              pace,
+              DateTime.now().millisecondsSinceEpoch,
+              plan: own,
+              needsSubscription: needsSubscription,
+            ),
             data: data,
             plan: own,
-            onTopUp: canTopUp ? () => unawaited(_chooseTopUp(topUps)) : null,
-            onMoveToPlus: canMove
-                ? () => unawaited(_moveToPlus(plans.last))
-                : null,
-            onPortal: payments && subscription != null && !busy
-                ? () => unawaited(_openPayment('portal'))
-                : null,
+            onTopUp: take(
+              topUp,
+              (action) => unawaited(_chooseTopUp(action, tops)),
+            ),
+            moveLabel: bigger == null
+                ? null
+                : _action(data, 'change-plan', plan: bigger.id)?['label']
+                      as String?,
+            onMove: bigger == null ? null : change(bigger),
+            portalLabel: manage?['label'] as String? ?? '',
+            onPortal: take(manage, (action) => unawaited(_openPayment(action))),
           ),
         ),
         const SizedBox(height: 16),
       ],
-      identified(
-        BillingIds.plan,
-        _PlansCard(
-          plans: plans,
-          current: subscribed || trial != null ? own.id : null,
-          trial: trial != null,
-          selling: !subscribed && trial == null && _canSubscribe(subscription),
-          payments: payments,
-          // A subscription that lapsed or is past due is mended where it
-          // is kept, not bought again.
-          onChoose:
-              !subscribed &&
-                  trial == null &&
-                  _canSubscribe(subscription) &&
-                  payments &&
-                  !busy
-              ? (id) => unawaited(_openPayment('subscription', plan: id))
-              : null,
-          onMoveToPlus: canMove
-              ? () => unawaited(_moveToPlus(plans.last))
-              : null,
-          onMend:
-              !subscribed &&
-                  trial == null &&
-                  !_canSubscribe(subscription) &&
-                  subscription != null &&
-                  payments &&
-                  !busy
-              ? () => unawaited(_openPayment('portal'))
-              : null,
+      if (plans.isNotEmpty) ...[
+        identified(
+          BillingIds.plan,
+          _PlansCard(
+            plans: [
+              // Only what the account is on or can buy: a plan the Package
+              // offers no way to take is not for sale here.
+              for (final plan in plans)
+                if (plan.id == own?.id ||
+                    _action(data, 'subscribe', plan: plan.id) != null ||
+                    _action(data, 'change-plan', plan: plan.id) != null ||
+                    ![
+                      ..._actions(data, 'subscribe'),
+                      ..._actions(data, 'change-plan'),
+                    ].any((action) => action['plan'] != null))
+                  plan,
+            ],
+            current: subscribed || trial != null ? own?.id : null,
+            trial: trial != null,
+            payments: payments,
+            actionFor: (plan) =>
+                _action(data, 'subscribe', plan: plan.id) ??
+                _action(data, 'change-plan', plan: plan.id),
+            onAction: (plan, action) => action['purpose'] == 'subscribe'
+                ? take(action, (action) => unawaited(_openPayment(action)))
+                : change(plan),
+            upFrom: own,
+            // A subscription that lapsed or is past due is mended where it
+            // is kept, not bought again: the Package offers no subscribe.
+            mendLabel: manage?['label'] as String? ?? '',
+            onMend:
+                !subscribed &&
+                    trial == null &&
+                    subscription != null &&
+                    _actions(data, 'subscribe').isEmpty
+                ? take(manage, (action) => unawaited(_openPayment(action)))
+                : null,
+            topUps: tops.isNotEmpty,
+          ),
         ),
-      ),
-      const SizedBox(height: 32),
+        const SizedBox(height: 16),
+      ],
+      const SizedBox(height: 16),
       KeyedSubtree(
         key: _spendingSection,
         child: identified(
@@ -499,10 +571,6 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
       ),
     ];
   }
-
-  static bool _canSubscribe(Map? subscription) =>
-      subscription == null ||
-      {'canceled', 'incomplete_expired'}.contains(subscription['status']);
 
   static bool _hadComplimentary(Map data) =>
       (data['payments'] as List? ?? const []).whereType<Map>().any(
@@ -667,12 +735,20 @@ int _monthBefore(int end) {
 String _percent(num part, num whole) =>
     '${whole > 0 ? (part / whole * 100).clamp(0, 100).round() : 0}%';
 
-_Fuel _fuel(Map data, Map? credit, int now) {
+_Fuel _fuel(
+  Map data,
+  Map? credit,
+  int now, {
+  required _Plan? plan,
+  required bool needsSubscription,
+}) {
   int micros(String key) => (data[key] as num?)?.toInt() ?? 0;
   final subscribed = data['subscribed'] == true;
   final trial = subscribed ? null : data['trial'] as Map?;
   final subscription = data['subscription'] as Map?;
-  final plan = _readPlan(data['plan']);
+  final allowance = plan?.includedMicros ?? 0;
+  final trialDays =
+      ((data['plan'] as Map?)?['trial'] as Map?)?['days'] as num? ?? 7;
   final end =
       ((subscription?['periodEnd'] ??
                   (data['paidAccess'] as Map?)?['periodEnd'])
@@ -715,15 +791,20 @@ _Fuel _fuel(Map data, Map? credit, int now) {
     return _Fuel(
       lead: 'Trial · $days ${days == 1 ? 'day' : 'days'} left',
       caption:
-          '${_percent(complimentary, whole)} of your trial credit left. ${plan.name} begins ${spendDate(endsAt)}.',
+          '${_percent(complimentary, whole)} of your trial credit left. ${plan?.name ?? 'Your plan'} begins ${spendDate(endsAt)}.',
       gauge: gauge(
         complimentary,
         whole,
-        start: endsAt - 7 * _day,
+        start: endsAt - (trialDays * _day).round(),
         until: endsAt,
       ),
       notes: reserve,
     );
+  }
+
+  // Where purchased credit stands on its own, it is simply credit.
+  if (!subscribed && !needsSubscription) {
+    return _Fuel(lead: '${_money(complimentary + purchased)} of credit');
   }
 
   if (!subscribed) {
@@ -748,7 +829,7 @@ _Fuel _fuel(Map data, Map? credit, int now) {
       lead: end == null ? 'Paused' : 'Paused until $renews',
       leadTone: _Tone.stop,
       caption: 'This month’s allowance is used up. Top up to keep your Bots working now.',
-      gauge: gauge(0, plan.includedMicros),
+      gauge: gauge(0, allowance),
       short: true,
     );
   }
@@ -771,7 +852,7 @@ _Fuel _fuel(Map data, Map? credit, int now) {
       caption: end == null
           ? 'This month’s allowance is used.'
           : 'This month’s allowance is used. It renews on $renews.',
-      gauge: gauge(0, plan.includedMicros, start: start, until: end),
+      gauge: gauge(0, allowance, start: start, until: end),
       pace: short ? pace : null,
       paceTone: _Tone.warn,
       short: short,
@@ -779,9 +860,11 @@ _Fuel _fuel(Map data, Map? credit, int now) {
   }
 
   return _Fuel(
-    lead: '${_percent(included, plan.includedMicros)} left',
-    caption: 'of this month’s ${plan.name} plan',
-    gauge: gauge(included, plan.includedMicros, start: start, until: end),
+    lead: '${_percent(included, allowance)} left',
+    caption: plan == null
+        ? 'of this month’s plan'
+        : 'of this month’s ${plan.name} plan',
+    gauge: gauge(included, allowance, start: start, until: end),
     pace: pace,
     paceTone: short ? _Tone.warn : _Tone.calm,
     short: short,
@@ -804,16 +887,22 @@ Color _ink(BuildContext context, _Tone tone) {
 class _FuelCard extends StatelessWidget {
   final _Fuel fuel;
   final Map<String, dynamic> data;
-  final _Plan plan;
+  final _Plan? plan;
   final VoidCallback? onTopUp;
-  final VoidCallback? onMoveToPlus;
+
+  /// The payments Package's words for moving to the plan with more room.
+  final String? moveLabel;
+  final VoidCallback? onMove;
+  final String portalLabel;
   final VoidCallback? onPortal;
   const _FuelCard({
     required this.fuel,
     required this.data,
     required this.plan,
     required this.onTopUp,
-    required this.onMoveToPlus,
+    required this.moveLabel,
+    required this.onMove,
+    required this.portalLabel,
     required this.onPortal,
   });
 
@@ -829,21 +918,19 @@ class _FuelCard extends StatelessWidget {
             as num?;
     final ending = subscription?['cancelAtPeriodEnd'] == true;
     final held = (data['reservedMicros'] as num? ?? 0) > 0;
+    final name = plan?.name ?? 'Subscribed';
     final pill = subscribed
         ? _Pill(
             periodEnd == null
-                ? plan.name
-                : '${plan.name} · ${ending ? 'ends' : 'renews'} ${spendDate(periodEnd)}',
+                ? name
+                : '$name · ${ending ? 'ends' : 'renews'} ${spendDate(periodEnd)}',
           )
         : null;
     final more = [
       if (onTopUp != null)
         OutlinedButton(onPressed: onTopUp, child: const Text('Top up')),
-      if (onMoveToPlus != null)
-        FilledButton(
-          onPressed: onMoveToPlus,
-          child: const Text('Move to Plus'),
-        ),
+      if (onMove != null && moveLabel != null)
+        FilledButton(onPressed: onMove, child: Text(moveLabel!)),
     ];
     final portal = onPortal == null
         ? null
@@ -851,7 +938,7 @@ class _FuelCard extends StatelessWidget {
             onPressed: onPortal,
             iconAlignment: IconAlignment.end,
             icon: const Icon(Icons.north_east_rounded, size: 16),
-            label: const Text('Plan, invoices & card'),
+            label: Text(portalLabel),
           );
     return Card(
       margin: EdgeInsets.zero,
@@ -1130,7 +1217,14 @@ class _Pill extends StatelessWidget {
 class _TopUpDialog extends StatefulWidget {
   final List<int> topUps;
   final int initial;
-  const _TopUpDialog({required this.topUps, required this.initial});
+
+  /// The payments Package's word for buying it, followed by the amount.
+  final String label;
+  const _TopUpDialog({
+    required this.topUps,
+    required this.initial,
+    required this.label,
+  });
 
   @override
   State<_TopUpDialog> createState() => _TopUpDialogState();
@@ -1168,41 +1262,48 @@ class _TopUpDialogState extends State<_TopUpDialog> {
       ),
       FilledButton(
         onPressed: () => Navigator.of(context).pop(cents),
-        child: Text('Add ${_dollars(cents)}'),
+        child: Text('${widget.label} ${_dollars(cents)}'),
       ),
     ],
   );
 }
 
-/// Standard beside Plus, described by how much room each gives the account's
-/// Bots; the credit behind it is the small print.
+/// The deployment's plans side by side, described by how much room each gives
+/// the account's Bots; the credit behind it is the small print. Every button
+/// is one of the payments Package's actions.
 class _PlansCard extends StatelessWidget {
   final List<_Plan> plans;
 
   /// The plan the account is on, or null without one.
   final String? current;
   final bool trial;
-
-  /// The account can take a plan here, whether or not payments are open.
-  final bool selling;
   final bool payments;
-  final void Function(String id)? onChoose;
-  final VoidCallback? onMoveToPlus;
+  final Map? Function(_Plan plan) actionFor;
+  final VoidCallback? Function(_Plan plan, Map action) onAction;
+
+  /// The plan a change is measured from, to say when it takes effect.
+  final _Plan? upFrom;
+  final String mendLabel;
   final VoidCallback? onMend;
+
+  /// Whether the deployment sells top-ups beside the plans.
+  final bool topUps;
   const _PlansCard({
     required this.plans,
     required this.current,
     required this.trial,
-    required this.selling,
     required this.payments,
-    required this.onChoose,
-    required this.onMoveToPlus,
+    required this.actionFor,
+    required this.onAction,
+    required this.upFrom,
+    required this.mendLabel,
     required this.onMend,
+    required this.topUps,
   });
 
   String _room(_Plan plan) {
     final base = plans.first.includedMicros;
-    if (plan.id == 'standard' || base <= 0) {
+    if (plan == plans.first || base <= 0) {
       return 'Room for everyday chats and a few Routines.';
     }
     final times = plan.includedMicros / base;
@@ -1212,18 +1313,29 @@ class _PlansCard extends StatelessWidget {
     return '$label× the room, for Bots and Routines that work all day.';
   }
 
+  /// When a change to [plan] takes effect, under its button.
+  String? _after(_Plan plan, Map? action) {
+    if (action?['purpose'] != 'change-plan') return null;
+    if (trial) return 'Ends the trial and charges the first month now.';
+    final from = upFrom;
+    return from == null || plan.includedMicros > from.includedMicros
+        ? 'Starts now, with a new billing month.'
+        : 'Starts when your plan renews.';
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
+    final selling = current == null && onMend == null;
     return Card(
       margin: EdgeInsets.zero,
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final wide = constraints.maxWidth >= 560;
+          final wide = constraints.maxWidth >= 560 && plans.length > 1;
           final tiles = [for (final plan in plans) _tile(context, plan, wide)];
           return Padding(
-            padding: EdgeInsets.all(wide ? 24 : 18),
+            padding: EdgeInsets.all(constraints.maxWidth >= 560 ? 24 : 18),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -1259,7 +1371,7 @@ class _PlansCard extends StatelessWidget {
                       onPressed: onMend,
                       iconAlignment: IconAlignment.end,
                       icon: const Icon(Icons.north_east_rounded, size: 16),
-                      label: const Text('Plan, invoices & card'),
+                      label: Text(mendLabel),
                     ),
                   ),
                 ],
@@ -1269,9 +1381,12 @@ class _PlansCard extends StatelessWidget {
                       ? 'Payments are not available yet.'
                       : onMend != null
                       ? 'Your subscription needs attention. Fix it in your browser.'
-                      : selling
-                      ? 'A first subscription starts with a 7-day trial. Checkout opens in your browser and asks for a card. Cancel any time.'
-                      : 'Top-ups never expire, and work pauses rather than running up an overage.',
+                      : [
+                          if (selling) 'Checkout opens in your browser.',
+                          if (topUps) 'Top-ups never expire.',
+                          'Work pauses when credit runs out, with no overage charge.',
+                          if (selling) 'Cancel any time.',
+                        ].join(' '),
                   style: theme.textTheme.bodySmall?.copyWith(color: muted),
                 ),
               ],
@@ -1290,22 +1405,24 @@ class _PlansCard extends StatelessWidget {
       fontSize: 12.5,
     );
     final mine = plan.id == current;
-    final Widget? action = selling
-        ? FilledButton(
-            onPressed: onChoose == null ? null : () => onChoose!(plan.id),
-            child: Text('Choose ${plan.name}'),
+    final action = actionFor(plan);
+    final down =
+        action?['purpose'] == 'change-plan' &&
+        !trial &&
+        upFrom != null &&
+        plan.includedMicros < upFrom!.includedMicros;
+    final button = action == null
+        ? null
+        : down
+        ? OutlinedButton(
+            onPressed: onAction(plan, action),
+            child: Text('${action['label']}'),
           )
-        : plan.id == 'plus' && onMoveToPlus != null
-        ? FilledButton(
-            onPressed: onMoveToPlus,
-            child: const Text('Move to Plus'),
-          )
-        : null;
-    final String? after = plan.id == 'plus' && onMoveToPlus != null
-        ? 'Starts now, with a new billing month.'
-        : plan.id == 'standard' && current == 'plus' && !trial
-        ? 'Move back at renewal, from Plan, invoices & card.'
-        : null;
+        : FilledButton(
+            onPressed: onAction(plan, action),
+            child: Text('${action['label']}'),
+          );
+    final after = _after(plan, action);
     return Semantics(
       container: true,
       child: Container(
@@ -1368,10 +1485,10 @@ class _PlansCard extends StatelessWidget {
               style: muted,
             ),
             // Side by side, the buttons line up along the bottom.
-            if (wide && (action != null || after != null)) const Spacer(),
-            if (action != null) ...[
+            if (wide && (button != null || after != null)) const Spacer(),
+            if (button != null) ...[
               const SizedBox(height: 14),
-              SizedBox(width: double.infinity, child: action),
+              SizedBox(width: double.infinity, child: button),
             ],
             if (after != null) ...[
               const SizedBox(height: 8),

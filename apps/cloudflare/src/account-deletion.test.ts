@@ -58,7 +58,7 @@ function seams(overrides: Partial<Seams> = {}): Seams {
   return {
     deleteGroupChats: async () => ({ status: "complete" }),
     deleteBots: async () => ({ status: "complete" }),
-    recordedPaymentCustomer: () => undefined,
+    paymentRecord: () => undefined,
     vectorIdsAfter: () => [],
     deleteIdentity: async () => undefined,
     eraseVoice: async () => undefined,
@@ -248,7 +248,10 @@ describe("the account's payments", () => {
     await expect(
       runAccountDeletionStepV1(
         {},
-        seams({ recordedPaymentCustomer: () => "cus_1" }),
+        seams({
+          paymentRecord: <T>(key: string) =>
+            (key === "customer" ? "cus_1" : undefined) as T | undefined,
+        }),
         "payments",
         record(),
       ),

@@ -221,7 +221,16 @@ void main() {
         return {
           'metered': true,
           'subscribed': true,
-          'plan': {'id': 'standard', 'includedMicros': 20000000},
+          'subscription': {'planId': 'standard'},
+          'plan': {
+            'subscriptions': [
+              {
+                'id': 'standard',
+                'name': 'Standard',
+                'includedMicros': 20000000,
+              },
+            ],
+          },
         };
       }
       return _report(

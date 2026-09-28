@@ -18,7 +18,13 @@ import {
   type MemoryJobPrincipalV1,
   type MemoryOutboxPayloadV1,
   type MemoryScopeRefV1,
+  createdByPrincipalV1,
 } from "./records.js";
+import {
+  MEMORY_WRITE_RECALL_V1,
+  type MemoryWriteEvidenceV1,
+  type MemoryWriteVerdictV1,
+} from "./engine-tools.js";
 
 export interface MemoryExtractionDispatchV1 {
   obligationId: string;
@@ -53,6 +59,14 @@ export interface MemoryProcessingAdaptersV1 {
     payload: MemoryOutboxPayloadV1,
     outboxId: string,
   ) => Promise<{ status: "ok" } | { status: "refused"; reason: string }>;
+  /**
+   * The judgment a `memory_write` goes through, asked of each extracted fact
+   * too, so the Bot keeps one standard for what is worth keeping. Absent, or
+   * unable to say, the fact is written as extracted.
+   */
+  judgeWrite?: (
+    evidence: MemoryWriteEvidenceV1,
+  ) => Promise<MemoryWriteVerdictV1 | undefined>;
 }
 
 /** An extractor's refusal before its call was sent: the job may try again. */
@@ -199,9 +213,75 @@ async function drainExtract(
     }
     if (!engine.storeJobResult(job, proposals)) return ["stale-claim"];
   }
-  engine.applyExtractedProposals(job, proposals);
+  engine.applyExtractedProposals(
+    job,
+    adapters.judgeWrite
+      ? await judgedProposalsV1(engine, job, proposals, adapters.judgeWrite)
+      : proposals,
+  );
   engine.completeClaimedJob(job, "done", { releaseRetention: true });
   return ["model", "extracted"];
+}
+
+/**
+ * Each extracted fact, as the write judgment sees it against what is already
+ * kept near it: a secret or a repeat is dropped, a fact that no longer holds
+ * is replaced when this principal wrote it, and a passing fact is kept as a
+ * log entry. The judgment is asked again if the job is retried; it changes
+ * nothing outside the Bot, so asking twice costs nothing but the call.
+ */
+async function judgedProposalsV1(
+  engine: MemoryEngineV1,
+  job: MemoryClaimedJobV1,
+  proposals: readonly MemoryExtractedProposalV1[],
+  judgeWrite: NonNullable<MemoryProcessingAdaptersV1["judgeWrite"]>,
+): Promise<MemoryExtractedProposalV1[]> {
+  const writer = createdByPrincipalV1(job.authority);
+  const judged: MemoryExtractedProposalV1[] = [];
+  for (const proposal of proposals) {
+    let candidates: { id: string; text: string; createdBy: string }[] = [];
+    try {
+      candidates = engine
+        .recall({
+          authority: job.authority,
+          query: proposal.text,
+          scopes: [job.scope],
+          budget: MEMORY_WRITE_RECALL_V1,
+          effort: "automatic",
+        })
+        .hits.filter((hit) => hit.item.status === "active")
+        .slice(0, MEMORY_WRITE_RECALL_V1)
+        .map((hit) => ({
+          id: hit.item.id,
+          text: hit.item.text,
+          createdBy: hit.item.createdBy,
+        }));
+    } catch {
+      // Nothing recalled to compare with; the secret and lasting questions stand.
+    }
+    const verdict = await judgeWrite({
+      fact: proposal.text,
+      tier: proposal.kind === "fact" ? "profile" : "log",
+      candidates: candidates.map(({ id, text }) => ({ id, text })),
+    });
+    if (!verdict) {
+      judged.push(proposal);
+      continue;
+    }
+    if (verdict.action !== "write") continue;
+    const replaced = verdict.replaces
+      ? candidates.find(
+          (kept) =>
+            kept.id === verdict.replaces?.id && kept.createdBy === writer,
+        )
+      : undefined;
+    judged.push({
+      ...proposal,
+      kind: verdict.tier === "profile" ? "fact" : "experience",
+      ...(replaced ? { replaces: replaced.id } : {}),
+    });
+  }
+  return judged;
 }
 
 async function drainConsolidate(

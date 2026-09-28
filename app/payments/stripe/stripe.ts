@@ -1,11 +1,23 @@
-import {
-  BILLING_PLAN,
-  BillingError,
-  BillingLedger,
-  stable,
-  type SubscriptionState,
-} from "./ledger.js";
+import { BillingError } from "@frockbot/app/billing/errors";
+import { boundedText, object } from "@frockbot/app/billing/wire";
+import type {
+  PaymentsLedgerPortV1,
+  PaymentsPlanV1,
+  PaymentsSubscriptionV1,
+} from "@frockbot/core/contracts";
 import { withDeadlineV1 } from "@frockbot/core/deadline";
+
+/**
+ * FrockBot's plan: US$20 a month, with US$15 of usage credit each paid month,
+ * and top-ups spendable only while subscribed. The monthly price is also a
+ * Stripe price (`STRIPE_MONTHLY_PRICE_ID`), and a subscription on any other is
+ * refused.
+ */
+export const STRIPE_PLAN_V1 = {
+  subscription: { monthlyCents: 2000, includedMicros: 15_000_000 },
+  topUpCents: [1000, 2500, 5000],
+  purchasedCreditNeedsSubscription: true,
+} as const satisfies PaymentsPlanV1;
 
 export interface StripeConfig {
   /** What a checkout names the credit it sells: the product's. */
@@ -16,48 +28,13 @@ export interface StripeConfig {
   origin: string;
 }
 type StripeObject = Record<string, unknown>;
-export function object(value: unknown): StripeObject {
-  if (!value || typeof value !== "object" || Array.isArray(value))
-    throw new BillingError("Invalid payment response", 502);
-  return value as StripeObject;
-}
+export { boundedText, object };
 export function stripeId(value: unknown): string {
   const id = typeof value === "string" ? value : object(value).id;
   if (typeof id !== "string" || !/^[a-z]+_[a-zA-Z0-9_]+$/.test(id))
     throw new BillingError("Invalid payment identifier", 400);
   return id;
 }
-export async function boundedText(
-  response: Response | Request,
-  maximum = 1_048_576,
-): Promise<string> {
-  if (!response.body) return "";
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > maximum) {
-        await reader.cancel();
-        throw new BillingError("Payment payload is too large", 413);
-      }
-      chunks.push(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  const result = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    result.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(result);
-}
-
 export class StripeClient {
   constructor(
     readonly config: StripeConfig,
@@ -225,16 +202,16 @@ interface PaymentIntentRecord {
 /** Stripe effects retain their intent before dispatch, including uncertain responses. */
 export class AccountPayments {
   constructor(
-    private readonly ledger: BillingLedger,
+    private readonly ledger: PaymentsLedgerPortV1,
     private readonly stripe: StripeClient,
     private readonly userId: string,
     private readonly now: () => number = Date.now,
   ) {}
   private async customer(): Promise<string> {
-    const existing = this.ledger.get<string>("customer");
+    const existing = this.ledger.record<string>("customer");
     if (existing) return existing;
-    const started = this.ledger.get<number>("customerIntent") ?? this.now();
-    this.ledger.set("customerIntent", started);
+    const started = this.ledger.record<number>("customerIntent") ?? this.now();
+    this.ledger.remember("customerIntent", started);
     if (this.now() - started > 23 * 3600_000)
       throw new BillingError(
         "Payment setup needs reconciliation. Please contact support.",
@@ -246,7 +223,7 @@ export class AccountPayments {
       `frockbot:customer:${this.userId}`,
     );
     const id = stripeId(customer.id);
-    this.ledger.set("customer", id);
+    this.ledger.remember("customer", id);
     return id;
   }
   async checkout(command: {
@@ -260,21 +237,21 @@ export class AccountPayments {
       throw new BillingError("Invalid purchase", 400);
     const cents =
       command.kind === "subscription"
-        ? BILLING_PLAN.monthlyCents
+        ? STRIPE_PLAN_V1.subscription.monthlyCents
         : command.cents;
     if (
       command.kind === "topup" &&
-      !(BILLING_PLAN.topUpCents as readonly number[]).includes(cents ?? 0)
+      !(STRIPE_PLAN_V1.topUpCents as readonly number[]).includes(cents ?? 0)
     )
       throw new BillingError("Choose a $10, $25 or $50 top-up", 400);
     const key = `checkout:${command.id}`;
-    let intent = this.ledger.get<PaymentIntentRecord>(key);
+    let intent = this.ledger.record<PaymentIntentRecord>(key);
     if (intent && (intent.kind !== command.kind || intent.cents !== cents))
       throw new BillingError("Checkout key was reused", 409);
     if (intent?.url) return { url: intent.url };
     if (!intent) {
       if (command.kind === "subscription") {
-        const subscription = this.ledger.subscription();
+        const subscription = this.ledger.account().subscription;
         if (
           subscription &&
           !["canceled", "incomplete_expired"].includes(subscription.status)
@@ -283,7 +260,7 @@ export class AccountPayments {
             "Manage your existing subscription in the billing portal.",
             409,
           );
-        const pending = this.ledger.get<PaymentIntentRecord>(
+        const pending = this.ledger.record<PaymentIntentRecord>(
           "pendingSubscription",
         );
         if (pending) {
@@ -303,7 +280,7 @@ export class AccountPayments {
               409,
             );
           }
-          const current = this.ledger.get<PaymentIntentRecord>(
+          const current = this.ledger.record<PaymentIntentRecord>(
             "pendingSubscription",
           );
           if (
@@ -324,9 +301,9 @@ export class AccountPayments {
         created: this.now(),
       };
       // No await between claiming the single subscription slot and its intent.
-      this.ledger.set(key, intent);
+      this.ledger.remember(key, intent);
       if (command.kind === "subscription")
-        this.ledger.set("pendingSubscription", intent);
+        this.ledger.remember("pendingSubscription", intent);
     }
     // Stripe requires expires_at to remain at least 30 minutes ahead of the
     // request. The stable one-hour deadline leaves room for safe retries.
@@ -370,15 +347,15 @@ export class AccountPayments {
     )
       throw new BillingError("Stripe did not return a checkout link", 502);
     const saved = { ...intent, sessionId: stripeId(session.id), url };
-    this.ledger.set(key, saved);
+    this.ledger.remember(key, saved);
     if (intent.kind === "subscription")
-      this.ledger.set("pendingSubscription", saved);
+      this.ledger.remember("pendingSubscription", saved);
     return { url };
   }
   async portal(commandId: string) {
     if (!/^[a-zA-Z0-9_-]{16,100}$/.test(commandId))
       throw new BillingError("Invalid portal request", 400);
-    const customer = this.ledger.get<string>("customer");
+    const customer = this.ledger.record<string>("customer");
     if (!customer)
       throw new BillingError(
         "Subscribe before opening the billing portal",
@@ -396,9 +373,11 @@ export class AccountPayments {
       throw new BillingError("Invalid billing portal link", 502);
     return { url: session.url };
   }
-  private async subscription(id: string): Promise<SubscriptionState> {
+  private async subscription(id: string): Promise<PaymentsSubscriptionV1> {
     const subscription = await this.stripe.call(`subscriptions/${id}`);
-    if (stripeId(subscription.customer) !== this.ledger.get<string>("customer"))
+    if (
+      stripeId(subscription.customer) !== this.ledger.record<string>("customer")
+    )
       throw new BillingError("Subscription belongs to another account", 409);
     const items = object(subscription.items).data;
     if (!Array.isArray(items) || items.length !== 1)
@@ -408,7 +387,7 @@ export class AccountPayments {
     if (
       stripeId(price.id) !== this.stripe.config.monthlyPriceId ||
       price.currency !== "usd" ||
-      price.unit_amount !== BILLING_PLAN.monthlyCents ||
+      price.unit_amount !== STRIPE_PLAN_V1.subscription.monthlyCents ||
       item.quantity !== 1 ||
       object(price.recurring).interval !== "month"
     )
@@ -438,22 +417,14 @@ export class AccountPayments {
     const eventId = stripeId(event.id);
     const type = String(event.type);
     const data = object(object(event.data).object);
-    const customer = this.ledger.get<string>("customer");
+    const customer = this.ledger.record<string>("customer");
     if (!customer || stripeId(data.customer) !== customer)
       throw new BillingError("Payment customer does not match account", 409);
-    const fingerprint = stable(event);
-    if (this.ledger.receipt(eventId, fingerprint)) return;
+    if (this.ledger.applied(eventId, event)) return;
     // A later event may finish its Stripe read first. Retry instead of overwriting it.
-    const revision = this.ledger.get<number>("stripeRevision") ?? 0;
-    let subscription: SubscriptionState | undefined;
-    let grant:
-      | {
-          id: string;
-          kind: "included" | "purchased";
-          micros: number;
-          expires: number | null;
-        }
-      | undefined;
+    const revision = this.ledger.record<number>("stripeRevision") ?? 0;
+    let subscription: PaymentsSubscriptionV1 | undefined;
+    let purchase: { key: string; micros: number } | undefined;
     let paidPeriod:
       | { subscriptionId: string; periodStart: number; periodEnd: number }
       | undefined;
@@ -497,12 +468,7 @@ export class AccountPayments {
           start > this.now()
         )
           throw new BillingError("Invalid invoice period", 409);
-        grant = {
-          id: `monthly:${subscriptionId}:${period.start}`,
-          kind: "included",
-          micros: BILLING_PLAN.includedMicros,
-          expires: end,
-        };
+        // The ledger grants the plan's allowance for the paid period.
         paidPeriod = { subscriptionId, periodStart: start, periodEnd: end };
       }
     } else if (type.startsWith("customer.subscription.")) {
@@ -524,7 +490,7 @@ export class AccountPayments {
       )
         throw new BillingError("Checkout account mismatch", 409);
       const meta = object(session.metadata);
-      const intent = this.ledger.get<PaymentIntentRecord>(
+      const intent = this.ledger.record<PaymentIntentRecord>(
         `checkout:${String(meta.frockbot_checkout_id)}`,
       );
       if (!intent || (intent.sessionId && intent.sessionId !== session.id))
@@ -536,58 +502,30 @@ export class AccountPayments {
           session.amount_total !== intent.cents
         )
           throw new BillingError("Top-up amount does not match payment", 409);
-        grant = {
-          id: `topup:${stripeId(session.id)}`,
-          kind: "purchased",
-          micros: intent.cents * 10_000,
-          expires: null,
-        };
+        purchase = { key: stripeId(session.id), micros: intent.cents * 10_000 };
       }
       if (intent.kind === "subscription" && session.subscription) {
         subscription = await this.subscription(stripeId(session.subscription));
         completedSubscriptionIntentId = intent.id;
       }
     }
-    this.ledger.once(eventId, event, () => {
-      if ((this.ledger.get<number>("stripeRevision") ?? 0) !== revision)
+    this.ledger.apply(eventId, event, (ledger) => {
+      if ((ledger.record<number>("stripeRevision") ?? 0) !== revision)
         throw new BillingError("Payment state changed; retry event", 409);
       if (subscription) {
-        const existing = this.ledger.subscription();
-        if (
-          existing &&
-          existing.subscriptionId !== subscription.subscriptionId &&
-          existing.periodStart > subscription.periodStart
-        )
-          throw new BillingError("Old subscription event", 409);
-        this.ledger.set("subscription", subscription);
-        if (paidPeriod) {
-          const paid = this.ledger.get<{
-            subscriptionId: string;
-            periodStart: number;
-            periodEnd: number;
-          }>("paidAccess");
-          if (
-            !paid ||
-            paidPeriod.periodEnd > paid.periodEnd ||
-            (paidPeriod.periodStart === paid.periodStart &&
-              paidPeriod.periodEnd === paid.periodEnd &&
-              paidPeriod.subscriptionId !== paid.subscriptionId)
-          ) {
-            this.ledger.set("paidAccess", paidPeriod);
-          }
-        }
+        ledger.recordSubscription(subscription);
+        if (paidPeriod) ledger.recordPaidPeriod(paidPeriod);
       }
-      if (grant)
-        this.ledger.grant(grant.id, grant.kind, grant.micros, grant.expires);
+      if (purchase) ledger.grantPurchased(purchase);
       if (
         completedSubscriptionIntentId &&
-        this.ledger.get<PaymentIntentRecord>("pendingSubscription")?.id ===
+        ledger.record<PaymentIntentRecord>("pendingSubscription")?.id ===
           completedSubscriptionIntentId
       )
-        this.ledger.set("pendingSubscription", null);
+        ledger.remember("pendingSubscription", null);
       if (type === "charge.refunded" || type === "charge.dispute.created")
-        this.ledger.set("suspended", true);
-      this.ledger.set("stripeRevision", revision + 1);
+        ledger.suspend();
+      ledger.remember("stripeRevision", revision + 1);
     });
   }
 }
