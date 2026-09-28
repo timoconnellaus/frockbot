@@ -79,7 +79,7 @@ test("a recorded run yields its call reviews with the evidence production built"
         arguments: { query: "newer_than:1d" },
       },
       conversation: [
-        { speaker: "context", text: 'Routine "Triage" fired (cron).' },
+        { speaker: "context", text: 'Routine "Triage" fired (cron).\n' },
         { speaker: "routine", text: "Check my inbox." },
       ],
       priorResults: [{ tool: "computer_exec", content: "[]" }],
