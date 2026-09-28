@@ -1,17 +1,20 @@
 # ADR 0038: White-label deployments build FrockBot from published packages
 
-Status: accepted, 2026-09-27. Decisions are Tim's from the 2026-09-27
-discussion. This is the "customised deployments come later, through published
-packages" that [ADR 0028](0028-open-deployment.md) left open.
+Status: accepted, 2026-09-27; amended 2026-09-28. Decisions are Tim's from the
+2026-09-27 discussion, and the email rule in §3 is his of 2026-09-28. This is
+the "customised deployments come later, through published packages" that
+[ADR 0028](0028-open-deployment.md) left open.
 
 - A white-label product is its own repository. It is not a fork, a submodule
   or a branch of this one: it installs FrockBot's packages at a release version
   and adds its own profile, brand and client shell.
-- The first one is a crypto product. It signs people in with Privy, themes
-  differently and uses its own Bot characters.
+- The first one is a crypto product. It signs people in with Discord through
+  Privy, themes differently and uses its own Bot characters.
 - Privy stays out of this repository. The white-label writes its own auth
-  Package against the published contract, and requires an email at sign-in, so
-  every User it admits has one.
+  Package against the published contract.
+- Email is optional. A Package records an email only when its provider
+  verified it, so most of the crypto white-label's Users have none, and
+  nothing here may assume a User has one.
 - Everything a white-label needs to differ in is a build-time seam here, chosen
   the way the auth Package and the Computer host already are. Nothing is chosen
   at runtime, and no white-label code runs inside this repository's builds.
@@ -107,12 +110,19 @@ repository ships no Privy code and names no Privy variable.
   repository.** A white-label's Package declares the vars and secrets it reads
   through `AuthPackageEnvironmentV1`; the profile lists which of them are
   required so the production-secrets check covers them.
-- **Email is present.** The crypto white-label requires an email at sign-in, so
-  its Package always returns a verified email and the existing admission
-  paths, keyed on email, work unchanged for it. Whether its Package stores
-  identities, and so whether it uses the hosted admission modes or decides
-  admission itself as Access does, is its choice through the optional members
-  `AuthPackageV1` already has.
+- **Email is optional, and only ever verified.** Discord lets an account
+  carry an address it never verified, and Privy neither says whether a Discord
+  email is verified nor puts it in its identity token. So a Package returns an
+  email only when its provider verified it, and returns none otherwise; most of
+  the crypto white-label's Users have none. Everything keyed on email —
+  invitations, the admin allowlist — reads it only when `emailVerified` is
+  true, so an address somebody typed grants nothing.
+- **Admission without email is open or the Package's.** The hosted admission
+  modes invite by email, so a white-label whose Users have none runs admission
+  `open`, or decides it itself through the optional members `AuthPackageV1`
+  already has, as Access does.
+- **Admin can be granted by User id.** Beside the email allowlist, a deployment
+  lists admin User ids, so one whose people have no email still has an admin.
 - **Sign-in routes are the Package's.** `handler` serves `/api/auth/*` and
   `startSignIn` sends a browser that is nobody to sign in, which is all the
   gateway and the native authorize door ask of any Package. A Package that
