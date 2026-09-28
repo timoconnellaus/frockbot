@@ -167,6 +167,8 @@ export interface DurableMemoryIndexBindingsV1 {
   ai?: MemoryAiBinding;
   /** What a Turn's words hold worth remembering; absent, extraction waits. */
   extract?: MemoryProcessingAdaptersV1["extract"];
+  /** The write judgment each extracted fact goes through. */
+  judgeWrite?: MemoryProcessingAdaptersV1["judgeWrite"];
 }
 
 export async function drainDurableMemoryV1(
@@ -177,5 +179,6 @@ export async function drainDurableMemoryV1(
   if (bindings.vectors) adapters.vectors = bindings.vectors;
   if (bindings.ai) adapters.embed = createMemoryEmbedder(bindings.ai);
   if (bindings.extract) adapters.extract = bindings.extract;
+  if (bindings.judgeWrite) adapters.judgeWrite = bindings.judgeWrite;
   return drainMemoryProcessingV1(engine, adapters);
 }

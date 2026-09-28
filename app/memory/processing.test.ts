@@ -320,6 +320,98 @@ describe("extraction obligations", () => {
     ).not.toBe("done");
   });
 
+  test("each extracted fact goes through the write judgment", async () => {
+    const { engine, time } = engineOf();
+    const authority = auth();
+    engine.write({
+      authority,
+      scope: BOT,
+      content: "Tim lives in Sydney.",
+      operationKey: "kept-1",
+      subjectKey: "profile",
+    });
+    engine.write({
+      authority,
+      scope: BOT,
+      content: "Tim prefers blunt answers.",
+      operationKey: "kept-2",
+    });
+    const captured = engine.captureExtraction({
+      authority,
+      scope: BOT,
+      principal: PRINCIPAL,
+      source: chatSource({
+        capturedText:
+          "My wife is Becky, we moved to Wollongong, the gate code is 4411, and I like blunt answers.",
+      }),
+    });
+    expect(captured.status).toBe("ok");
+    const judged: { fact: string; tier: string; kept: string[] }[] = [];
+    const adapters: MemoryProcessingAdaptersV1 = {
+      extract: async () => [
+        { text: "Tim's wife is Becky.", kind: "fact" },
+        { text: "Tim lives in Wollongong.", kind: "fact" },
+        { text: "Tim's gate code is 4411.", kind: "fact" },
+        { text: "Tim likes blunt answers.", kind: "fact" },
+        { text: "Tim moved house this week.", kind: "fact" },
+      ],
+      judgeWrite: async (evidence) => {
+        judged.push({
+          fact: evidence.fact,
+          tier: evidence.tier,
+          kept: evidence.candidates.map((kept) => kept.text),
+        });
+        const near = (text: string) =>
+          evidence.candidates.find((kept) => kept.text === text);
+        if (evidence.fact.includes("gate code")) {
+          return { action: "refuse-secret" };
+        }
+        if (evidence.fact.includes("blunt")) {
+          const kept = near("Tim prefers blunt answers.");
+          return kept ? { action: "already-kept", id: kept.id } : undefined;
+        }
+        if (evidence.fact.includes("Wollongong")) {
+          const kept = near("Tim lives in Sydney.");
+          return {
+            action: "write",
+            tier: "profile",
+            ...(kept ? { replaces: { id: kept.id, text: kept.text } } : {}),
+          };
+        }
+        if (evidence.fact.includes("moved house")) {
+          return { action: "write", tier: "log" };
+        }
+        return undefined;
+      },
+    };
+    // The kept facts queue their own work; drain until extraction has run.
+    for (let round = 0; round < 6; round++) {
+      await drainDue(engine, time, adapters);
+    }
+    expect(judged.map((entry) => entry.fact)).toHaveLength(5);
+    expect(judged.every((entry) => entry.tier === "profile")).toBe(true);
+    const kept = (query: string) =>
+      engine
+        .recall({ authority, query, scopes: [BOT] })
+        .hits.filter(
+          (hit) =>
+            hit.item.status === "active" && hit.item.text.includes(query),
+        )
+        .map((hit) => [hit.item.text, hit.item.kind]);
+    // A verdict Jev could not give leaves the fact as extracted.
+    expect(kept("Becky")).toEqual([["Tim's wife is Becky.", "fact"]]);
+    expect(kept("gate code")).toEqual([]);
+    expect(kept("blunt")).toEqual([
+      ["Tim prefers blunt answers.", expect.any(String)],
+    ]);
+    expect(kept("Tim lives in")).toEqual([
+      ["Tim lives in Wollongong.", "fact"],
+    ]);
+    expect(kept("moved house")).toEqual([
+      ["Tim moved house this week.", "experience"],
+    ]);
+  });
+
   test("an authenticated User can abandon an unfinished obligation", () => {
     const { engine } = engineOf();
     const captured = engine.captureExtraction({

@@ -370,6 +370,7 @@ export async function executeTurn(
     {
       ...turn,
       inputOrigin: turnInputOriginV1(input.command.origin),
+      ...personWordsV1(input.command),
       // A withheld send's draft goes: the words were never delivered.
       ...(drawsDrafts && deliverReplyDraft
         ? {
@@ -701,6 +702,23 @@ export async function turnInputTextV1(
     return `${preamble}\n${command.text}\n${guidance}`;
   }
   return `${preamble}\n${command.text}`;
+}
+
+/**
+ * What the person typed or said, on a Turn they sent: their own chat, call or
+ * email. Everything else a Turn reads — a hand-off drained in front of their
+ * words, a Routine's prompt, another Bot, a group member, a brief — was
+ * written by someone else, so none of it is theirs to remember.
+ */
+export function personWordsV1(command: {
+  text: string;
+  turnType?: TurnTypeV1;
+  origin?: StoredRunOriginV1;
+}): { personText?: string } {
+  if ((command.turnType ?? "chat") !== "chat") return {};
+  const kind = command.origin?.kind;
+  if (kind !== undefined && kind !== "voice" && kind !== "email") return {};
+  return { personText: command.text };
 }
 
 /** The visible half of failing closed, through the Bot's notifications. */
