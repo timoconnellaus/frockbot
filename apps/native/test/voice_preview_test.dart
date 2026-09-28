@@ -67,7 +67,10 @@ void main() {
   });
 
   test('names a clip after the voice, under the bundled folder', () {
-    expect(voicePreviewAssetV1('Iapetus'), 'packages/frockbot_client/assets/voices/Iapetus.wav');
+    expect(
+      voicePreviewAssetV1('Iapetus'),
+      'packages/frockbot_client/assets/voices/Iapetus.wav',
+    );
   });
 
   test('hears one voice, and tapping it again stops', () async {
@@ -152,7 +155,10 @@ void main() {
   test('every bundled clip is 24 kHz mono PCM16 speech', () async {
     for (final voice in geminiVoicesV1) {
       final data = await rootBundle.load(voicePreviewAssetV1(voice.voiceName));
-      final wav = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+      final wav = data.buffer.asUint8List(
+        data.offsetInBytes,
+        data.lengthInBytes,
+      );
       final format = ByteData.sublistView(wav);
       expect(format.getUint16(20, Endian.little), 1, reason: voice.voiceName);
       expect(format.getUint16(22, Endian.little), 1, reason: voice.voiceName);

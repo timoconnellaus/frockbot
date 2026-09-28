@@ -92,10 +92,12 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  test('the host refuses to open a non-https link at the moment of opening',
-      () async {
-    expect(await frockOpenLinkV1('http://example.com'), isFalse);
-    expect(await frockOpenLinkV1('javascript:alert(1)'), isFalse);
-    expect(await frockOpenLinkV1('file:///etc/passwd'), isFalse);
-  });
+  test(
+    'the host refuses to open a non-https link at the moment of opening',
+    () async {
+      expect(await frockOpenLinkV1('http://example.com'), isFalse);
+      expect(await frockOpenLinkV1('javascript:alert(1)'), isFalse);
+      expect(await frockOpenLinkV1('file:///etc/passwd'), isFalse);
+    },
+  );
 }

@@ -55,7 +55,8 @@ class FakeSocket implements WebSocketChannel {
     }),
   );
 
-  void sendUpdate(Map<String, Object?> update) => frames.add(jsonEncode(update));
+  void sendUpdate(Map<String, Object?> update) =>
+      frames.add(jsonEncode(update));
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);

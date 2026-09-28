@@ -47,17 +47,20 @@ void main() {
       }
     });
 
-    test('refuses a schema this build does not carry, without a request', () async {
-      // A Card names no schema of its own: the catalog is compiled in, and a
-      // document this build does not hold is one it cannot validate against.
-      await expectLater(
-        readDocument(
-          cardSchemaClientV1,
-          'https://a2ui.org/specification/v0_9/not_here.json',
-        ),
-        throwsA(isA<http.ClientException>()),
-      );
-    });
+    test(
+      'refuses a schema this build does not carry, without a request',
+      () async {
+        // A Card names no schema of its own: the catalog is compiled in, and a
+        // document this build does not hold is one it cannot validate against.
+        await expectLater(
+          readDocument(
+            cardSchemaClientV1,
+            'https://a2ui.org/specification/v0_9/not_here.json',
+          ),
+          throwsA(isA<http.ClientException>()),
+        );
+      },
+    );
 
     test('is the client a schema stack is handed inside the zone', () async {
       // What `json_schema_builder` sees: it asks `package:http` for a client

@@ -108,6 +108,11 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   /// A Group Chat's members sheet, where a Bot's header has its panel.
   final VoidCallback? onMembers;
 
+  /// Which of the Bot's views the column is showing, `chat` or `work-log`,
+  /// and how to change it. Absent on a phone, where the Work log is a page.
+  final String? view;
+  final ValueChanged<String>? onView;
+
   /// Whether this Bot is the one on the call (ADR 0031). The bar keeps the
   /// name, a mark that says why the thread is gone, and the Computer: every
   /// other door leads out of a call that has no way out but ending it.
@@ -138,6 +143,8 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     this.onTogglePanel,
     this.panelShown = false,
     this.onMembers,
+    this.view,
+    this.onView,
     this.voiceMode = false,
     this.companion,
     this.below = const [],
@@ -256,7 +263,14 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
                       IgnorePointer(child: companion!),
                       const SizedBox(width: 12),
                     ],
-                    Expanded(child: _overlayName(context)),
+                    if (onView == null)
+                      Expanded(child: _overlayName(context))
+                    else ...[
+                      Flexible(child: _overlayName(context)),
+                      const SizedBox(width: 16),
+                      _ViewTabs(view: view ?? 'chat', onView: onView!),
+                      const Spacer(),
+                    ],
                     for (final action in actions) ...[
                       const SizedBox(width: 8),
                       action,
@@ -736,5 +750,66 @@ class _DelayedConnectionDotState extends State<_DelayedConnectionDot>
     delay?.cancel();
     pulse.dispose();
     super.dispose();
+  }
+}
+
+/// Chat and Work log, the two things the conversation column can show for
+/// one Bot.
+class _ViewTabs extends StatelessWidget {
+  final String view;
+  final ValueChanged<String> onView;
+  const _ViewTabs({required this.view, required this.onView});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final (slug, label, id) in const [
+          ('chat', 'Chat', WorkLogIds.chatTab),
+          ('work-log', 'Work log', WorkLogIds.workLogTab),
+        ]) ...[
+          identified(
+            id,
+            Semantics(
+              button: true,
+              selected: view == slug,
+              label: label,
+              excludeSemantics: true,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(FrockTheme.radiusPill),
+                onTap: () => onView(slug),
+                child: Container(
+                  height: 34,
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  decoration: BoxDecoration(
+                    color: view == slug
+                        ? scheme.surfaceContainerHigh
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(FrockTheme.radiusPill),
+                  ),
+                  child: Text(
+                    label,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontSize: 13.5,
+                      color: view == slug
+                          ? scheme.onSurface
+                          : scheme.onSurfaceVariant,
+                      fontWeight: view == slug
+                          ? FontWeight.w600
+                          : FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+        ],
+      ],
+    );
   }
 }

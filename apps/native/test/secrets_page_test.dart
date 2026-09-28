@@ -26,8 +26,7 @@ Map<String, Object?> secretsDocument() => {
         'children': [
           {
             'type': 'text',
-            'text':
-                'Payment detail · Used on https://shop.example · Saved 1 day ago',
+            'text': 'Payment detail · Used on https://shop.example · Saved 1 day ago',
             'style': 'status',
           },
           {

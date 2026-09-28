@@ -57,7 +57,9 @@ void main() {
     expect(style.letterSpacing, body.letterSpacing);
   });
 
-  testWidgets('a heading stays body size and only gains weight', (tester) async {
+  testWidgets('a heading stays body size and only gains weight', (
+    tester,
+  ) async {
     await tester.pumpWidget(
       MaterialApp(
         theme: FrockTheme.theme(Brightness.dark),

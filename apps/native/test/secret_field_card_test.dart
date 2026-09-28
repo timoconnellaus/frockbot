@@ -47,7 +47,10 @@ void main() {
         return {
           'schemaVersion': 1,
           'status': 'saved',
-          'card': cardJson(components: request(state: 'saved'), dataModel: {}),
+          'card': cardJson(
+            components: request(state: 'saved'),
+            dataModel: {},
+          ),
         };
       }
       return cardJson(
@@ -90,10 +93,7 @@ void main() {
 
     final posts = requests.where((request) => request.$2 != null).toList();
     expect(posts, hasLength(1));
-    expect(
-      posts.single.$1,
-      '/api/bots/bot-1/secret-requests/$requestId',
-    );
+    expect(posts.single.$1, '/api/bots/bot-1/secret-requests/$requestId');
     final body = (posts.single.$2! as Map).cast<String, Object?>();
     expect(body['value'], typed);
     expect(body['commandId'], isA<String>());
@@ -115,9 +115,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: FrockTheme.theme(Brightness.light),
-        home: const Scaffold(
-          body: FrockSecretFieldView(requestId: requestId),
-        ),
+        home: const Scaffold(body: FrockSecretFieldView(requestId: requestId)),
       ),
     );
     await tester.pumpAndSettle();

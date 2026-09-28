@@ -736,4 +736,21 @@ void main() {
     );
     expect(find.byType(IconButton), findsOneWidget);
   });
+
+  testWidgets('a Bot\'s header switches its column between Chat and Work log', (
+    tester,
+  ) async {
+    final chosen = <String>[];
+    await tester.pumpWidget(
+      host(ChatHeader(name: 'Pixel', view: 'chat', onView: chosen.add)),
+    );
+    expect(find.text('Chat'), findsOneWidget);
+    await tester.tap(find.text('Work log'));
+    expect(chosen, ['work-log']);
+  });
+
+  testWidgets('a header without a view has no tabs', (tester) async {
+    await tester.pumpWidget(host(const ChatHeader(name: 'Pixel')));
+    expect(find.text('Work log'), findsNothing);
+  });
 }

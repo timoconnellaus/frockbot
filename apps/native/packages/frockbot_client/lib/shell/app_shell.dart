@@ -269,6 +269,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// take the column away at another.
   bool panelCollapsed = false;
 
+  /// The Bot whose conversation column shows its Work log rather than its
+  /// chat. A phone pushes the Work log as a page instead.
+  String? workLogBotId;
+
   /// Whether the run on screen borrowed a collapsed panel column. Opening a
   /// run un-collapses the column so the run is visible; closing the run gives
   /// the column back the way the person left it instead of leaving a panel
@@ -1981,9 +1985,18 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         inbox: routineInbox,
         onOpenRun: (run) => _openRoutineRun(botId, run),
         onOpenRoutines: () => _openPanel('routines', push: true),
-        onOpenWorkLog: () => _push(
-          WorkLogPage(api: widget.api, botId: botId, botName: _name(bot)),
-        ),
+        onOpenWorkLog: () {
+          if (shellTierForWidth(MediaQuery.sizeOf(context).width) ==
+              ShellTier.single) {
+            unawaited(
+              _push(
+                WorkLogPage(api: widget.api, botId: botId, botName: _name(bot)),
+              ),
+            );
+            return;
+          }
+          setState(() => workLogBotId = botId);
+        },
         panels: panelCanvas,
         panelDoors: _panelDoors(),
       ),
@@ -2983,6 +2996,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       // the dock on another Bot.
       onBack: single ? _openBack : null,
       phone: single,
+      view: single
+          ? null
+          : workLogBotId == bot.botId.value
+          ? 'work-log'
+          : 'chat',
+      onView: single
+          ? null
+          : (view) => setState(
+              () => workLogBotId = view == 'work-log' ? bot.botId.value : null,
+            ),
       onOpenBot: null,
       computerRunning:
           computer?.available == true &&
@@ -3115,6 +3138,40 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                   failure: bots.isEmpty ? error : null,
                                   action: 'Refresh Bots',
                                   onAction: () => unawaited(load()),
+                                )
+                              : !single && workLogBotId == bot.botId.value
+                              ? Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    conversationHeader(
+                                      companion: CharacterAvatar(
+                                        size: chatCompanionSizeFor(
+                                          phone: false,
+                                        ),
+                                        botId: bot.botId.value,
+                                        characterId: _background(
+                                          bot.botId.value,
+                                        ),
+                                        primary: _primary(bot.botId.value),
+                                        cropToInk: true,
+                                        motion: CharacterMotion.quiet,
+                                        working: _workingRunId != null,
+                                        semanticsLabel: _workingRunId != null
+                                            ? 'Bot is working'
+                                            : 'Bot is ready',
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: WorkLogView(
+                                        key: ValueKey(
+                                          'work-log-${bot.botId.value}',
+                                        ),
+                                        api: widget.api,
+                                        botId: bot.botId.value,
+                                      ),
+                                    ),
+                                  ],
                                 )
                               : ConversationView(
                                   key: ValueKey(

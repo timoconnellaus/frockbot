@@ -27,20 +27,23 @@ Map<String, Object?> routinesDocument({
         'orientation': 'column',
         'title': 'Scheduled',
         'children': [
-          routineRow({
-            'routineId': 'r1',
-            'name': 'Morning brief',
-            'schedule': '0 9 * * *',
-            'enabled': enabled,
-          }, runs: [
+          routineRow(
             {
-              'entryId': 'e1',
               'routineId': 'r1',
               'name': 'Morning brief',
-              'createdAt': '2026-09-02T23:00:10.000Z',
-              'mark': 'finished',
+              'schedule': '0 9 * * *',
+              'enabled': enabled,
             },
-          ]),
+            runs: [
+              {
+                'entryId': 'e1',
+                'routineId': 'r1',
+                'name': 'Morning brief',
+                'createdAt': '2026-09-02T23:00:10.000Z',
+                'mark': 'finished',
+              },
+            ],
+          ),
         ],
       },
     ],
@@ -320,11 +323,7 @@ Map<String, Object?> routineRow(
           'orientation': 'column',
           'title': run['name'],
           'children': [
-            {
-              'type': 'text',
-              'text': run['createdAt'],
-              'style': 'status',
-            },
+            {'type': 'text', 'text': run['createdAt'], 'style': 'status'},
             {'type': 'text', 'text': run['mark']},
             {
               'type': 'group',
@@ -397,23 +396,24 @@ void main() {
     expect(find.text('New Routine'), findsNothing);
   });
 
-  testWidgets('tapping a Routine opens the detail; the switch is only the switch', (
-    tester,
-  ) async {
-    final paths = <String>[];
-    final api = SettingsApi(MemoryStore(), (path, body) async {
-      paths.add(path);
-      if (path.contains('routine=r1')) return routinesDetailDocument();
-      return routinesDocument();
-    });
-    await pumpRoutines(tester, api: api);
-    await tester.tap(find.text('Morning brief').first);
-    await tester.pumpAndSettle();
-    expect(paths.any((path) => path.contains('routine=r1')), isTrue);
-    expect(find.text('Summarise overnight email.'), findsOneWidget);
-    expect(find.text('Run now'), findsOneWidget);
-    expect(find.text('Delete'), findsOneWidget);
-  });
+  testWidgets(
+    'tapping a Routine opens the detail; the switch is only the switch',
+    (tester) async {
+      final paths = <String>[];
+      final api = SettingsApi(MemoryStore(), (path, body) async {
+        paths.add(path);
+        if (path.contains('routine=r1')) return routinesDetailDocument();
+        return routinesDocument();
+      });
+      await pumpRoutines(tester, api: api);
+      await tester.tap(find.text('Morning brief').first);
+      await tester.pumpAndSettle();
+      expect(paths.any((path) => path.contains('routine=r1')), isTrue);
+      expect(find.text('Summarise overnight email.'), findsOneWidget);
+      expect(find.text('Run now'), findsOneWidget);
+      expect(find.text('Delete'), findsOneWidget);
+    },
+  );
 
   testWidgets('a connected-app detail shows the event and optional config', (
     tester,
@@ -552,7 +552,10 @@ void main() {
     };
 
     test('a pause, a run, a rotate, or a delete', () {
-      expect(routineCommandV1(command('set-routine-enabled'), 'bot-1')['type'], 'routine/pause');
+      expect(
+        routineCommandV1(command('set-routine-enabled'), 'bot-1')['type'],
+        'routine/pause',
+      );
       expect(
         routineCommandV1({
           'commandId': 'c1',
@@ -564,9 +567,18 @@ void main() {
         }, 'bot-1')['type'],
         'routine/resume',
       );
-      expect(routineCommandV1(command('run-routine'), 'bot-1')['type'], 'routine/run');
-      expect(routineCommandV1(command('rotate-key'), 'bot-1')['type'], 'routine/rotate-key');
-      expect(routineCommandV1(command('delete-routine'), 'bot-1')['type'], 'routine/delete');
+      expect(
+        routineCommandV1(command('run-routine'), 'bot-1')['type'],
+        'routine/run',
+      );
+      expect(
+        routineCommandV1(command('rotate-key'), 'bot-1')['type'],
+        'routine/rotate-key',
+      );
+      expect(
+        routineCommandV1(command('delete-routine'), 'bot-1')['type'],
+        'routine/delete',
+      );
     });
 
     test('and refuses a write the list never offers', () {

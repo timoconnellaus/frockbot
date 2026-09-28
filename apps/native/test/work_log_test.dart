@@ -92,8 +92,18 @@ Map<String, Object?> workLogPage({String? cursor}) => {
           detail: 'Free after 6:00 pm',
           durationMs: 412,
           sections: [
-            {'label': 'Input', 'text': '{"day": "Thu"}', 'mono': true},
-            {'label': 'Result', 'text': 'Free after 6:00 pm', 'mono': true},
+            {
+              'label': 'Input',
+              'text': '{"day": "Thu"}',
+              'mono': true,
+              'tab': 'input',
+            },
+            {
+              'label': 'Result',
+              'text': 'Free after 6:00 pm',
+              'mono': true,
+              'tab': 'result',
+            },
           ],
         ),
       ],
@@ -169,7 +179,7 @@ void main() {
     expect(find.text('calendar_freebusy'), findsOneWidget);
     // The older Turn is folded to its header.
     expect(find.text('Turn 41'), findsOneWidget);
-    expect(find.text('A tool failed'), findsOneWidget);
+    expect(find.text('1 error'), findsOneWidget);
     expect(find.text('weather.today'), findsNothing);
     await tester.tap(find.text('Turn 41'));
     await tester.pumpAndSettle();
@@ -188,7 +198,9 @@ void main() {
     await tester.tap(find.text('calendar_freebusy'));
     await tester.pumpAndSettle();
     expect(find.byType(WorkLogInspector), findsOneWidget);
-    expect(find.text('INPUT'), findsWidgets);
+    expect(find.text('{"day": "Thu"}'), findsNothing);
+    await tester.tap(find.text('Input').last);
+    await tester.pumpAndSettle();
     expect(find.text('{"day": "Thu"}'), findsOneWidget);
     expect(find.text('412 ms'), findsWidgets);
   });
@@ -206,7 +218,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(WorkLogInspector), findsOneWidget);
     expect(find.text('Frock AI'), findsOneWidget);
-    expect(find.text('14.2k'), findsOneWidget);
+    expect(find.text('11,980'), findsOneWidget);
   });
 
   testWidgets('filters and search narrow the rows, across folded Turns', (
@@ -220,18 +232,18 @@ void main() {
     await tester.pumpWidget(host(api));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.widgetWithText(ChoiceChip, 'Tools'));
+    await tester.tap(find.bySemanticsLabel('Show Tools'));
     await tester.pumpAndSettle();
     expect(find.text('Checking Thursday.'), findsNothing);
     expect(find.text('calendar_freebusy'), findsOneWidget);
     expect(find.text('weather.today'), findsOneWidget);
 
-    await tester.tap(find.widgetWithText(ChoiceChip, 'Errors'));
+    await tester.tap(find.bySemanticsLabel('Show Errors'));
     await tester.pumpAndSettle();
     expect(find.text('calendar_freebusy'), findsNothing);
     expect(find.text('weather.today'), findsOneWidget);
 
-    await tester.tap(find.widgetWithText(ChoiceChip, 'All'));
+    await tester.tap(find.bySemanticsLabel('Show All'));
     await tester.enterText(find.byType(TextField), 'thursday');
     await tester.pumpAndSettle();
     expect(find.text('Checking Thursday.'), findsOneWidget);
@@ -319,5 +331,93 @@ void main() {
     await tester.tap(find.text('Try again'));
     await tester.pumpAndSettle();
     expect(find.text('Turn 42'), findsOneWidget);
+  });
+
+  test('the timeline lays Turns oldest first, and every mode fits in 0–1', () {
+    final turns = wire.WorkLogPage.fromJson(workLogPage()).turns
+        .map(WorkLogTurnView.fromWire)
+        .toList();
+    for (final mode in WorkLogTimeMode.values) {
+      final layout = layoutWorkLogTimeline(turns, mode);
+      expect(layout.marks.map((mark) => mark.label), ['T41', 'T42']);
+      expect(layout.bars, hasLength(5));
+      for (final bar in layout.bars) {
+        expect(bar.start, inInclusiveRange(0, 1));
+        expect(bar.end, greaterThanOrEqualTo(bar.start));
+      }
+      // The fixture's rows share one clock, so only the other modes order.
+      if (mode != WorkLogTimeMode.clock) {
+        expect(
+          layout.spans['run-41']!.$1,
+          lessThan(layout.spans['run-42']!.$1),
+        );
+      }
+    }
+  });
+
+  testWidgets('Fold Turns folds every Turn, and opens them again', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final api = NativeSessionApi(MemoryStore(), (_, _) async => workLogPage());
+    addTearDown(api.close);
+    await tester.pumpWidget(host(api));
+    await tester.pumpAndSettle();
+    expect(find.text('Checking Thursday.'), findsOneWidget);
+    await tester.tap(find.text('Fold Turns'));
+    await tester.pumpAndSettle();
+    expect(find.text('Checking Thursday.'), findsNothing);
+    await tester.tap(find.text('Open Turns'));
+    await tester.pumpAndSettle();
+    expect(find.text('Checking Thursday.'), findsOneWidget);
+    expect(find.text('weather.today'), findsOneWidget);
+  });
+
+  testWidgets('a call shows how it got to run, and a Jev check its verdict', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final fixture = workLogPage();
+    final turns = [...fixture['turns']! as List<Object?>];
+    final first = {...turns[0]! as Map<String, Object?>};
+    final entries = [...first['entries']! as List<Object?>];
+    entries[2] = {
+      ...entries[2]! as Map<String, Object?>,
+      'label': 'Call review',
+      'verdict': 'Allow',
+    };
+    entries[3] = {
+      ...entries[3]! as Map<String, Object?>,
+      'chain': [
+        {'kind': 'model', 'title': 'Asked for by request #1'},
+        {'kind': 'jev', 'title': 'Jev · allow', 'durationMs': 212},
+        {'kind': 'tool', 'title': 'Ran', 'durationMs': 412},
+      ],
+    };
+    first['entries'] = entries;
+    turns[0] = first;
+    final api = NativeSessionApi(
+      MemoryStore(),
+      (_, _) async => {...fixture, 'turns': turns},
+    );
+    addTearDown(api.close);
+    await tester.pumpWidget(host(api));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('calendar_freebusy'));
+    await tester.pumpAndSettle();
+    expect(find.text('HOW IT GOT TO RUN'), findsOneWidget);
+    expect(find.text('Asked for by request #1'), findsOneWidget);
+    expect(find.text('Jev · allow'), findsOneWidget);
+    expect(find.text('Ran'), findsOneWidget);
+
+    await tester.tap(find.text('Call review · calendar_freebusy'));
+    await tester.pumpAndSettle();
+    expect(find.text('Allow'), findsOneWidget);
+    expect(find.text('JEV THIS TURN'), findsOneWidget);
   });
 }

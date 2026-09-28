@@ -164,56 +164,58 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('the published card that asks a question answers what was ticked', (
-    tester,
-  ) async {
-    final asking = cards.firstWhere(
-      (card) =>
-          card.sendDataModel &&
-          card.components.any((it) => it['component'] == 'MultiSelect'),
-    );
-    final multiSelect = asking.components.firstWhere(
-      (it) => it['component'] == 'MultiSelect',
-    );
-    final path = ((multiSelect['values']! as Map)['path']! as String).substring(
-      1,
-    );
-    final options = (multiSelect['options']! as List)
-        .map((option) => (option as Map).cast<String, Object?>())
-        .toList();
-    final seeded = (asking.dataModel[path]! as List).cast<String>();
-    final ticking = options.firstWhere(
-      (option) => !seeded.contains(option['value']),
-    );
-    final submit = asking.components.firstWhere(
-      (it) => it['component'] == 'Button' && it['action'] != null,
-    );
-    final action =
-        ((submit['action']! as Map)['event']! as Map)['name']! as String;
-    final submitLabel = asking.components.firstWhere(
-      (it) => it['id'] == submit['child'],
-    )['text']! as String;
+  testWidgets(
+    'the published card that asks a question answers what was ticked',
+    (tester) async {
+      final asking = cards.firstWhere(
+        (card) =>
+            card.sendDataModel &&
+            card.components.any((it) => it['component'] == 'MultiSelect'),
+      );
+      final multiSelect = asking.components.firstWhere(
+        (it) => it['component'] == 'MultiSelect',
+      );
+      final path = ((multiSelect['values']! as Map)['path']! as String)
+          .substring(1);
+      final options = (multiSelect['options']! as List)
+          .map((option) => (option as Map).cast<String, Object?>())
+          .toList();
+      final seeded = (asking.dataModel[path]! as List).cast<String>();
+      final ticking = options.firstWhere(
+        (option) => !seeded.contains(option['value']),
+      );
+      final submit = asking.components.firstWhere(
+        (it) => it['component'] == 'Button' && it['action'] != null,
+      );
+      final action =
+          ((submit['action']! as Map)['event']! as Map)['name']! as String;
+      final submitLabel =
+          asking.components.firstWhere(
+                (it) => it['id'] == submit['child'],
+              )['text']!
+              as String;
 
-    final posts = await drawFamily(
-      tester,
-      asking.components,
-      dataModel: asking.dataModel,
-      sendDataModel: asking.sendDataModel,
-    );
-    // An option's label may also be a value in the card's own table; the
-    // control is drawn after it.
-    await tester.tap(find.text(ticking['label']! as String).last);
-    await tester.pumpAndSettle();
-    await captureFamily(tester, 'published-${asking.surfaceId}-ticked');
-    await tester.tap(find.text(submitLabel));
-    await tester.pumpAndSettle();
+      final posts = await drawFamily(
+        tester,
+        asking.components,
+        dataModel: asking.dataModel,
+        sendDataModel: asking.sendDataModel,
+      );
+      // An option's label may also be a value in the card's own table; the
+      // control is drawn after it.
+      await tester.tap(find.text(ticking['label']! as String).last);
+      await tester.pumpAndSettle();
+      await captureFamily(tester, 'published-${asking.surfaceId}-ticked');
+      await tester.tap(find.text(submitLabel));
+      await tester.pumpAndSettle();
 
-    expect((posts.single['event']! as Map)['name'], action);
-    expect((posts.single['dataModel']! as Map)[path], [
-      for (final option in options)
-        if (seeded.contains(option['value']) || identical(option, ticking))
-          option['value'],
-    ]);
-    await tester.pumpWidget(const SizedBox());
-  });
+      expect((posts.single['event']! as Map)['name'], action);
+      expect((posts.single['dataModel']! as Map)[path], [
+        for (final option in options)
+          if (seeded.contains(option['value']) || identical(option, ticking))
+            option['value'],
+      ]);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
 }
