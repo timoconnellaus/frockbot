@@ -432,6 +432,7 @@ async function identifyRequest(
       {
         id: userId,
         ...(session?.user.email ? { email: session.user.email } : {}),
+        emailVerified: session?.user.emailVerified === true,
         mode: development.userId ? "development" : "better-auth",
       },
       dependencies.adminEmails,

@@ -2768,7 +2768,11 @@ describe("Cloudflare user application gateway", () => {
       handler: unauthenticatedAuth.handler,
       getSession: () =>
         Promise.resolve({
-          user: { id: "owner-user", email: "OWNER@example.com" },
+          user: {
+            id: "owner-user",
+            email: "OWNER@example.com",
+            emailVerified: true,
+          },
         }),
     });
     const { gateway, loader } = createTestGateway(
@@ -2789,6 +2793,50 @@ describe("Cloudflare user application gateway", () => {
 
     expect(response.status).toBe(200);
     expect(loader.ids).toEqual(["owner-user:foundation-v1"]);
+  });
+
+  test("asks the authority for an allowlisted email the provider never verified", async () => {
+    // A provider such as Discord lets an account carry any address, so an
+    // unverified one on the list would be admin for whoever typed it.
+    const asked: AdmissionIdentityV1[] = [];
+    const auth = testAuthPackage({
+      handler: unauthenticatedAuth.handler,
+      getSession: () =>
+        Promise.resolve({
+          user: { id: "claimant", email: "owner@example.com" },
+        }),
+    });
+    const { gateway, loader } = createTestGateway(
+      undefined,
+      auth,
+      false,
+      undefined,
+      {
+        admitAccount: (identity) => {
+          asked.push(identity);
+          return Promise.resolve({
+            schemaVersion: 1,
+            admitted: false,
+            reason: "invitation-required",
+          });
+        },
+        adminEmails: "owner@example.com",
+      },
+    );
+
+    const response = await gateway(new Request("https://frockbot.test/"));
+
+    expect(response.status).toBe(403);
+    expect(loader.ids).toEqual([]);
+    expect(asked).toEqual([
+      {
+        schemaVersion: 1,
+        userId: "claimant",
+        email: "owner@example.com",
+        emailVerified: false,
+        isAdmin: false,
+      },
+    ]);
   });
 
   test("admits development identities without asking the authority", async () => {

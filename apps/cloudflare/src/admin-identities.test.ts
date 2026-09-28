@@ -15,6 +15,7 @@ describe("deployment admin identities", () => {
         {
           id: "user-1",
           email: "OWNER@example.com",
+          emailVerified: true,
           mode: "better-auth",
         },
         "owner@example.com",
@@ -25,11 +26,33 @@ describe("deployment admin identities", () => {
         {
           id: "user-2",
           email: "somebody@example.com",
+          emailVerified: true,
           mode: "better-auth",
         },
         "owner@example.com",
       ),
     ).toBe(false);
+  });
+
+  test("grants admin on an allowlisted email only once it is verified", () => {
+    const identity = {
+      id: "user-1",
+      email: "owner@example.com",
+      mode: "better-auth",
+    } as const;
+    expect(isDeploymentAdminV1(identity, "owner@example.com")).toBe(false);
+    expect(
+      isDeploymentAdminV1(
+        { ...identity, emailVerified: false },
+        "owner@example.com",
+      ),
+    ).toBe(false);
+    expect(
+      isDeploymentAdminV1(
+        { ...identity, emailVerified: true },
+        "owner@example.com",
+      ),
+    ).toBe(true);
   });
 
   test("makes the canonical development identity admin", () => {

@@ -8,6 +8,8 @@ export const DEVELOPMENT_USER_ID = "development";
 export interface GatewayIdentityV1 {
   id: string;
   email?: string;
+  /** Whether the provider verified `email`; an unverified one names nobody. */
+  emailVerified?: boolean;
   mode: "better-auth" | "development";
 }
 
@@ -19,7 +21,11 @@ export function isDeploymentAdminV1(
     return true;
   }
   const emails = adminEmailsV1(configuredEmails);
-  if (identity.email && emails.has(identity.email.trim().toLowerCase())) {
+  if (
+    identity.emailVerified === true &&
+    identity.email &&
+    emails.has(identity.email.trim().toLowerCase())
+  ) {
     return true;
   }
   return identity.mode === "development" && emails.size === 0;
