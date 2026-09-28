@@ -76,6 +76,8 @@ async function run(
     initialText?: string;
     /** Handed the Turn's hooks, for a tool that reviews synthetic calls. */
     hooks?: (hooks: LoopHookListV1) => void;
+    /** A Routine's Turn, which speaks only by handing off. */
+    automation?: boolean;
   } = {},
 ): Promise<SessionEvent[]> {
   const root = createAgentRuntimeHarness({});
@@ -137,7 +139,11 @@ async function run(
       sessionId: "user:test",
       provider: provider.id,
       model: "test",
-      turnType: options.voice ? "agent" : "chat",
+      turnType: options.automation
+        ? "automation"
+        : options.voice
+          ? "agent"
+          : "chat",
       admitEffect: () => Promise.resolve(true),
     });
     handle.agent.send(options.initialText ?? "Email Dana the March invoice.");
@@ -427,6 +433,108 @@ test("a response off its task runs none of its calls but the Bot speaking", asyn
     content: expect.stringMatching(/^Not run: supervision judged/),
   });
   expect(sent(events)).toEqual(["Which Dana?"]);
+});
+
+test("a finish withheld off its task does not end the Turn: the person has nothing yet", async () => {
+  // Audit F4: "remember Becky" judged off-task refused the memory write and
+  // withheld its "Got it" finish, and the Turn ended with nothing said.
+  const seen: NormalizedModelRequest[] = [];
+  let step = 0;
+  const events = await run(
+    scripted(
+      [
+        [
+          {
+            id: "save",
+            name: "web_fetch",
+            input: { url: "https://a.example" },
+          },
+          {
+            id: "done",
+            name: "send_to_user",
+            input: text("Got it.", "finish"),
+          },
+        ],
+        [
+          {
+            id: "honest",
+            name: "send_to_user",
+            input: text("I couldn't save that.", "finish"),
+          },
+        ],
+      ],
+      seen,
+    ),
+    createFakeTurnSupervisorV1({
+      reviewStep: async (evidence) => {
+        step += 1;
+        return step === 1
+          ? {
+              ...allowAllStepDecisionV1(evidence.calls),
+              responseAlignment: "wrong-objective",
+              text: "withhold",
+              textReason: "off_task",
+            }
+          : allowAllStepDecisionV1(evidence.calls);
+      },
+    }),
+  );
+  expect(seen).toHaveLength(2);
+  expect(sent(events)).toEqual(["I couldn't save that."]);
+  expect(
+    events.find(
+      (event) =>
+        event.type === "tool/result" && event.occurrenceId.endsWith(":1:1"),
+    ),
+  ).toMatchObject({
+    content: expect.not.stringContaining("The Turn is complete"),
+  });
+  expect(events.at(-1)).toMatchObject({
+    type: "turn/end",
+    outcome: "completed",
+  });
+});
+
+test("a hand-off claiming undone work is withheld once, and the truth goes out; off its task it still speaks", async () => {
+  const reviewed: SendReviewEvidenceV1[] = [];
+  const events = await run(
+    scripted([
+      [
+        {
+          id: "claim",
+          name: "wake_parent",
+          input: { message: "Archived 40 newsletters." },
+        },
+      ],
+      [
+        {
+          id: "truth",
+          name: "wake_parent",
+          input: { message: "I could not archive anything; it was refused." },
+        },
+      ],
+    ]),
+    createFakeTurnSupervisorV1({
+      reviewStep: async (evidence) => ({
+        ...allowAllStepDecisionV1(evidence.calls),
+        responseAlignment: "wrong-objective",
+      }),
+      reviewSend: async (evidence) => {
+        reviewed.push(evidence);
+        return evidence.message.startsWith("Archived")
+          ? { send: "withhold", reason: "unsupported_claim", judgments: [] }
+          : { send: "release", judgments: [] };
+      },
+    }),
+    { automation: true },
+  );
+  expect(
+    events.flatMap((event) =>
+      event.type === "wake/parent" ? [event.message] : [],
+    ),
+  ).toEqual(["I could not archive anything; it was refused."]);
+  expect(reviewed.map((evidence) => evidence.handoff)).toEqual([true]);
+  expect(events.at(-1)).toMatchObject({ type: "turn/end" });
 });
 
 test("the step decision is recorded before any of its calls runs", async () => {
@@ -993,6 +1101,58 @@ test("a long Turn going in circles is told, at that request's tail, to change co
     { step: 5, decision: { stuck: true } },
     { step: 7, decision: { stuck: false } },
   ]);
+});
+
+test("a Turn judged stuck twice runs nothing but speaking", async () => {
+  // 2026-09-27: progress said stuck seven times and the Routine ran on for 61
+  // steps, because a stuck verdict only ever added a note.
+  const events = await run(
+    scripted([
+      ...["a", "b", "c", "d", "e", "f", "g"].map(fetchStep),
+      [
+        {
+          id: "h",
+          name: "send_to_user",
+          input: text("Stuck on fetch.", "finish"),
+        },
+      ],
+    ]),
+    createFakeTurnSupervisorV1({
+      reviewProgress: async (evidence) => ({
+        stuck: true,
+        signals: [...evidence.signals],
+        judgments: [],
+      }),
+    }),
+  );
+  const stuckAt = events
+    .filter((event) => event.type === "supervision/progress")
+    .map((event) => (event as { step: number }).step);
+  expect(stuckAt).toEqual([5, 7]);
+  // From the second verdict on, the fetch is not run and the Turn is told why.
+  expect(
+    events.find(
+      (event) =>
+        event.type === "tool/result" &&
+        event.step === 7 &&
+        event.name === "web_fetch",
+    ),
+  ).toMatchObject({
+    content: expect.stringMatching(
+      /^Not run: this Turn was judged stuck twice/,
+    ),
+  });
+  expect(sent(events)).toEqual(["Stuck on fetch."]);
+});
+
+test("a stuck Routine is told to hand off, never to ask a person who is not there", () => {
+  expect(stuckNoteV1("FrockBot", undefined, { origin: "schedule" })).toContain(
+    "hand off what you have",
+  );
+  expect(
+    stuckNoteV1("FrockBot", undefined, { origin: "schedule", narrowed: true }),
+  ).toContain("Nothing but a hand-off will run now");
+  expect(stuckNoteV1("FrockBot")).toContain("ask how to go on");
 });
 
 test("a stuck Turn offered no thinking specialist is told to try another way or ask", () => {

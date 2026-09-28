@@ -166,7 +166,11 @@ export function createJevTurnSupervisorV1(
       try {
         // Work a subagent produced is judged first, and whatever the vetoes
         // say: a long message or a question can still be a rewrite of it.
-        if (evidence.work.length > 0 && !workShownV1(evidence)) {
+        if (
+          !evidence.handoff &&
+          evidence.work.length > 0 &&
+          !workShownV1(evidence)
+        ) {
           const relay = await reviewRelayV1(
             options.client,
             relayEvidenceV1(evidence),
@@ -190,7 +194,7 @@ export function createJevTurnSupervisorV1(
                 budget,
               })
             : undefined,
-          sendVetoV1(evidence) === undefined
+          !evidence.handoff && sendVetoV1(evidence) === undefined
             ? reviewSendV1(options.client, sendReviewEvidenceV1(evidence), {
                 signal,
                 budget,

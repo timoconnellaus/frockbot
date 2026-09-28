@@ -26,6 +26,7 @@ import {
   type SessionEvent,
   type StepDecision,
   type StepProposalEvidence,
+  type SupervisionReasonCode,
   type ToolCall,
   type TurnDirective,
   type TurnInputOriginV1,
@@ -110,6 +111,8 @@ export function turnInputOriginV1(
 
 const SEND_TO_USER = "send_to_user";
 const REPLY_TO_REQUEST = "reply_to_request";
+/** A background Turn's hand-off: the only thing it ever says. */
+const WAKE_PARENT = "wake_parent";
 
 /** The earlier conversation Jev is shown, most recent last. */
 export const SUPERVISION_CONVERSATION_MAX_V1 = 8;
@@ -123,11 +126,39 @@ export function acknowledgeNoteV1(productName: string): string {
 export function stuckNoteV1(
   productName: string,
   thinking?: { slug: string },
+  options: { origin?: TurnInputOriginV1; narrowed?: boolean } = {},
 ): string {
+  const label = runtimeNoteLabelV1(productName, "not getting anywhere");
+  const nobodyToAsk = !personPresentV1(options.origin ?? "user");
+  if (options.narrowed) {
+    return nobodyToAsk
+      ? `${label}\nThis work has been judged stuck again. Nothing but a hand-off will run now: hand off what you have, and say plainly what you could not do and why.`
+      : `${label}\nThis work has been judged stuck again. Nothing but speaking to the person will run now: tell them what you have, what is blocking you, and ask how to go on.`;
+  }
   const mentor = thinking
     ? `, hand the problem to the thinking specialist (call Task with model "${thinking.slug}" and a brief of what you tried and what happened)`
     : "";
-  return `${runtimeNoteLabelV1(productName, "not getting anywhere")}\nYour last few steps have not moved the work forward. Stop repeating what has not worked. Try a different approach${mentor}, or tell the person what is blocking you and ask how to go on.`;
+  const out = nobodyToAsk
+    ? "or hand off what you have and say what is blocking you"
+    : "or tell the person what is blocking you and ask how to go on";
+  return `${label}\nYour last few steps have not moved the work forward. Stop repeating what has not worked. Try a different approach${mentor}, ${out}.`;
+}
+
+/** Whether someone is there to be asked while this Turn runs. */
+function personPresentV1(origin: TurnInputOriginV1): boolean {
+  return origin !== "schedule" && origin !== "subagent" && origin !== "agent";
+}
+
+/**
+ * How many stuck verdicts narrow a Turn to speaking. One is a nudge to change
+ * course; a second means the nudge did not work, and more steps of the same
+ * only spend.
+ */
+export const STUCK_NARROW_AFTER_V1 = 2;
+
+function stuckCount(events: readonly SessionEvent[], turn: number): number {
+  return progressChecksOf(events, turn).filter((check) => check.decision.stuck)
+    .length;
 }
 
 /** How a Turn is steered to answer a question its subagent asked. */
@@ -198,7 +229,17 @@ export function textSendV1(
 }
 
 function speaks(tool: string): boolean {
-  return tool === SEND_TO_USER || tool === REPLY_TO_REQUEST;
+  return (
+    tool === SEND_TO_USER || tool === REPLY_TO_REQUEST || tool === WAKE_PARENT
+  );
+}
+
+/** A hand-off's message, when the call is one. */
+function handoffMessageV1(tool: string, input: unknown): string | undefined {
+  if (tool !== WAKE_PARENT || !isRecord(input)) return undefined;
+  return typeof input.message === "string" && input.message.trim()
+    ? input.message
+    : undefined;
 }
 
 /** The step's calls, a batch opened into the calls it carries. */
@@ -703,7 +744,7 @@ function withheldResult(
       ? "because the person can already see what it says."
       : "because it is not about what the person asked for.";
   const next =
-    finish && !addressed
+    finish && !addressed && reason === "redundant_text"
       ? " The Turn is complete; do not send it again."
       : reason === "redundant_text"
         ? addressed
@@ -711,6 +752,17 @@ function withheldResult(
           : " Carry on without repeating it."
         : " Go back to what they asked.";
   return `${SUPERVISION_WITHHELD_SEND_PREFIX_V1} ${why}${next}`;
+}
+
+const SUPERVISION_STUCK_PREFIX_V1 =
+  "Not run: this Turn was judged stuck twice, so only speaking runs now.";
+
+function withheldHandoffResult(
+  reason: SupervisionReasonCode | undefined,
+): string {
+  return reason === "unsupported_fact"
+    ? `${SUPERVISION_WITHHELD_SEND_PREFIX_V1} because it says a page said something that the pages this Turn read do not say. Hand off again saying only what they say.`
+    : `${SUPERVISION_WITHHELD_SEND_PREFIX_V1} because it says something was done that this Turn's results do not show done. Hand off again saying plainly what was and was not done.`;
 }
 
 function refusedCallResult(reason: string, origin: TurnInputOriginV1): string {
@@ -860,7 +912,12 @@ export function createSupervisionRuntimeFeatureV1(
             .find((offered) => offered.name === "thinking");
           return appendRuntimeNoteV1(
             request,
-            stuckNoteV1(host.productName, thinking),
+            stuckNoteV1(host.productName, thinking, {
+              origin: host.origin,
+              narrowed:
+                stuckCount(agent.session.activeRunJournal, turn) >=
+                STUCK_NARROW_AFTER_V1,
+            }),
           );
         }
         const session = agent.session;
@@ -964,8 +1021,79 @@ export function createSupervisionRuntimeFeatureV1(
             `supervision: step ${at.turn}:${at.step} ran a call it never reviewed`,
           );
         }
+        // A hand-off is what the person will be told the work did, so what it
+        // says was done is checked against the Turn's results, once a Turn,
+        // like a send. Whether it is needed is not asked: it is the only word
+        // a background Turn has.
+        const handoff = handoffMessageV1(call.name, call.input);
+        if (
+          handoff !== undefined &&
+          (sendDecisionOf(events, context.effectId) !== undefined ||
+            !withheldForV1(
+              events,
+              at.turn,
+              "unsupported_claim",
+              "unsupported_fact",
+            ))
+        ) {
+          let verdict = sendDecisionOf(events, context.effectId);
+          if (!verdict) {
+            const started = Date.now();
+            verdict = await host.supervisor.reviewSend(
+              {
+                objective: inputText(events, at.turn, host.origin),
+                origin: host.origin,
+                conversation: [],
+                shown: [],
+                priorResults: priorResults(events, at.turn),
+                message: handoff,
+                finish: true,
+                work: [],
+                checkClaim: true,
+                handoff: true,
+              },
+              context.signal,
+            );
+            session.append({
+              type: "supervision/send",
+              turn: at.turn,
+              step: at.step,
+              occurrenceId: context.effectId,
+              finish: true,
+              decision: verdict,
+              latencyMs: elapsed(started),
+            });
+            await session.flush();
+          }
+          if (verdict.send === "withhold") {
+            return {
+              kind: "denied",
+              call,
+              result: {
+                content: withheldHandoffResult(verdict.reason),
+                isError: false,
+              },
+            };
+          }
+          return next();
+        }
         const send = textSendV1(call.name, call.input);
         if (!send) {
+          if (
+            !speaks(call.name) &&
+            stuckCount(events, at.turn) >= STUCK_NARROW_AFTER_V1
+          ) {
+            return {
+              kind: "denied",
+              call,
+              result: {
+                content: personPresentV1(host.origin)
+                  ? `${SUPERVISION_STUCK_PREFIX_V1} Tell the person what you have, what is blocking you, and ask how to go on.`
+                  : `${SUPERVISION_STUCK_PREFIX_V1} Hand off what you have, and say what you could not do and why.`,
+                isError: true,
+              },
+            };
+          }
           if (
             decision.responseAlignment === "wrong-objective" &&
             !speaks(call.name)
