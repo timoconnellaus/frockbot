@@ -66,8 +66,8 @@ function planForPrice(
   if (config.plusPriceId && priceId === config.plusPriceId) return "plus";
   return undefined;
 }
-function isPlan(value: unknown): value is StripePlanIdV1 {
-  return value === "standard" || value === "plus";
+export function isStripePlanV1(value: unknown): value is StripePlanIdV1 {
+  return STRIPE_PLAN_V1.subscriptions.some((plan) => plan.id === value);
 }
 type StripeObject = Record<string, unknown>;
 export { boundedText, object };
@@ -286,7 +286,7 @@ export class AccountPayments {
         ? (command.plan ?? "standard")
         : undefined;
     if (plan !== undefined) {
-      if (!isPlan(plan)) throw new BillingError("Invalid plan", 400);
+      if (!isStripePlanV1(plan)) throw new BillingError("Invalid plan", 400);
       if (!planPriceIdV1(this.stripe.config, plan))
         throw new BillingError("That plan is not available yet", 409);
     }
@@ -303,7 +303,8 @@ export class AccountPayments {
       intent &&
       (intent.kind !== command.kind ||
         intent.cents !== cents ||
-        (intent.plan ?? undefined) !== plan)
+        (intent.plan ??
+          (intent.kind === "subscription" ? "standard" : undefined)) !== plan)
     )
       throw new BillingError("Checkout key was reused", 409);
     if (intent?.url) return { url: intent.url };
@@ -460,7 +461,7 @@ export class AccountPayments {
   async changePlan(command: { id: string; plan: StripePlanIdV1 }) {
     if (!/^[a-zA-Z0-9_-]{16,100}$/.test(command.id))
       throw new BillingError("Invalid plan change", 400);
-    if (!isPlan(command.plan)) throw new BillingError("Invalid plan", 400);
+    if (!isStripePlanV1(command.plan)) throw new BillingError("Invalid plan", 400);
     const price = planPriceIdV1(this.stripe.config, command.plan);
     if (!price) throw new BillingError("That plan is not available yet", 409);
     const key = `planChange:${command.id}`;

@@ -35,6 +35,7 @@ import {
   type StripePlanIdV1,
   boundedText,
   deleteAccountCustomersV1,
+  isStripePlanV1,
   object,
   stripeId,
   verifyStripeEvent,
@@ -87,9 +88,6 @@ export function stripeConfig(
 const CHECKOUT_PATH = "/api/billing/provider/checkout";
 const PORTAL_PATH = "/api/billing/provider/portal";
 const PLAN_PATH = "/api/billing/provider/plan";
-function isStripePlan(value: unknown): value is StripePlanIdV1 {
-  return STRIPE_PLAN_V1.subscriptions.some((plan) => plan.id === value);
-}
 const WEBHOOK_PATH = "/api/billing/provider/webhook";
 
 /**
@@ -296,7 +294,7 @@ async function command(
         typeof body.id !== "string" ||
         !["subscription", "topup"].includes(String(body.kind)) ||
         (body.cents !== undefined && typeof body.cents !== "number") ||
-        (body.plan !== undefined && !isStripePlan(body.plan))
+        (body.plan !== undefined && !isStripePlanV1(body.plan))
       )
         throw new BillingError("Invalid checkout", 400);
       return Response.json(
@@ -310,7 +308,7 @@ async function command(
       );
     }
     if (route(url) === PLAN_PATH) {
-      if (typeof body.id !== "string" || !isStripePlan(body.plan))
+      if (typeof body.id !== "string" || !isStripePlanV1(body.plan))
         throw new BillingError("Invalid plan change", 400);
       const changed = (await account.command("plan", {
         id: body.id,

@@ -829,6 +829,38 @@ describe("plans and the trial", () => {
     ).rejects.toThrow("That plan is not available yet");
   });
 
+  test("a subscription checkout recorded before plans existed is answered its saved URL as Standard", async () => {
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
+    ledger.set("checkout:legacy-subscription", {
+      id: "legacy-subscription",
+      kind: "subscription",
+      cents: 2000,
+      created: NOW,
+      sessionId: "cs_legacy",
+      url: "https://checkout.stripe.com/c/legacy",
+    });
+    let calls = 0;
+    const payments = new AccountPayments(
+      ledger.paymentsPort(),
+      new StripeClient(
+        config,
+        fakeFetch(async () => {
+          calls += 1;
+          return Response.json({});
+        }),
+      ),
+      "user_one",
+      () => NOW,
+    );
+    expect(
+      await payments.checkout({
+        id: "legacy-subscription",
+        kind: "subscription",
+      }),
+    ).toEqual({ url: "https://checkout.stripe.com/c/legacy" });
+    expect(calls).toBe(0);
+  });
+
   test("the trial's free invoice grants trial credit, never the allowance or a paid period", async () => {
     const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
     ledger.set("customer", "cus_owner");
