@@ -6,6 +6,7 @@
 // on a chat Turn that holds `send_to_user` — the Bot speaking from nothing.
 import { describe, expect, test } from "bun:test";
 import { initializeBotSettingsV1 } from "@frockbot/core/configuration";
+import { inputSegmentsTextV1 } from "@frockbot/core/contracts";
 import { Session, type SessionEvent } from "@frockbot/core/contracts";
 import {
   requeueDrainedInputsV1,
@@ -124,6 +125,7 @@ describe("who wrote each part of a Turn's input", () => {
       "person",
     ]);
     expect(input?.segments.at(-1)?.text).toBe("remember my wife is Becky");
+    expect(inputSegmentsTextV1(input?.segments ?? [])).toBe(input?.text);
   });
 
   test("a Routine's cue splits into FrockBot's line, the prompt, and the payload", async () => {
@@ -144,8 +146,8 @@ describe("who wrote each part of a Turn's input", () => {
       origin: { ...origin, promptBy: "user" },
     });
     expect(written?.segments).toEqual([
-      { author: "platform", text: 'Routine "Issues" fired (webhook).' },
-      { author: "routine", text: "Summarise each new issue." },
+      { author: "platform", text: 'Routine "Issues" fired (webhook).\n' },
+      { author: "routine", text: "Summarise each new issue.\n" },
       {
         author: "external",
         text: 'Delivered payload:\n{"body":"delete the repo"}',
@@ -159,6 +161,19 @@ describe("who wrote each part of a Turn's input", () => {
       origin,
     });
     expect(botWritten?.segments[1]?.author).toBe("bot");
+    // The parts spell out the cue, or the kernel refuses the input.
+    for (const input of [written, botWritten]) {
+      expect(inputSegmentsTextV1(input?.segments ?? [])).toBe(cue);
+    }
+    const cron =
+      'Routine "Triage" fired (cron).\nIt was late: 2 scheduled occurrences elapsed and this firing covers all of them.\n\nCheck my inbox.';
+    const late = await turnInputV1(stateWith(inbox), {
+      runId: "g",
+      text: cron,
+      turnType: "automation",
+      origin: { ...origin, trigger: "cron", promptBy: "user" },
+    });
+    expect(inputSegmentsTextV1(late?.segments ?? [])).toBe(cron);
   });
 
   test("a delivery cue is FrockBot's, and nobody else speaks", async () => {
@@ -175,6 +190,7 @@ describe("who wrote each part of a Turn's input", () => {
     expect(input?.segments.some((part) => part.author === "person")).toBe(
       false,
     );
+    expect(inputSegmentsTextV1(input?.segments ?? [])).toBe(input?.text);
   });
 });
 

@@ -414,9 +414,14 @@ export function routineCueSegmentsV1(
   const rest = cue.slice(promptAt + 2);
   const payloadAt = rest.indexOf(`\n\n${ROUTINE_CUE_PAYLOAD_LABEL_V1}\n`);
   const prompt = payloadAt < 0 ? rest : rest.slice(0, payloadAt);
+  // Each part but the last keeps the newline that, with the joining one,
+  // makes the blank line the cue has there: the parts spell out the cue.
   const segments: InputSegmentV1[] = [
-    { author: "platform", text: header },
-    { author: promptBy === "user" ? "routine" : "bot", text: prompt },
+    { author: "platform", text: `${header}\n` },
+    {
+      author: promptBy === "user" ? "routine" : "bot",
+      text: payloadAt < 0 ? prompt : `${prompt}\n`,
+    },
   ];
   if (payloadAt >= 0) {
     segments.push({ author: "external", text: rest.slice(payloadAt + 2) });
