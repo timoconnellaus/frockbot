@@ -1607,6 +1607,7 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
         origin: "extraction",
         createdBy: createdByPrincipalV1(claim.authority),
         ...(proposal.subjectKey ? { subjectKey: proposal.subjectKey } : {}),
+        ...(proposal.replaces ? { replaces: proposal.replaces } : {}),
         ...(proposal.occurredAt ? { occurredAt: proposal.occurredAt } : {}),
         ...(proposal.confidence !== undefined
           ? { confidence: proposal.confidence }

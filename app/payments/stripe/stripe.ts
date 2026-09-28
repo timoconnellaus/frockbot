@@ -1,13 +1,44 @@
-import {
-  BILLING_PLAN,
-  BILLING_PLANS,
-  BillingError,
-  BillingLedger,
-  stable,
-  type BillingPlanIdV1,
-  type SubscriptionState,
-} from "./ledger.js";
+import { BillingError } from "@frockbot/app/billing/errors";
+import { boundedText, object } from "@frockbot/app/billing/wire";
+import type {
+  PaymentsLedgerPortV1,
+  PaymentsPlanV1,
+  PaymentsSubscriptionV1,
+} from "@frockbot/core/contracts";
 import { withDeadlineV1 } from "@frockbot/core/deadline";
+
+/**
+ * FrockBot's plans. The markup is in the usage rates, so Standard includes as
+ * much usage as it costs and Plus more. A first subscription starts with a
+ * 7-day trial carrying US$3 of credit; top-ups are spendable only while
+ * subscribed. Each plan is also a Stripe price (`STRIPE_MONTHLY_PRICE_ID`,
+ * `STRIPE_PLUS_PRICE_ID`), and a subscription on any other is refused.
+ */
+export const STRIPE_PLAN_V1 = {
+  subscriptions: [
+    {
+      id: "standard",
+      name: "Standard",
+      monthlyCents: 2000,
+      includedMicros: 20_000_000,
+    },
+    {
+      id: "plus",
+      name: "Plus",
+      monthlyCents: 5000,
+      includedMicros: 60_000_000,
+    },
+  ],
+  trial: { days: 7, creditMicros: 3_000_000 },
+  topUpCents: [1000, 2500, 5000],
+  purchasedCreditNeedsSubscription: true,
+} as const satisfies PaymentsPlanV1;
+
+export type StripePlanIdV1 =
+  (typeof STRIPE_PLAN_V1.subscriptions)[number]["id"];
+export function stripePlanV1(id: StripePlanIdV1) {
+  return STRIPE_PLAN_V1.subscriptions.find((plan) => plan.id === id)!;
+}
 
 export interface StripeConfig {
   /** What a checkout names the credit it sells: the product's. */
@@ -23,64 +54,29 @@ export interface StripeConfig {
 /** The Stripe price a plan is sold at, if this deployment sells it. */
 export function planPriceIdV1(
   config: StripeConfig,
-  plan: BillingPlanIdV1,
+  plan: StripePlanIdV1,
 ): string | undefined {
   return plan === "standard" ? config.monthlyPriceId : config.plusPriceId;
 }
 function planForPrice(
   config: StripeConfig,
   priceId: string,
-): BillingPlanIdV1 | undefined {
+): StripePlanIdV1 | undefined {
   if (priceId === config.monthlyPriceId) return "standard";
   if (config.plusPriceId && priceId === config.plusPriceId) return "plus";
   return undefined;
 }
-function isPlan(value: unknown): value is BillingPlanIdV1 {
+function isPlan(value: unknown): value is StripePlanIdV1 {
   return value === "standard" || value === "plus";
 }
 type StripeObject = Record<string, unknown>;
-export function object(value: unknown): StripeObject {
-  if (!value || typeof value !== "object" || Array.isArray(value))
-    throw new BillingError("Invalid payment response", 502);
-  return value as StripeObject;
-}
+export { boundedText, object };
 export function stripeId(value: unknown): string {
   const id = typeof value === "string" ? value : object(value).id;
   if (typeof id !== "string" || !/^[a-z]+_[a-zA-Z0-9_]+$/.test(id))
     throw new BillingError("Invalid payment identifier", 400);
   return id;
 }
-export async function boundedText(
-  response: Response | Request,
-  maximum = 1_048_576,
-): Promise<string> {
-  if (!response.body) return "";
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > maximum) {
-        await reader.cancel();
-        throw new BillingError("Payment payload is too large", 413);
-      }
-      chunks.push(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  const result = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    result.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(result);
-}
-
 export class StripeClient {
   constructor(
     readonly config: StripeConfig,
@@ -240,7 +236,7 @@ interface PaymentIntentRecord {
   id: string;
   kind: "subscription" | "topup";
   cents: number;
-  plan?: BillingPlanIdV1;
+  plan?: StripePlanIdV1;
   /** Whether the subscription starts with the account's one trial. */
   trial?: boolean;
   created: number;
@@ -251,16 +247,16 @@ interface PaymentIntentRecord {
 /** Stripe effects retain their intent before dispatch, including uncertain responses. */
 export class AccountPayments {
   constructor(
-    private readonly ledger: BillingLedger,
+    private readonly ledger: PaymentsLedgerPortV1,
     private readonly stripe: StripeClient,
     private readonly userId: string,
     private readonly now: () => number = Date.now,
   ) {}
   private async customer(): Promise<string> {
-    const existing = this.ledger.get<string>("customer");
+    const existing = this.ledger.record<string>("customer");
     if (existing) return existing;
-    const started = this.ledger.get<number>("customerIntent") ?? this.now();
-    this.ledger.set("customerIntent", started);
+    const started = this.ledger.record<number>("customerIntent") ?? this.now();
+    this.ledger.remember("customerIntent", started);
     if (this.now() - started > 23 * 3600_000)
       throw new BillingError(
         "Payment setup needs reconciliation. Please contact support.",
@@ -272,14 +268,14 @@ export class AccountPayments {
       `frockbot:customer:${this.userId}`,
     );
     const id = stripeId(customer.id);
-    this.ledger.set("customer", id);
+    this.ledger.remember("customer", id);
     return id;
   }
   async checkout(command: {
     id: string;
     kind: "subscription" | "topup";
     cents?: number;
-    plan?: BillingPlanIdV1;
+    plan?: StripePlanIdV1;
   }) {
     if (!/^[a-zA-Z0-9_-]{16,100}$/.test(command.id))
       throw new BillingError("Invalid checkout request", 400);
@@ -295,14 +291,14 @@ export class AccountPayments {
         throw new BillingError("That plan is not available yet", 409);
     }
     const cents =
-      plan !== undefined ? BILLING_PLANS[plan].monthlyCents : command.cents;
+      plan !== undefined ? stripePlanV1(plan).monthlyCents : command.cents;
     if (
       command.kind === "topup" &&
-      !(BILLING_PLAN.topUpCents as readonly number[]).includes(cents ?? 0)
+      !(STRIPE_PLAN_V1.topUpCents as readonly number[]).includes(cents ?? 0)
     )
       throw new BillingError("Choose a $10, $25 or $50 top-up", 400);
     const key = `checkout:${command.id}`;
-    let intent = this.ledger.get<PaymentIntentRecord>(key);
+    let intent = this.ledger.record<PaymentIntentRecord>(key);
     if (
       intent &&
       (intent.kind !== command.kind ||
@@ -313,7 +309,7 @@ export class AccountPayments {
     if (intent?.url) return { url: intent.url };
     if (!intent) {
       if (command.kind === "subscription") {
-        const subscription = this.ledger.subscription();
+        const subscription = this.ledger.account().subscription;
         if (
           subscription &&
           !["canceled", "incomplete_expired"].includes(subscription.status)
@@ -322,7 +318,7 @@ export class AccountPayments {
             "Manage your existing subscription in the billing portal.",
             409,
           );
-        const pending = this.ledger.get<PaymentIntentRecord>(
+        const pending = this.ledger.record<PaymentIntentRecord>(
           "pendingSubscription",
         );
         if (pending) {
@@ -342,7 +338,7 @@ export class AccountPayments {
               409,
             );
           }
-          const current = this.ledger.get<PaymentIntentRecord>(
+          const current = this.ledger.record<PaymentIntentRecord>(
             "pendingSubscription",
           );
           if (
@@ -366,15 +362,15 @@ export class AccountPayments {
               plan,
               // One trial per account, and never after a subscription.
               trial:
-                !this.ledger.get<boolean>("trialUsed") &&
-                !this.ledger.subscription(),
+                !this.ledger.account().trialUsed &&
+                !this.ledger.account().subscription,
             }),
         created: this.now(),
       };
       // No await between claiming the single subscription slot and its intent.
-      this.ledger.set(key, intent);
+      this.ledger.remember(key, intent);
       if (command.kind === "subscription")
-        this.ledger.set("pendingSubscription", intent);
+        this.ledger.remember("pendingSubscription", intent);
     }
     // Stripe requires expires_at to remain at least 30 minutes ahead of the
     // request. The stable one-hour deadline leaves room for safe retries.
@@ -407,7 +403,7 @@ export class AccountPayments {
       fields["subscription_data[metadata][frockbot_user_id]"] = this.userId;
       if (intent.trial)
         fields["subscription_data[trial_period_days]"] = String(
-          BILLING_PLAN.trialDays,
+          STRIPE_PLAN_V1.trial.days,
         );
     } else {
       fields["line_items[0][price_data][currency]"] = "usd";
@@ -427,15 +423,15 @@ export class AccountPayments {
     )
       throw new BillingError("Stripe did not return a checkout link", 502);
     const saved = { ...intent, sessionId: stripeId(session.id), url };
-    this.ledger.set(key, saved);
+    this.ledger.remember(key, saved);
     if (intent.kind === "subscription")
-      this.ledger.set("pendingSubscription", saved);
+      this.ledger.remember("pendingSubscription", saved);
     return { url };
   }
   async portal(commandId: string) {
     if (!/^[a-zA-Z0-9_-]{16,100}$/.test(commandId))
       throw new BillingError("Invalid portal request", 400);
-    const customer = this.ledger.get<string>("customer");
+    const customer = this.ledger.record<string>("customer");
     if (!customer)
       throw new BillingError(
         "Subscribe before opening the billing portal",
@@ -461,16 +457,16 @@ export class AccountPayments {
    * whose trial credit ran out starts paying early. Nothing prorates, which
    * the ledger does not model.
    */
-  async changePlan(command: { id: string; plan: BillingPlanIdV1 }) {
+  async changePlan(command: { id: string; plan: StripePlanIdV1 }) {
     if (!/^[a-zA-Z0-9_-]{16,100}$/.test(command.id))
       throw new BillingError("Invalid plan change", 400);
     if (!isPlan(command.plan)) throw new BillingError("Invalid plan", 400);
     const price = planPriceIdV1(this.stripe.config, command.plan);
     if (!price) throw new BillingError("That plan is not available yet", 409);
     const key = `planChange:${command.id}`;
-    let intent = this.ledger.get<{
+    let intent = this.ledger.record<{
       id: string;
-      plan: BillingPlanIdV1;
+      plan: StripePlanIdV1;
       subscriptionId: string;
       itemId: string;
       mode: "upgrade" | "downgrade" | "endTrial";
@@ -479,29 +475,32 @@ export class AccountPayments {
     if (intent && intent.plan !== command.plan)
       throw new BillingError("Plan change key was reused", 409);
     if (!intent) {
-      const subscription = this.ledger.subscription();
+      const account = this.ledger.account();
+      const recorded = account.subscription;
       const trialing =
-        subscription?.status === "trialing" &&
-        subscription.trialEnd !== null &&
-        subscription.trialEnd > this.now();
-      if (!subscription || (!trialing && !this.ledger.subscribed()))
+        recorded?.status === "trialing" &&
+        recorded.trialEnd !== null &&
+        recorded.trialEnd > this.now();
+      if (!recorded || (!trialing && !account.subscribed))
         throw new BillingError("Subscribe before changing plan", 409);
-      if (!trialing && subscription.plan === command.plan)
+      if (!trialing && recorded.planId === command.plan)
         return { plan: command.plan };
+      // The item a change replaces the price of is Stripe's to name.
+      const current = await this.subscription(recorded.subscriptionId);
       intent = {
         id: command.id,
         plan: command.plan,
-        subscriptionId: subscription.subscriptionId,
-        itemId: subscription.itemId,
+        subscriptionId: current.subscriptionId,
+        itemId: current.itemId,
         mode: trialing
           ? "endTrial"
-          : BILLING_PLANS[command.plan].monthlyCents >
-              BILLING_PLANS[subscription.plan].monthlyCents
+          : stripePlanV1(command.plan).monthlyCents >
+              stripePlanV1(current.planId as StripePlanIdV1).monthlyCents
             ? "upgrade"
             : "downgrade",
         created: this.now(),
       };
-      this.ledger.set(key, intent);
+      this.ledger.remember(key, intent);
     }
     // Stripe forgets an idempotency key after a day; past that, a retry could
     // charge twice.
@@ -529,9 +528,14 @@ export class AccountPayments {
     );
     return { plan: command.plan };
   }
-  private async subscription(id: string): Promise<SubscriptionState> {
+  /** A subscription as Stripe describes it, with the item a plan change replaces. */
+  private async subscription(
+    id: string,
+  ): Promise<PaymentsSubscriptionV1 & { itemId: string }> {
     const subscription = await this.stripe.call(`subscriptions/${id}`);
-    if (stripeId(subscription.customer) !== this.ledger.get<string>("customer"))
+    if (
+      stripeId(subscription.customer) !== this.ledger.record<string>("customer")
+    )
       throw new BillingError("Subscription belongs to another account", 409);
     const items = object(subscription.items).data;
     if (!Array.isArray(items) || items.length !== 1)
@@ -542,7 +546,7 @@ export class AccountPayments {
     if (
       !plan ||
       price.currency !== "usd" ||
-      price.unit_amount !== BILLING_PLANS[plan].monthlyCents ||
+      price.unit_amount !== stripePlanV1(plan).monthlyCents ||
       item.quantity !== 1 ||
       object(price.recurring).interval !== "month"
     )
@@ -568,7 +572,7 @@ export class AccountPayments {
       customerId: stripeId(subscription.customer),
       subscriptionId: id,
       itemId: stripeId(item.id),
-      plan,
+      planId: plan,
       status: subscription.status,
       periodStart: start,
       periodEnd: end,
@@ -580,27 +584,24 @@ export class AccountPayments {
     const eventId = stripeId(event.id);
     const type = String(event.type);
     const data = object(object(event.data).object);
-    const customer = this.ledger.get<string>("customer");
+    const customer = this.ledger.record<string>("customer");
     if (!customer || stripeId(data.customer) !== customer)
       throw new BillingError("Payment customer does not match account", 409);
-    const fingerprint = stable(event);
-    if (this.ledger.receipt(eventId, fingerprint)) return;
+    if (this.ledger.applied(eventId, event)) return;
     // A later event may finish its Stripe read first. Retry instead of overwriting it.
-    const revision = this.ledger.get<number>("stripeRevision") ?? 0;
-    let subscription: SubscriptionState | undefined;
-    let grant:
+    const revision = this.ledger.record<number>("stripeRevision") ?? 0;
+    let subscription: PaymentsSubscriptionV1 | undefined;
+    let purchase: { key: string; micros: number } | undefined;
+    let trial: { subscriptionId: string; expires: number } | undefined;
+    let paidPeriod:
       | {
-          id: string;
-          kind: "included" | "purchased" | "complimentary";
-          micros: number;
-          expires: number | null;
+          subscriptionId: string;
+          planId: string;
+          periodStart: number;
+          periodEnd: number;
         }
       | undefined;
-    let paidPeriod:
-      | { subscriptionId: string; periodStart: number; periodEnd: number }
-      | undefined;
     let completedSubscriptionIntentId: string | undefined;
-    let trialGranted = false;
     if (type === "invoice.paid") {
       const invoice = await this.stripe.call(`invoices/${stripeId(data.id)}`);
       if (
@@ -658,26 +659,17 @@ export class AccountPayments {
               reason === "subscription_create" &&
               subscription.trialEnd !== null &&
               end <= subscription.trialEnd
-            ) {
-              grant = {
-                id: `trial:${subscriptionId}`,
-                kind: "complimentary",
-                micros: BILLING_PLAN.trialMicros,
-                expires: subscription.trialEnd,
-              };
-              trialGranted = true;
-            }
-          } else if (
-            paid.line.amount === BILLING_PLANS[paid.plan].monthlyCents
-          ) {
-            grant = {
-              id: `monthly:${subscriptionId}:${period.start}`,
-              kind: "included",
-              micros: BILLING_PLANS[paid.plan].includedMicros,
-              expires: end,
+            )
+              trial = { subscriptionId, expires: subscription.trialEnd };
+          } else if (paid.line.amount === stripePlanV1(paid.plan).monthlyCents)
+            // The ledger grants the plan's allowance for the paid period.
+            paidPeriod = {
+              subscriptionId,
+              planId: paid.plan,
+              periodStart: start,
+              periodEnd: end,
             };
-            paidPeriod = { subscriptionId, periodStart: start, periodEnd: end };
-          } else
+          else
             throw new BillingError(
               "Invoice amount does not match the plan",
               409,
@@ -703,7 +695,7 @@ export class AccountPayments {
       )
         throw new BillingError("Checkout account mismatch", 409);
       const meta = object(session.metadata);
-      const intent = this.ledger.get<PaymentIntentRecord>(
+      const intent = this.ledger.record<PaymentIntentRecord>(
         `checkout:${String(meta.frockbot_checkout_id)}`,
       );
       if (!intent || (intent.sessionId && intent.sessionId !== session.id))
@@ -715,59 +707,31 @@ export class AccountPayments {
           session.amount_total !== intent.cents
         )
           throw new BillingError("Top-up amount does not match payment", 409);
-        grant = {
-          id: `topup:${stripeId(session.id)}`,
-          kind: "purchased",
-          micros: intent.cents * 10_000,
-          expires: null,
-        };
+        purchase = { key: stripeId(session.id), micros: intent.cents * 10_000 };
       }
       if (intent.kind === "subscription" && session.subscription) {
         subscription = await this.subscription(stripeId(session.subscription));
         completedSubscriptionIntentId = intent.id;
       }
     }
-    this.ledger.once(eventId, event, () => {
-      if ((this.ledger.get<number>("stripeRevision") ?? 0) !== revision)
+    this.ledger.apply(eventId, event, (ledger) => {
+      if ((ledger.record<number>("stripeRevision") ?? 0) !== revision)
         throw new BillingError("Payment state changed; retry event", 409);
       if (subscription) {
-        const existing = this.ledger.subscription();
-        if (
-          existing &&
-          existing.subscriptionId !== subscription.subscriptionId &&
-          existing.periodStart > subscription.periodStart
-        )
-          throw new BillingError("Old subscription event", 409);
-        this.ledger.set("subscription", subscription);
-        if (paidPeriod) {
-          const paid = this.ledger.get<{
-            subscriptionId: string;
-            periodStart: number;
-            periodEnd: number;
-          }>("paidAccess");
-          if (
-            !paid ||
-            paidPeriod.periodEnd > paid.periodEnd ||
-            (paidPeriod.periodStart === paid.periodStart &&
-              paidPeriod.periodEnd === paid.periodEnd &&
-              paidPeriod.subscriptionId !== paid.subscriptionId)
-          ) {
-            this.ledger.set("paidAccess", paidPeriod);
-          }
-        }
+        ledger.recordSubscription(subscription);
+        if (paidPeriod) ledger.recordPaidPeriod(paidPeriod);
       }
-      if (grant)
-        this.ledger.grant(grant.id, grant.kind, grant.micros, grant.expires);
-      if (trialGranted) this.ledger.set("trialUsed", true);
+      if (purchase) ledger.grantPurchased(purchase);
+      if (trial) ledger.grantTrial(trial);
       if (
         completedSubscriptionIntentId &&
-        this.ledger.get<PaymentIntentRecord>("pendingSubscription")?.id ===
+        ledger.record<PaymentIntentRecord>("pendingSubscription")?.id ===
           completedSubscriptionIntentId
       )
-        this.ledger.set("pendingSubscription", null);
+        ledger.remember("pendingSubscription", null);
       if (type === "charge.refunded" || type === "charge.dispute.created")
-        this.ledger.set("suspended", true);
-      this.ledger.set("stripeRevision", revision + 1);
+        ledger.suspend();
+      ledger.remember("stripeRevision", revision + 1);
     });
   }
 }

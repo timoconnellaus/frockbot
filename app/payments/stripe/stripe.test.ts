@@ -1,8 +1,12 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
-import { BillingLedger, type BillingStorage } from "./ledger";
+import {
+  BillingLedger,
+  type BillingStorage,
+} from "@frockbot/app/billing/ledger";
 import {
   AccountPayments,
+  STRIPE_PLAN_V1 as PLAN,
   StripeClient,
   deleteAccountCustomersV1,
   verifyStripeEvent,
@@ -46,8 +50,7 @@ function active(ledger: BillingLedger) {
   ledger.set("subscription", {
     customerId: "cus_owner",
     subscriptionId: "sub_owner",
-    itemId: "si_owner",
-    plan: "standard",
+    planId: "standard",
     status: "active",
     periodStart: NOW - 1,
     periodEnd: NOW + 1_000_000,
@@ -56,6 +59,7 @@ function active(ledger: BillingLedger) {
   });
   ledger.set("paidAccess", {
     subscriptionId: "sub_owner",
+    planId: "standard",
     periodStart: NOW - 1,
     periodEnd: NOW + 1_000_000,
   });
@@ -106,7 +110,7 @@ describe("Stripe payment boundaries", () => {
   });
 
   test("top-up checkout requires membership and sends only an allowed exact amount", async () => {
-    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
     const calls: {
       path: string;
       fields?: Record<string, string>;
@@ -134,7 +138,12 @@ describe("Stripe payment boundaries", () => {
         return Response.json(response);
       }),
     );
-    const payments = new AccountPayments(ledger, stripe, "user_one", () => NOW);
+    const payments = new AccountPayments(
+      ledger.paymentsPort(),
+      stripe,
+      "user_one",
+      () => NOW,
+    );
     await expect(
       payments.checkout({
         id: "0123456789abcdef",
@@ -191,7 +200,7 @@ describe("Stripe payment boundaries", () => {
 
   test("uses a stable one-hour Stripe expiry and refuses an intent too old to submit safely", async () => {
     let now = NOW;
-    const ledger = new BillingLedger(storage(), "FrockBot", () => now);
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => now);
     active(ledger);
     let calls = 0;
     const stripe = new StripeClient(
@@ -205,7 +214,12 @@ describe("Stripe payment boundaries", () => {
         );
       }),
     );
-    const payments = new AccountPayments(ledger, stripe, "user_one", () => now);
+    const payments = new AccountPayments(
+      ledger.paymentsPort(),
+      stripe,
+      "user_one",
+      () => now,
+    );
     await payments.checkout({
       id: "expiry-check-1234",
       kind: "topup",
@@ -230,7 +244,7 @@ describe("Stripe payment boundaries", () => {
   });
 
   test("paid top-up webhook grants exactly the recorded purchase and replays once", async () => {
-    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
     active(ledger);
     ledger.set("customer", "cus_owner");
     ledger.set("checkout:0123456789abcdef", {
@@ -255,7 +269,12 @@ describe("Stripe payment boundaries", () => {
         }),
       ),
     );
-    const payments = new AccountPayments(ledger, stripe, "user_one", () => NOW);
+    const payments = new AccountPayments(
+      ledger.paymentsPort(),
+      stripe,
+      "user_one",
+      () => NOW,
+    );
     const event = {
       id: "evt_topup",
       type: "checkout.session.completed",
@@ -268,10 +287,10 @@ describe("Stripe payment boundaries", () => {
   });
 
   test("rejects a webhook for another customer before it can change credit", async () => {
-    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
     ledger.set("customer", "cus_owner");
     const payments = new AccountPayments(
-      ledger,
+      ledger.paymentsPort(),
       new StripeClient(
         config,
         fakeFetch(async () => {
@@ -297,7 +316,7 @@ describe("Stripe payment boundaries", () => {
   });
 
   test("a paid monthly invoice grants one allowance for its canonical invoice period", async () => {
-    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
     ledger.set("customer", "cus_owner");
     const periodStart = Math.floor((NOW - 1_000) / 1000);
     const periodEnd = Math.floor((NOW + 30 * 86_400_000) / 1000);
@@ -351,7 +370,12 @@ describe("Stripe payment boundaries", () => {
         });
       }),
     );
-    const payments = new AccountPayments(ledger, stripe, "user_one", () => NOW);
+    const payments = new AccountPayments(
+      ledger.paymentsPort(),
+      stripe,
+      "user_one",
+      () => NOW,
+    );
     const event = {
       id: "evt_invoice",
       type: "invoice.paid",
@@ -370,7 +394,7 @@ describe("Stripe payment boundaries", () => {
   });
 
   test("a delayed old invoice cannot grant access to the canonical newer unpaid period", async () => {
-    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
     ledger.set("customer", "cus_owner");
     const oldStart = Math.floor((NOW - 60 * 86_400_000) / 1000);
     const oldEnd = Math.floor((NOW - 30 * 86_400_000) / 1000);
@@ -426,7 +450,12 @@ describe("Stripe payment boundaries", () => {
         });
       }),
     );
-    const payments = new AccountPayments(ledger, stripe, "user_one", () => NOW);
+    const payments = new AccountPayments(
+      ledger.paymentsPort(),
+      stripe,
+      "user_one",
+      () => NOW,
+    );
     await payments.webhook({
       id: "evt_old",
       type: "invoice.paid",
@@ -441,6 +470,7 @@ describe("Stripe payment boundaries", () => {
       }>("paidAccess"),
     ).toEqual({
       subscriptionId: "sub_owner",
+      planId: "standard",
       periodStart: oldStart * 1000,
       periodEnd: oldEnd * 1000,
     });
@@ -450,7 +480,7 @@ describe("Stripe payment boundaries", () => {
   });
 
   test("concurrent subscription starts claim one checkout slot before calling Stripe", async () => {
-    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
     let release!: () => void;
     const held = new Promise<void>((resolve) => {
       release = resolve;
@@ -471,7 +501,12 @@ describe("Stripe payment boundaries", () => {
         );
       }),
     );
-    const payments = new AccountPayments(ledger, stripe, "user_one", () => NOW);
+    const payments = new AccountPayments(
+      ledger.paymentsPort(),
+      stripe,
+      "user_one",
+      () => NOW,
+    );
     const first = payments.checkout({
       id: "subscription-first",
       kind: "subscription",
@@ -488,7 +523,7 @@ describe("Stripe payment boundaries", () => {
   });
 
   test("a confirmed subscription checkout clears only its matching pending slot", async () => {
-    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
     ledger.set("customer", "cus_owner");
     const intent = {
       id: "subscription-done",
@@ -540,7 +575,12 @@ describe("Stripe payment boundaries", () => {
         ),
       ),
     );
-    const payments = new AccountPayments(ledger, stripe, "user_one", () => NOW);
+    const payments = new AccountPayments(
+      ledger.paymentsPort(),
+      stripe,
+      "user_one",
+      () => NOW,
+    );
     await payments.webhook({
       id: "evt_subscription_done",
       type: "checkout.session.completed",
@@ -551,10 +591,10 @@ describe("Stripe payment boundaries", () => {
   });
 
   test("a refund suspends usage once and cannot be replayed with changed event data", async () => {
-    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
     ledger.set("customer", "cus_owner");
     const payments = new AccountPayments(
-      ledger,
+      ledger.paymentsPort(),
       new StripeClient(
         config,
         fakeFetch(async () => {
@@ -725,7 +765,12 @@ describe("plans and the trial", () => {
         return Response.json(answer(path, body));
       }),
     );
-    return new AccountPayments(ledger, stripe, "user_one", () => NOW);
+    return new AccountPayments(
+      ledger.paymentsPort(),
+      stripe,
+      "user_one",
+      () => NOW,
+    );
   }
   const invoicePaid = (id: string) => ({
     id,
@@ -735,7 +780,7 @@ describe("plans and the trial", () => {
   });
 
   test("a first subscription starts with a seven-day trial, a later one does not", async () => {
-    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
     ledger.set("customer", "cus_owner");
     const seen: { path: string; body?: URLSearchParams }[] = [];
     const payments = paymentsWith(
@@ -764,9 +809,9 @@ describe("plans and the trial", () => {
   });
 
   test("Plus is refused where its price is not configured", async () => {
-    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
     const payments = new AccountPayments(
-      ledger,
+      ledger.paymentsPort(),
       new StripeClient(
         config,
         fakeFetch(async () => Response.json({})),
@@ -784,7 +829,7 @@ describe("plans and the trial", () => {
   });
 
   test("the trial's free invoice grants trial credit, never the allowance or a paid period", async () => {
-    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
     ledger.set("customer", "cus_owner");
     const trialEnd = unix + 7 * DAY;
     const payments = paymentsWith(ledger, (path) =>
@@ -813,13 +858,14 @@ describe("plans and the trial", () => {
       canSpend: true,
       paidAccess: null,
       trial: { endsAt: trialEnd * 1000, creditMicros: 3_000_000 },
-      plan: { id: "standard", includedMicros: 20_000_000 },
+      subscription: { planId: "standard", trialEnd: trialEnd * 1000 },
     });
     expect(ledger.get<boolean>("trialUsed")).toBe(true);
     // The trial credit ends with the trial.
     const later = new BillingLedger(
       storage(),
       "FrockBot",
+      PLAN,
       () => trialEnd * 1000 + 1,
     );
     later.grant("trial:sub_owner", "complimentary", 3_000_000, trialEnd * 1000);
@@ -827,7 +873,7 @@ describe("plans and the trial", () => {
   });
 
   test("a paid month grants its own plan's allowance, and a mismatched amount is refused", async () => {
-    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
     ledger.set("customer", "cus_owner");
     const start = unix - 60;
     const end = unix + 30 * DAY;
@@ -852,7 +898,7 @@ describe("plans and the trial", () => {
     expect(ledger.snapshot()).toMatchObject({
       includedMicros: 60_000_000,
       subscribed: true,
-      plan: { id: "plus" },
+      subscription: { planId: "plus" },
       trial: null,
     });
     amount = 2000;
@@ -862,11 +908,24 @@ describe("plans and the trial", () => {
   });
 
   test("an upgrade charges now and restarts the month; a downgrade waits for renewal", async () => {
-    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
     ledger.set("customer", "cus_owner");
     active(ledger);
     const seen: { path: string; body?: URLSearchParams; key?: string }[] = [];
-    const payments = paymentsWith(ledger, () => ({ id: "sub_owner" }), seen);
+    let current: "price_monthly" | "price_plus" = "price_monthly";
+    const payments = paymentsWith(
+      ledger,
+      (_path, body) =>
+        body
+          ? { id: "sub_owner" }
+          : subscriptionObject({
+              price: current,
+              status: "active",
+              start: unix - 60,
+              end: unix + 30 * DAY,
+            }),
+      seen,
+    );
     await expect(
       payments.changePlan({ id: "plan-change-upgrade", plan: "plus" }),
     ).resolves.toEqual({ plan: "plus" });
@@ -889,8 +948,9 @@ describe("plans and the trial", () => {
 
     ledger.set("subscription", {
       ...ledger.subscription()!,
-      plan: "plus",
+      planId: "plus",
     });
+    current = "price_plus";
     await payments.changePlan({
       id: "plan-change-downgrade",
       plan: "standard",
@@ -903,7 +963,7 @@ describe("plans and the trial", () => {
   });
 
   test("the upgrade's invoice grants the new allowance for the restarted month", async () => {
-    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
     ledger.set("customer", "cus_owner");
     const end = unix + 30 * DAY;
     const payments = paymentsWith(ledger, (path) =>
@@ -930,12 +990,12 @@ describe("plans and the trial", () => {
   });
 
   test("during a trial, choosing a plan ends the trial and charges its first month now", async () => {
-    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
+    ledger.set("customer", "cus_owner");
     ledger.set("subscription", {
       customerId: "cus_owner",
       subscriptionId: "sub_owner",
-      itemId: "si_owner",
-      plan: "standard",
+      planId: "standard",
       status: "trialing",
       periodStart: NOW,
       periodEnd: NOW + 7 * DAY * 1000,
@@ -943,7 +1003,20 @@ describe("plans and the trial", () => {
       cancelAtPeriodEnd: false,
     });
     const seen: { path: string; body?: URLSearchParams; key?: string }[] = [];
-    const payments = paymentsWith(ledger, () => ({ id: "sub_owner" }), seen);
+    const payments = paymentsWith(
+      ledger,
+      (_path, body) =>
+        body
+          ? { id: "sub_owner" }
+          : subscriptionObject({
+              price: "price_monthly",
+              status: "trialing",
+              start: unix,
+              end: unix + 7 * DAY,
+              trialEnd: unix + 7 * DAY,
+            }),
+      seen,
+    );
     await expect(
       payments.changePlan({ id: "plan-change-in-trial", plan: "standard" }),
     ).resolves.toEqual({ plan: "standard" });
@@ -957,7 +1030,7 @@ describe("plans and the trial", () => {
   });
 
   test("an account without a subscription cannot change plan", async () => {
-    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
     const payments = paymentsWith(ledger, () => ({}));
     await expect(
       payments.changePlan({ id: "plan-change-nobody", plan: "plus" }),

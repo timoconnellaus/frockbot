@@ -4,6 +4,7 @@
   "accountId": "374784ce2915a597adcecf9bcb2c5ee6",
   "prefix": "frockbot",
   "authPackage": "better-auth",
+  "payments": "stripe",
   "workers": {
     "app": {
       "name": "frockbot-cloudflare-staging",

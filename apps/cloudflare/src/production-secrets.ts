@@ -30,14 +30,24 @@
  * Package's are required, checked and deployed. A white-label's own Package is
  * not in this file at all (ADR 0038 §3): its profile names the secrets it
  * requires, and every function below takes them as the `auth` it checks.
+ *
+ * The payments Package is the same shape. Stripe's settings are optional —
+ * its secret key is the switch — and only a build that chose Stripe carries
+ * them. A white-label's own payments Package's secrets are required, named by
+ * its profile, and taken as the `payments` each function checks.
  */
 import {
   isBuiltInAuthPackageIdV1,
+  isBuiltInPaymentsPackageIdV1,
   type AuthPackageIdV1,
   type AuthPackageSettingV1,
   type BuiltInAuthPackageIdV1,
+  type BuiltInPaymentsPackageIdV1,
+  type PaymentsPackageIdV1,
+  type PaymentsPackageSettingV1,
 } from "@frockbot/core/contracts";
 import { AUTH_PACKAGE_V1 } from "#auth-package";
+import { PAYMENTS_PACKAGE_V1 } from "#payments";
 
 /** One setting the deploy hands the Worker. */
 export interface ProductionSecretV1 {
@@ -57,6 +67,8 @@ export interface ProductionSecretV1 {
    * build is the one being released.
    */
   readonly authPackage?: BuiltInAuthPackageIdV1;
+  /** Read by one payments Package only, and carried only by its build. */
+  readonly paymentsPackage?: BuiltInPaymentsPackageIdV1;
 }
 
 /**
@@ -71,6 +83,15 @@ export interface ProductionAuthPackageV1 {
 }
 
 /**
+ * The payments Package a deploy is checked for: the build's own chooser by
+ * default, or what a white-label's profile names.
+ */
+export interface ProductionPaymentsPackageV1 {
+  readonly id: PaymentsPackageIdV1;
+  readonly required: readonly PaymentsPackageSettingV1[];
+}
+
+/**
  * Whether this build carries the secret at all.
  *
  * The one asymmetry in this module: every other name is required or optional
@@ -80,8 +101,13 @@ export interface ProductionAuthPackageV1 {
 function belongsToBuildV1(
   secret: ProductionSecretV1,
   auth: ProductionAuthPackageV1,
+  payments: ProductionPaymentsPackageV1,
 ): boolean {
-  return secret.authPackage === undefined || secret.authPackage === auth.id;
+  return (
+    (secret.authPackage === undefined || secret.authPackage === auth.id) &&
+    (secret.paymentsPackage === undefined ||
+      secret.paymentsPackage === payments.id)
+  );
 }
 
 /** One setting the deploy may omit, and what the product loses when it does. */
@@ -201,17 +227,20 @@ export const OPTIONAL_PRODUCTION_SECRETS_V1: readonly OptionalProductionSecretV1
   [
     {
       name: "STRIPE_SECRET_KEY",
+      paymentsPackage: "stripe",
       why: "Creates account subscriptions, top-ups and portal sessions, and is the switch that turns billing on.",
       degraded:
         "billing stays switched off: nothing is metered, no subscription is required, and the billing page says payments are not available",
     },
     {
       name: "STRIPE_WEBHOOK_SECRET",
+      paymentsPackage: "stripe",
       why: "Verifies payment events before granting credit.",
       degraded: "no Stripe event can grant credit, so checkout cannot complete",
     },
     {
       name: "STRIPE_MONTHLY_PRICE_ID",
+      paymentsPackage: "stripe",
       why: "Pins the US$20 monthly Stripe price.",
       degraded: "subscription checkout answers that the plan is not configured",
     },
@@ -344,27 +373,43 @@ export const NON_SECRET_WORKER_SETTINGS_V1: readonly NonSecretWorkerSettingV1[] 
     },
   ];
 
-/** What this build must be given, the other auth Packages' names aside. */
+/** What this build must be given, the other Packages' names aside. */
 export function requiredSecretsV1(
   auth: ProductionAuthPackageV1 = AUTH_PACKAGE_V1,
+  payments: ProductionPaymentsPackageV1 = PAYMENTS_PACKAGE_V1,
 ): ProductionSecretV1[] {
-  const required = REQUIRED_PRODUCTION_SECRETS_V1.filter((secret) =>
-    belongsToBuildV1(secret, auth),
-  );
-  if (isBuiltInAuthPackageIdV1(auth.id)) return required;
+  // An external Package's names come from its profile; the manifest cannot
+  // know them.
+  const external = [
+    ...(isBuiltInAuthPackageIdV1(auth.id) ? [] : auth.required),
+    ...(isBuiltInPaymentsPackageIdV1(payments.id) ? [] : payments.required),
+  ].map(({ name, why }) => ({ name, why }));
   return [
-    ...required,
-    ...auth.required.map(({ name, why }) => ({ name, why })),
+    ...REQUIRED_PRODUCTION_SECRETS_V1.filter((secret) =>
+      belongsToBuildV1(secret, auth, payments),
+    ),
+    ...external,
   ];
+}
+
+/** The optional names this build carries. */
+function optionalSecretsV1(
+  auth: ProductionAuthPackageV1,
+  payments: ProductionPaymentsPackageV1,
+): OptionalProductionSecretV1[] {
+  return OPTIONAL_PRODUCTION_SECRETS_V1.filter((secret) =>
+    belongsToBuildV1(secret, auth, payments),
+  );
 }
 
 /** Every name the deploy's secrets file may carry, required first. */
 export function deployedSecretNamesV1(
   auth: ProductionAuthPackageV1 = AUTH_PACKAGE_V1,
+  payments: ProductionPaymentsPackageV1 = PAYMENTS_PACKAGE_V1,
 ): string[] {
   return [
-    ...requiredSecretsV1(auth).map((secret) => secret.name),
-    ...OPTIONAL_PRODUCTION_SECRETS_V1.map((secret) => secret.name),
+    ...requiredSecretsV1(auth, payments).map((secret) => secret.name),
+    ...optionalSecretsV1(auth, payments).map((secret) => secret.name),
   ];
 }
 
@@ -372,8 +417,9 @@ export function deployedSecretNamesV1(
 export function missingRequiredSecretsV1(
   present: Readonly<Record<string, string | undefined>>,
   auth: ProductionAuthPackageV1 = AUTH_PACKAGE_V1,
+  payments: ProductionPaymentsPackageV1 = PAYMENTS_PACKAGE_V1,
 ): ProductionSecretV1[] {
-  return requiredSecretsV1(auth).filter(
+  return requiredSecretsV1(auth, payments).filter(
     (secret) => (present[secret.name] ?? "").trim() === "",
   );
 }
@@ -381,8 +427,10 @@ export function missingRequiredSecretsV1(
 /** Optional names the given environment does not supply. */
 export function missingOptionalSecretsV1(
   present: Readonly<Record<string, string | undefined>>,
+  auth: ProductionAuthPackageV1 = AUTH_PACKAGE_V1,
+  payments: ProductionPaymentsPackageV1 = PAYMENTS_PACKAGE_V1,
 ): OptionalProductionSecretV1[] {
-  return OPTIONAL_PRODUCTION_SECRETS_V1.filter(
+  return optionalSecretsV1(auth, payments).filter(
     (secret) => (present[secret.name] ?? "").trim() === "",
   );
 }
@@ -414,9 +462,10 @@ export interface LiveSecretPlanV1 {
 function carriedSecretNamesV1(
   present: Readonly<Record<string, string | undefined>>,
   auth: ProductionAuthPackageV1,
+  payments: ProductionPaymentsPackageV1,
 ): Set<string> {
   return new Set(
-    deployedSecretNamesV1(auth).filter(
+    deployedSecretNamesV1(auth, payments).filter(
       (name) => (present[name] ?? "").trim() !== "",
     ),
   );
@@ -427,8 +476,9 @@ export function liveSecretPlanV1(
   live: readonly string[],
   present: Readonly<Record<string, string | undefined>>,
   auth: ProductionAuthPackageV1 = AUTH_PACKAGE_V1,
+  payments: ProductionPaymentsPackageV1 = PAYMENTS_PACKAGE_V1,
 ): LiveSecretPlanV1 {
-  const carried = carriedSecretNamesV1(present, auth);
+  const carried = carriedSecretNamesV1(present, auth, payments);
   const held = new Set(live);
   const forbidden = NON_SECRET_WORKER_SETTINGS_V1.filter(
     (setting) => setting.forbiddenLive !== undefined && held.has(setting.name),
@@ -454,19 +504,23 @@ export function productionSecretsReportV1(
   present: Readonly<Record<string, string | undefined>>,
   live?: readonly string[],
   auth: ProductionAuthPackageV1 = AUTH_PACKAGE_V1,
+  payments: ProductionPaymentsPackageV1 = PAYMENTS_PACKAGE_V1,
 ): { ok: boolean; failures: string[]; warnings: string[]; notices: string[] } {
-  const failures = missingRequiredSecretsV1(present, auth).map(
+  const failures = missingRequiredSecretsV1(present, auth, payments).map(
     (secret) =>
       `Missing production configuration: ${secret.name} — ${secret.why} Add it to the repository's production environment, then re-run this release.`,
   );
-  const plan = live ? liveSecretPlanV1(live, present, auth) : undefined;
+  const plan = live
+    ? liveSecretPlanV1(live, present, auth, payments)
+    : undefined;
   const held = new Set(live ?? []);
-  const warnings = missingOptionalSecretsV1(present).map((secret) =>
-    held.has(secret.name)
-      ? `${secret.name} is unset in this release's environment, but the deployed Worker still holds it. ` +
-        "`wrangler deploy --secrets-file` is additive, so this release leaves the old value live and in use. " +
-        `Removing it from the production environment does not revoke it — ${revokeInstructionV1(secret.name)}.`
-      : `${secret.name} is unset, so ${secret.degraded}.`,
+  const warnings = missingOptionalSecretsV1(present, auth, payments).map(
+    (secret) =>
+      held.has(secret.name)
+        ? `${secret.name} is unset in this release's environment, but the deployed Worker still holds it. ` +
+          "`wrangler deploy --secrets-file` is additive, so this release leaves the old value live and in use. " +
+          `Removing it from the production environment does not revoke it — ${revokeInstructionV1(secret.name)}.`
+        : `${secret.name} is unset, so ${secret.degraded}.`,
   );
   for (const setting of plan?.forbidden ?? []) {
     failures.push(

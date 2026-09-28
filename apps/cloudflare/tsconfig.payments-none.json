@@ -1,0 +1,14 @@
+{
+  // The same Worker source, type-checked as a build that does not bill sees it:
+  // `#payments` pointed at `payments.none.ts`, the substitution a generated
+  // config for a `payments: "none"` profile makes with wrangler's `alias`. A
+  // Stripe setting read outside the Stripe Package would compile against the
+  // tracked chooser and fail here.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": { "#payments": ["./src/payments.none.ts"] }
+  },
+  // The suites drive the tracked Stripe build; what matters here is that the
+  // shipped Worker compiles without it.
+  "exclude": ["src/**/*.test.ts", "src/**/*.type-test.ts"]
+}

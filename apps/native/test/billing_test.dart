@@ -10,15 +10,66 @@ import 'widget_test.dart' show MemoryStore;
 final _renews = DateTime(2026, 10, 12, 9).millisecondsSinceEpoch;
 
 const _plan = {
-  'currency': 'usd',
-  'monthlyCents': 2000,
-  'includedMicros': 15000000,
+  'subscription': {'monthlyCents': 2000, 'includedMicros': 15000000},
   'topUpCents': [1000, 2500, 5000],
+  'purchasedCreditNeedsSubscription': true,
 };
 
+const _checkout = '/api/billing/provider/checkout';
+
+/// What FrockBot's payments Package offers an account in this state: the
+/// plan to a new or ended one, top-ups to a subscriber, and the portal to any
+/// account with a subscription.
+List<Map<String, Object?>> _actions(Map<String, Object?> account) {
+  final subscription = account['subscription'] as Map?;
+  final canSubscribe =
+      subscription == null ||
+      {'canceled', 'incomplete_expired'}.contains(subscription['status']);
+  return [
+    if (canSubscribe)
+      {
+        'purpose': 'subscribe',
+        'label': 'Subscribe',
+        'target': {
+          'kind': 'command',
+          'path': _checkout,
+          'body': {'kind': 'subscription'},
+        },
+        'opens': 'browser',
+        'hosts': ['checkout.stripe.com'],
+      },
+    if (account['subscribed'] == true)
+      {
+        'purpose': 'top-up',
+        'label': 'Add',
+        'target': {
+          'kind': 'command',
+          'path': _checkout,
+          'body': {'kind': 'topup'},
+        },
+        'opens': 'browser',
+        'hosts': ['checkout.stripe.com'],
+      },
+    if (subscription != null)
+      {
+        'purpose': 'manage',
+        'label': 'Plan, invoices & card',
+        'target': {'kind': 'command', 'path': '/api/billing/provider/portal'},
+        'opens': 'browser',
+        'hosts': ['billing.stripe.com'],
+      },
+  ];
+}
+
 /// What `/api/billing` answers, with [overrides] on top.
-Map<String, Object?> billing(Map<String, Object?> overrides) => {
+Map<String, Object?> billing(Map<String, Object?> overrides) {
+  final account = _billing(overrides);
+  return {'actions': _actions(account), ...account};
+}
+
+Map<String, Object?> _billing(Map<String, Object?> overrides) => {
   'paymentsAvailable': true,
+  'paymentsProvider': 'Stripe',
   'metered': true,
   'canSpend': true,
   'subscribed': false,
@@ -94,7 +145,10 @@ SettingsApi _api(
 });
 
 Finder _list() => find
-    .descendant(of: find.byType(SingleChildScrollView), matching: find.byType(Scrollable))
+    .descendant(
+      of: find.byType(SingleChildScrollView),
+      matching: find.byType(Scrollable),
+    )
     .first;
 
 Future<void> _show(WidgetTester tester, SettingsApi api, {Size? size}) async {
@@ -159,7 +213,7 @@ void main() {
     await tester.pump();
     await tester.tap(find.widgetWithText(FilledButton, 'Add US\$50'));
     await tester.pumpAndSettle();
-    expect(asked.last.$1, '/api/billing/checkout');
+    expect(asked.last.$1, '/api/billing/provider/checkout');
     expect(asked.last.$2, containsPair('cents', 5000));
     expect(asked.last.$2, containsPair('kind', 'topup'));
     expect(
@@ -413,6 +467,68 @@ void main() {
     await tester.pumpAndSettle();
     final section = tester.getTopLeft(identifiedBy(BillingIds.spending));
     expect(section.dy, lessThan(200));
+    api.close();
+  });
+
+  testWidgets('a provider that sells no subscription draws its own action '
+      'and no plan', (tester) async {
+    final api = _api({
+      ...billing({
+        'paymentsProvider': 'Wallet Pal',
+        'canSpend': true,
+        'purchasedMicros': 5000000,
+        'plan': {
+          'subscription': null,
+          'topUpCents': <int>[],
+          'purchasedCreditNeedsSubscription': false,
+        },
+      }),
+      'actions': [
+        {
+          'purpose': 'top-up',
+          'label': 'Buy credit',
+          'target': {'kind': 'url', 'url': '/api/billing/provider/buy'},
+          'opens': 'in-app',
+          'hosts': <String>[],
+        },
+      ],
+    });
+    await _show(tester, api);
+    expect(identifiedBy(BillingIds.plan), findsNothing);
+    expect(identifiedBy(BillingIds.blocked), findsNothing);
+    expect(find.text('Top-up credit'), findsOneWidget);
+    expect(find.text('Monthly credit'), findsNothing);
+    final buy = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Buy credit'),
+    );
+    expect(buy.onPressed, isNotNull);
+    expect(find.text('Top-up amount'), findsNothing);
+    expect(find.text('Plan, invoices & card'), findsNothing);
+    api.close();
+  });
+
+  testWidgets('a deployment that does not bill offers nothing to buy', (
+    tester,
+  ) async {
+    final api = _api(
+      billing({
+        'paymentsProvider': null,
+        'paymentsAvailable': false,
+        'metered': false,
+        'complimentaryMicros': 3000000,
+        'plan': {
+          'subscription': null,
+          'topUpCents': <int>[],
+          'purchasedCreditNeedsSubscription': false,
+        },
+        'actions': <Object>[],
+      }),
+    );
+    await _show(tester, api);
+    expect(find.text('Payments are not available yet.'), findsNothing);
+    expect(identifiedBy(BillingIds.plan), findsNothing);
+    expect(find.text('Complimentary credit'), findsOneWidget);
+    expect(find.byType(FilledButton), findsNothing);
     api.close();
   });
 }

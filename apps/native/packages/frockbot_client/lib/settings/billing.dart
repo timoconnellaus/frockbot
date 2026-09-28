@@ -13,11 +13,16 @@ import '../theme/rows.dart';
 import '../theme/states.dart';
 import 'spending.dart';
 
-/// The plan as `/api/billing` states it; these are only what a reply without
-/// one falls back to.
-const _defaultMonthlyCents = 2000;
-const _defaultIncludedMicros = 15000000;
-const _defaultTopUps = [1000, 2500, 5000];
+/// The monthly subscription the deployment sells, as `/api/billing` states
+/// it, or none.
+Map? _subscriptionPlan(Map data) =>
+    (data['plan'] as Map?)?['subscription'] as Map?;
+
+/// One thing the payments Package offers the account, by where it goes.
+Map? _action(Map data, String purpose) => (data['actions'] as List? ?? const [])
+    .whereType<Map>()
+    .where((action) => action['purpose'] == purpose)
+    .firstOrNull;
 
 /// How wide Billing reads: one column, the width of the design, centred.
 const _column = 760.0;
@@ -104,7 +109,7 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
       setState(() {
         account = response;
         failure = null;
-        if (!tops.contains(topUpCents)) {
+        if (tops.isNotEmpty && !tops.contains(topUpCents)) {
           topUpCents = tops[tops.length ~/ 2];
         }
       });
@@ -140,34 +145,56 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
     });
   }
 
-  Future<void> _openPayment(String kind, {int? cents}) async {
+  /// Takes one of the payments Package's actions: opens its page, or asks
+  /// the Package's route for one as the signed-in person and opens that.
+  Future<void> _openPayment(Map action, {int? cents}) async {
     if (busy) return;
     setState(() {
       busy = true;
       message = null;
     });
-    final key = '$kind:${cents ?? 0}';
+    final purpose = action['purpose'];
+    final key = '$purpose:${cents ?? 0}';
     final id = checkoutIds.putIfAbsent(key, randomId);
+    final inApp = action['opens'] == 'in-app';
     try {
-      final response = await widget.api.request(
-        kind == 'portal' ? '/api/billing/portal' : '/api/billing/checkout',
-        body: {'id': id, if (kind != 'portal') 'kind': kind, 'cents': ?cents},
-      );
-      if (response is! Map || response['url'] is! String) {
+      final target = action['target'] as Map;
+      final Object? link;
+      if (target['kind'] == 'url') {
+        link = target['url'];
+      } else {
+        final response = await widget.api.request(
+          target['path'] as String,
+          body: {
+            'id': id,
+            ...(target['body'] as Map? ?? const {}),
+            'cents': ?cents,
+          },
+        );
+        link = response is Map ? response['url'] : null;
+      }
+      if (link is! String) {
         throw const FormatException('Payment link is unavailable');
       }
-      final uri = Uri.parse(response['url'] as String);
-      if (uri.scheme != 'https' ||
-          !{'checkout.stripe.com', 'billing.stripe.com'}.contains(uri.host)) {
+      final origin = Uri.parse(hostedOrigin);
+      final uri = origin.resolve(link);
+      final hosts = (action['hosts'] as List? ?? const []).whereType<String>();
+      if (uri.origin != origin.origin &&
+          (uri.scheme != 'https' || !hosts.contains(uri.host))) {
         throw const FormatException('Invalid payment link');
       }
-      if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      if (!await launchUrl(
+        uri,
+        mode: inApp
+            ? LaunchMode.inAppBrowserView
+            : LaunchMode.externalApplication,
+      )) {
         throw StateError('Could not open your browser');
       }
       checkoutIds.remove(key);
-      if (mounted) {
+      if (mounted && !inApp) {
         setState(
-          () => message = kind == 'portal'
+          () => message = purpose == 'manage'
               ? 'Your plan, invoices and card are open in your browser.'
               : 'Complete payment in your browser, then return here. Your balance updates once payment is confirmed.',
         );
@@ -183,13 +210,11 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
     }
   }
 
-  List<int> _topUps(Map data) {
-    final listed = ((data['plan'] as Map?)?['topUpCents'] as List? ?? const [])
-        .whereType<num>()
-        .map((c) => c.toInt())
-        .toList();
-    return listed.isEmpty ? _defaultTopUps : listed;
-  }
+  List<int> _topUps(Map data) =>
+      ((data['plan'] as Map?)?['topUpCents'] as List? ?? const [])
+          .whereType<num>()
+          .map((c) => c.toInt())
+          .toList();
 
   @override
   Widget build(BuildContext context) {
@@ -245,10 +270,14 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
 
   List<Widget> _sections(BuildContext context, Map<String, dynamic> data) {
     final theme = Theme.of(context);
-    final subscription = data['subscription'] as Map?;
     final subscribed = data['subscribed'] == true;
     final metered = data['metered'] == true;
     final payments = data['paymentsAvailable'] == true;
+    final plan = _subscriptionPlan(data);
+    final subscribe = _action(data, 'subscribe');
+    final topUp = _action(data, 'top-up');
+    final manage = _action(data, 'manage');
+    final tops = _topUps(data);
     int micros(String key) => (data[key] as num?)?.toInt() ?? 0;
     final available = subscribed
         ? micros('includedMicros') +
@@ -260,7 +289,11 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
         : data['suspended'] == true
         ? 'Payments need review. Contact support before starting more paid work.'
         : data['canSpend'] != true
-        ? _hadComplimentary(data)
+        ? plan == null
+              ? _hadComplimentary(data)
+                    ? 'Your complimentary credit is used up. Add credit to keep them working.'
+                    : 'They reply once you add credit.'
+              : _hadComplimentary(data)
               ? 'Your complimentary credit is used up. Subscribe to keep them working.'
               : 'They reply once you subscribe or receive credit.'
         : subscribed && available <= 0
@@ -276,7 +309,10 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
         ].any((key) => micros(key) > 0);
     return [
       if (message case final String text) _Notice(text),
-      if (!payments) const _Notice('Payments are not available yet.'),
+      // A deployment with no payment provider sells nothing, so there is
+      // nothing to be unavailable.
+      if (!payments && data['paymentsProvider'] != null)
+        const _Notice('Payments are not available yet.'),
       if (blocked != null) ...[
         identified(BillingIds.blocked, _Blocked(reason: blocked)),
         const SizedBox(height: 16),
@@ -288,36 +324,44 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
             data: data,
             available: available,
             pace: pace,
-            topUps: _topUps(data),
+            plan: plan,
+            topUps: tops,
             topUpCents: topUpCents,
             onTopUpChosen: (cents) => setState(() => topUpCents = cents),
-            onTopUp: payments && subscribed && !busy
-                ? () => unawaited(_openPayment('topup', cents: topUpCents))
+            topUpLabel: topUp?['label'] as String? ?? 'Add',
+            onTopUp: topUp != null && payments && !busy
+                ? () => unawaited(
+                    _openPayment(
+                      topUp,
+                      cents: tops.isEmpty ? null : topUpCents,
+                    ),
+                  )
                 : null,
-            onPortal: payments && subscription != null && !busy
-                ? () => unawaited(_openPayment('portal'))
+            portalLabel: manage?['label'] as String? ?? '',
+            onPortal: manage != null && payments && !busy
+                ? () => unawaited(_openPayment(manage))
                 : null,
           ),
         ),
         const SizedBox(height: 16),
       ],
-      if (!subscribed) ...[
+      if (!subscribed && plan != null) ...[
         identified(
           BillingIds.plan,
           _PlanCard(
-            plan: data['plan'] as Map?,
+            plan: plan,
+            topUps: tops.isNotEmpty,
             payments: payments,
-            // A subscription that lapsed or is past due is mended where it
-            // is kept, not bought again.
-            onSubscribe: _canSubscribe(subscription) && payments && !busy
-                ? () => unawaited(_openPayment('subscription'))
+            subscribeLabel: subscribe?['label'] as String? ?? 'Subscribe',
+            portalLabel: manage?['label'] as String? ?? '',
+            opensHere: (subscribe ?? manage)?['opens'] == 'in-app',
+            onSubscribe: subscribe != null && payments && !busy
+                ? () => unawaited(_openPayment(subscribe))
                 : null,
-            onPortal:
-                !_canSubscribe(subscription) &&
-                    subscription != null &&
-                    payments &&
-                    !busy
-                ? () => unawaited(_openPayment('portal'))
+            // A subscription that lapsed or is past due is mended where it
+            // is kept, not bought again: the Package offers no subscribe.
+            onPortal: subscribe == null && manage != null && payments && !busy
+                ? () => unawaited(_openPayment(manage))
                 : null,
           ),
         ),
@@ -371,10 +415,6 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
       ),
     ];
   }
-
-  static bool _canSubscribe(Map? subscription) =>
-      subscription == null ||
-      {'canceled', 'incomplete_expired'}.contains(subscription['status']);
 
   static bool _hadComplimentary(Map data) =>
       (data['payments'] as List? ?? const []).whereType<Map>().any(
@@ -490,19 +530,27 @@ class _BalanceCard extends StatelessWidget {
   final Map<String, dynamic> data;
   final int available;
   final Map? pace;
+
+  /// The monthly subscription the deployment sells, or none.
+  final Map? plan;
   final List<int> topUps;
   final int topUpCents;
   final void Function(int cents) onTopUpChosen;
+  final String topUpLabel;
   final VoidCallback? onTopUp;
+  final String portalLabel;
   final VoidCallback? onPortal;
   const _BalanceCard({
     required this.data,
     required this.available,
     required this.pace,
+    required this.plan,
     required this.topUps,
     required this.topUpCents,
     required this.onTopUpChosen,
+    required this.topUpLabel,
     required this.onTopUp,
+    required this.portalLabel,
     required this.onPortal,
   });
 
@@ -517,13 +565,11 @@ class _BalanceCard extends StatelessWidget {
                 (data['paidAccess'] as Map?)?['periodEnd'])
             as num?;
     final ending = subscription?['cancelAtPeriodEnd'] == true;
-    final included =
-        ((data['plan'] as Map?)?['includedMicros'] as num?) ??
-        _defaultIncludedMicros;
+    final included = (plan?['includedMicros'] as num?) ?? 0;
     int micros(String key) => (data[key] as num?)?.toInt() ?? 0;
     final reserved = micros('reservedMicros');
     final parts = [
-      if (subscribed || micros('includedMicros') > 0)
+      if ((subscribed && plan != null) || micros('includedMicros') > 0)
         _Part(
           title: 'Monthly credit',
           amount:
@@ -533,7 +579,7 @@ class _BalanceCard extends StatelessWidget {
               ? 'Used first. Resets each billing month.'
               : 'Used first. Resets ${spendDate(periodEnd)}.',
         ),
-      if (subscribed || micros('purchasedMicros') > 0)
+      if ((subscribed && topUps.isNotEmpty) || micros('purchasedMicros') > 0)
         _Part(
           title: 'Top-up credit',
           amount: _money(micros('purchasedMicros')),
@@ -546,7 +592,8 @@ class _BalanceCard extends StatelessWidget {
           title: 'Complimentary credit',
           amount: _money(micros('complimentaryMicros')),
           fraction: 1,
-          detail: 'From ${clientBrand.productName}. Spendable without a subscription.',
+          detail:
+              'From ${clientBrand.productName}. Spendable without a subscription.',
           soft: true,
         ),
     ];
@@ -675,7 +722,7 @@ class _BalanceCard extends StatelessWidget {
             onPressed: onPortal,
             iconAlignment: IconAlignment.end,
             icon: const Icon(Icons.north_east_rounded, size: 16),
-            label: const Text('Plan, invoices & card'),
+            label: Text(portalLabel),
           );
     final topUp = onTopUp == null
         ? null
@@ -691,18 +738,23 @@ class _BalanceCard extends StatelessWidget {
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
-              FrockSegmented(
-                label: 'Top-up amount',
-                selected: '$topUpCents',
-                options: [
-                  for (final cents in topUps)
-                    (slug: '$cents', label: _dollars(cents)),
-                ],
-                onChosen: (slug) => onTopUpChosen(int.parse(slug)),
-              ),
+              if (topUps.isNotEmpty)
+                FrockSegmented(
+                  label: 'Top-up amount',
+                  selected: '$topUpCents',
+                  options: [
+                    for (final cents in topUps)
+                      (slug: '$cents', label: _dollars(cents)),
+                  ],
+                  onChosen: (slug) => onTopUpChosen(int.parse(slug)),
+                ),
               FilledButton(
                 onPressed: onTopUp,
-                child: Text('Add ${_dollars(topUpCents)}'),
+                child: Text(
+                  topUps.isEmpty
+                      ? topUpLabel
+                      : '$topUpLabel ${_dollars(topUpCents)}',
+                ),
               ),
             ],
           );
@@ -860,13 +912,25 @@ class _Pill extends StatelessWidget {
 
 /// The one plan, for an account that has not taken it.
 class _PlanCard extends StatelessWidget {
-  final Map? plan;
+  final Map plan;
+
+  /// Whether the deployment sells top-ups beside the plan.
+  final bool topUps;
   final bool payments;
+  final String subscribeLabel;
+  final String portalLabel;
+
+  /// Whether the provider's page opens inside the app rather than the browser.
+  final bool opensHere;
   final VoidCallback? onSubscribe;
   final VoidCallback? onPortal;
   const _PlanCard({
     required this.plan,
+    required this.topUps,
     required this.payments,
+    required this.subscribeLabel,
+    required this.portalLabel,
+    required this.opensHere,
     required this.onSubscribe,
     required this.onPortal,
   });
@@ -875,15 +939,14 @@ class _PlanCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
-    final monthly = (plan?['monthlyCents'] as num?) ?? _defaultMonthlyCents;
-    final included =
-        (plan?['includedMicros'] as num?) ?? _defaultIncludedMicros;
+    final monthly = (plan['monthlyCents'] as num?) ?? 0;
+    final included = (plan['includedMicros'] as num?) ?? 0;
     final check = theme.brightness == Brightness.dark
         ? FrockTheme.success
         : FrockTheme.successInk;
     final points = [
       '${_wholeMicros(included)} of usage included every month',
-      'Top up any time. Top-ups never expire.',
+      if (topUps) 'Top up any time. Top-ups never expire.',
       'Work pauses when credit runs out. No overage charges.',
     ];
     final mend = onPortal != null;
@@ -897,11 +960,11 @@ class _PlanCard extends StatelessWidget {
                   onPressed: onPortal,
                   iconAlignment: IconAlignment.end,
                   icon: const Icon(Icons.north_east_rounded, size: 16),
-                  label: const Text('Plan, invoices & card'),
+                  label: Text(portalLabel),
                 )
               : FilledButton(
                   onPressed: onSubscribe,
-                  child: const Text('Subscribe'),
+                  child: Text(subscribeLabel),
                 );
           return Padding(
             padding: EdgeInsets.all(wide ? 24 : 20),
@@ -986,8 +1049,8 @@ class _PlanCard extends StatelessWidget {
       !payments
           ? 'Payments are not available yet.'
           : mend
-          ? 'Your subscription needs attention. Fix it in your browser.'
-          : 'Checkout opens in your browser. Cancel any time.',
+          ? 'Your subscription needs attention. Fix it ${opensHere ? 'here' : 'in your browser'}.'
+          : 'Checkout opens ${opensHere ? 'here' : 'in your browser'}. Cancel any time.',
       style: theme.textTheme.bodySmall?.copyWith(
         color: theme.colorScheme.onSurfaceVariant,
       ),

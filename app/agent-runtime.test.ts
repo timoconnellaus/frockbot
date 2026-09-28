@@ -3,7 +3,6 @@ import { Database, type SQLQueryBindings } from "bun:sqlite";
 import {
   createInMemoryMemoryGroupsV1,
   createMemoryRuntimeFeature,
-  groupChatScopeV1,
   inProcessMemoryRemoteV1,
   MemoryEngineV1,
   MemoryRecordsV1,
@@ -282,10 +281,12 @@ describe("foundation runtime", () => {
     ).toBe(true);
   });
 
-  test("a group's Turn is remembered in the group's Memory", async () => {
+  function extractionRuntime(options: {
+    sessionId: string;
+    personText?: string;
+    group?: string;
+  }) {
     const owner = { userId: "alice", botId: "primary" };
-    const groupId = "g-5c0015c0015c0015c001";
-    const sessionId = `group:${groupId}`;
     const botEngine = new MemoryEngineV1({
       storage: sqlStorage(),
       ownedKinds: ["bot"],
@@ -300,10 +301,10 @@ describe("foundation runtime", () => {
         }),
       ),
     });
-    const runtime = await createFoundationRuntime(undefined, {
+    const runtime = createFoundationRuntime(undefined, {
       productName: "FrockBot",
       botId: owner.botId,
-      sessionId,
+      sessionId: options.sessionId,
       admitEffect: allowEffect,
       agentPackages: [
         ...basePackages(),
@@ -315,26 +316,82 @@ describe("foundation runtime", () => {
               files: createTestMemoryFilesV1({ userId: owner.userId }),
               owner,
             }),
-            writer: { sessionId, turnId: "turn-1", runId: "run-1" },
+            writer: {
+              sessionId: options.sessionId,
+              turnId: "turn-1",
+              runId: "run-1",
+            },
             records,
-            groups: createInMemoryMemoryGroupsV1([groupId]),
-            group: groupId,
+            ...(options.personText !== undefined
+              ? { personText: options.personText }
+              : {}),
+            ...(options.group
+              ? {
+                  groups: createInMemoryMemoryGroupsV1([options.group]),
+                  group: options.group,
+                }
+              : {}),
           }),
         },
       ],
     });
+    return { botEngine, runtime };
+  }
+
+  test("extraction reads the person's own words, never a hand-off drained in front of them", async () => {
+    // 2026-09-27: a Routine's inbox triage was drained in front of "remember
+    // my wife is Becky", and the whole message was extracted as the person's.
+    const said = "Can you remember that my wife is Becky";
+    const { botEngine, runtime: pending } = extractionRuntime({
+      sessionId: "alice:primary",
+      personText: said,
+    });
+    const runtime = await pending;
+    runtimes.push(runtime);
+
+    runtime.agent.agent.send(
+      `[Automation: Morning inbox triage] While you were away, your Routine finished and handed off:\nGitHub — Deployment review in patientos: waiting for your approval.\n\n${said}`,
+    );
+    await runtime.agent.agent.whenIdle();
+
+    const jobs = botEngine
+      .inspectJobs()
+      .filter((job) => job.kind === "extract");
+    expect(jobs).toHaveLength(1);
+    expect(
+      botEngine.retainedCapturedText(jobs[0]!.sourceRef ?? jobs[0]!.id),
+    ).toBe(said);
+  });
+
+  test("a Turn nobody sent extracts nothing", async () => {
+    const { botEngine, runtime: pending } = extractionRuntime({
+      sessionId: "routine:6bff1f41",
+    });
+    const runtime = await pending;
+    runtimes.push(runtime);
+
+    runtime.agent.agent.send(
+      'Routine "Morning inbox triage" fired (cron).\n\nCheck the User\'s inbox for emails received in the last 24 hours.',
+    );
+    await runtime.agent.agent.whenIdle();
+
+    expect(botEngine.inspectJobs()).toEqual([]);
+  });
+
+  test("a group's Turn extracts nothing until its words say who wrote them", async () => {
+    const groupId = "g-5c0015c0015c0015c001";
+    const { botEngine, runtime: pending } = extractionRuntime({
+      sessionId: `group:${groupId}`,
+      group: groupId,
+    });
+    const runtime = await pending;
     runtimes.push(runtime);
 
     runtime.agent.agent.send("User: the offsite is in Bowral this year.");
     await runtime.agent.agent.whenIdle();
 
-    // The thread is the group's, so what it teaches is owed to the group's
-    // Memory, which the User's object keeps.
-    const [owed] = botEngine.inspectOutbox();
-    expect(owed).toBeDefined();
-    expect(botEngine.outboxPayload(owed!.id)?.destinationScope).toEqual(
-      groupChatScopeV1(owner.userId, groupId),
-    );
+    expect(botEngine.inspectJobs()).toEqual([]);
+    expect(botEngine.inspectOutbox()).toEqual([]);
   });
 
   test("selects the configured OpenAI-compatible provider", async () => {

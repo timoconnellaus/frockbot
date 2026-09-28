@@ -265,6 +265,8 @@ export async function agentRuntime(
     handoffDepth?: number;
     /** Where this Turn's input came from, for Turn supervision. */
     inputOrigin?: TurnInputOriginV1;
+    /** The person's own words, on a Turn a person sent. */
+    personText?: string;
     /** Clears a withheld send's reply draft; absent where none is drawn. */
     clearReplyDraft?(ordinal: number): void;
   },

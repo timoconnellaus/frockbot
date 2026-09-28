@@ -14,7 +14,7 @@ import {
   type FrockAiServedModelV1,
 } from "@frockbot/providers/frock-ai/runtime";
 import {
-  BILLING_PLAN,
+  USAGE_PRICING_VERSION_V1,
   type UsageAttributionV1,
   type UsageReservation,
   type UsageSettlement,
@@ -230,7 +230,7 @@ export class BilledLlmRegistry extends LlmRegistry {
         }`,
         pricingVersion: table
           ? modelRatesPricingVersionV1(table.version)
-          : BILLING_PLAN.pricingVersion,
+          : USAGE_PRICING_VERSION_V1,
         ...(rate ? { unitRates: customerRates(rate) } : {}),
         attribution: {
           ...this.billing.spend,

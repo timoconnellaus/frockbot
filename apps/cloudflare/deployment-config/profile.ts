@@ -22,11 +22,18 @@ export { DEPLOYMENT_PROFILE_SCHEMA_V1 };
 
 type ProfileWithoutAuthV1 = Omit<
   GeneratedDeploymentProfileV1,
-  "authPackage" | "access" | "authEnvironment"
+  | "authPackage"
+  | "access"
+  | "authEnvironment"
+  | "payments"
+  | "paymentsEnvironment"
 >;
 type AccessApplicationV1 = NonNullable<GeneratedDeploymentProfileV1["access"]>;
 type AuthEnvironmentShapeV1 = NonNullable<
   GeneratedDeploymentProfileV1["authEnvironment"]
+>;
+type PaymentsEnvironmentShapeV1 = NonNullable<
+  GeneratedDeploymentProfileV1["paymentsEnvironment"]
 >;
 
 /**
@@ -35,10 +42,22 @@ type AuthEnvironmentShapeV1 = NonNullable<
  * `FromSchema` of the schema, with the auth Package's three cases spelled out:
  * `authPackage` may be a path, which `FromSchema` can only read as `string`,
  * and a `string` cannot exclude `"access"` — so the generated type alone would
- * let an Access profile name no Access application. The schema's `allOf` says
- * the same thing to ajv, which is what refuses a profile file.
+ * let an Access profile name no Access application. The payments Package's
+ * cases are spelled out for the same reason: only a chooser named by path
+ * names its environment. The schema's `allOf` says the same thing to ajv,
+ * which is what refuses a profile file.
  */
 export type DeploymentProfileV1 = ProfileWithoutAuthV1 &
+  (
+    | {
+        payments?: "stripe" | "none";
+        paymentsEnvironment?: never;
+      }
+    | {
+        payments: `./${string}` | `../${string}`;
+        paymentsEnvironment: PaymentsEnvironmentShapeV1;
+      }
+  ) &
   (
     | {
         authPackage: "better-auth";

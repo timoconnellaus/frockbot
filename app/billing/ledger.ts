@@ -5,41 +5,54 @@ import {
   spendLimitReachedV1,
   spentSinceV1,
 } from "./spending.js";
+import { BillingError, stable } from "./errors.js";
+import type {
+  PaymentsAccountV1,
+  PaymentsLedgerEffectsV1,
+  PaymentsLedgerPortV1,
+  PaymentsPaidPeriodV1,
+  PaymentsPlanV1,
+  PaymentsSubscriptionV1,
+} from "@frockbot/core/contracts";
 
-/** What every plan shares. The markup is in the rates, so a plan includes as much usage as it costs, or more. */
-export const BILLING_PLAN = {
-  currency: "usd",
-  topUpCents: [1000, 2500, 5000],
-  pricingVersion: "2026-09-28",
-  /** A first subscription starts with a trial: card taken, nothing charged. */
-  trialDays: 7,
-  trialMicros: 3_000_000,
-} as const;
+/**
+ * The version of FrockBot's usage tariff a charge was priced under, where no
+ * more specific table priced it. The plan a deployment sells is its payments
+ * Package's; what usage costs is not.
+ */
+export { BillingError, stable };
 
-export type BillingPlanIdV1 = "standard" | "plus";
-export interface BillingPlanV1 {
-  id: BillingPlanIdV1;
-  monthlyCents: number;
-  includedMicros: number;
-  topUpCents: readonly number[];
-  pricingVersion: string;
+export const USAGE_PRICING_VERSION_V1 = "2026-09-09";
+
+/**
+ * The `billing_state` keys the ledger owns. A payments Package keeps its own
+ * records beside them and may name none of these.
+ */
+const LEDGER_STATE_KEYS_V1 = new Set([
+  "subscription",
+  "paidAccess",
+  "suspended",
+  "trialUsed",
+]);
+function providerRecordKey(key: string): string {
+  if (
+    typeof key !== "string" ||
+    !/^[a-zA-Z0-9:_./-]{1,200}$/.test(key) ||
+    LEDGER_STATE_KEYS_V1.has(key) ||
+    key.startsWith("spike:")
+  )
+    throw new BillingError("Invalid payment record", 400);
+  return key;
 }
-export const BILLING_PLANS: Readonly<Record<BillingPlanIdV1, BillingPlanV1>> = {
-  standard: {
-    id: "standard",
-    monthlyCents: 2000,
-    includedMicros: 20_000_000,
-    topUpCents: BILLING_PLAN.topUpCents,
-    pricingVersion: BILLING_PLAN.pricingVersion,
-  },
-  plus: {
-    id: "plus",
-    monthlyCents: 5000,
-    includedMicros: 60_000_000,
-    topUpCents: BILLING_PLAN.topUpCents,
-    pricingVersion: BILLING_PLAN.pricingVersion,
-  },
-};
+/**
+ * A provider's own ids for its events and payments. No colon, so none can be
+ * one of the ledger's own `<kind>:<id>` receipts or grants.
+ */
+function providerKey(value: string, label: string): string {
+  if (typeof value !== "string" || !/^[a-zA-Z0-9_.-]{1,160}$/.test(value))
+    throw new BillingError(`Invalid ${label}`, 400);
+  return value;
+}
 
 /**
  * The two refusals a person is told in the conversation, so they are written
@@ -85,16 +98,6 @@ export interface BillingBalance {
   /** A model call would be admitted: subscribed, or complimentary credit remains. */
   canSpend: boolean;
   suspended: boolean;
-}
-
-export class BillingError extends Error {
-  constructor(
-    message: string,
-    readonly status = 402,
-  ) {
-    super(message);
-    this.name = "BillingError";
-  }
 }
 
 type SqlRow = Record<string, string | number | null | ArrayBuffer>;
@@ -205,24 +208,8 @@ interface Operation extends SqlRow {
   allocations: string;
   settlement: string | null;
 }
-export interface SubscriptionState {
-  customerId: string;
-  subscriptionId: string;
-  /** The subscription's one item, which a plan change replaces the price of. */
-  itemId: string;
-  plan: BillingPlanIdV1;
-  status: string;
-  periodStart: number;
-  periodEnd: number;
-  /** When a trial ends, while the subscription has one. */
-  trialEnd: number | null;
-  cancelAtPeriodEnd: boolean;
-}
-export interface PaidAccessState {
-  subscriptionId: string;
-  periodStart: number;
-  periodEnd: number;
-}
+export type SubscriptionState = PaymentsSubscriptionV1;
+export type PaidAccessState = PaymentsPaidPeriodV1;
 
 function amount(value: number, label: string) {
   if (!Number.isSafeInteger(value) || value < 0 || value > 1_000_000_000_000)
@@ -239,16 +226,6 @@ function identifier(value: string) {
     throw new BillingError("Invalid billing identifier", 400);
   return value;
 }
-export function stable(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
-  if (value && typeof value === "object")
-    return `{${Object.entries(value)
-      .filter(([, v]) => v !== undefined)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([k, v]) => `${JSON.stringify(k)}:${stable(v)}`)
-      .join(",")}}`;
-  return JSON.stringify(value);
-}
 
 /** Account-owned tables. Every balance mutation and its receipt commit together. */
 export class BillingLedger {
@@ -256,6 +233,8 @@ export class BillingLedger {
     private readonly storage: BillingStorage,
     /** The product a subscription is to, as a refusal names it. */
     private readonly productName: string,
+    /** What the deployment's payments Package sells. */
+    private readonly plan: PaymentsPlanV1,
     private readonly now: () => number = Date.now,
   ) {
     const sql = storage.sql;
@@ -393,18 +372,31 @@ export class BillingLedger {
     );
   }
   requireSubscription() {
-    if (!this.subscribed())
-      throw new BillingError(subscriptionRequiredReasonV1(this.productName));
+    if (this.subscribed()) return;
+    // A deployment that sells no subscription asks only for spendable credit.
+    if (this.plan.subscriptions.length === 0) {
+      const balance = this.balance();
+      if (balance.suspended)
+        throw new BillingError(subscriptionRequiredReasonV1(this.productName));
+      if (balance.canSpend) return;
+      throw new BillingError(CREDIT_EXHAUSTED_REASON_V1);
+    }
+    throw new BillingError(subscriptionRequiredReasonV1(this.productName));
   }
   /**
    * The grants a reservation may draw on, cheapest to spend first: monthly
    * credit expires soonest, complimentary credit was a gift, purchased credit
-   * carries forward. Without a subscription only complimentary credit counts.
+   * carries forward. Without a subscription only complimentary credit counts,
+   * and purchased credit too where the plan does not tie it to one.
    */
   private spendable(subscribed: boolean): Grant[] {
     return this.rows<Grant>(
       `SELECT id, kind, remaining, expires FROM billing_grants WHERE remaining > 0 AND (expires IS NULL OR expires > ?)${
-        subscribed ? "" : " AND kind = 'complimentary'"
+        subscribed
+          ? ""
+          : this.plan.purchasedCreditNeedsSubscription
+            ? " AND kind = 'complimentary'"
+            : " AND kind IN ('complimentary', 'purchased')"
       } ORDER BY CASE kind WHEN 'included' THEN 0 WHEN 'complimentary' THEN 1 ELSE 2 END, expires, created, id`,
       this.now(),
     );
@@ -450,7 +442,7 @@ export class BillingLedger {
         throw new BillingError(subscriptionRequiredReasonV1(this.productName));
       const grants = this.spendable(subscribed);
       const available = grants.reduce((total, g) => total + g.remaining, 0);
-      if (!subscribed && available === 0)
+      if (!subscribed && available === 0 && this.plan.subscriptions.length > 0)
         throw new BillingError(subscriptionRequiredReasonV1(this.productName));
       let needed = input.maximumMicros;
       if (available < needed)
@@ -596,6 +588,197 @@ export class BillingLedger {
       }
     });
   }
+  /**
+   * The one way a payments Package reaches this account. It reads the
+   * subscription and keeps its own records; it credits the account only inside
+   * `apply`, under the provider event's receipt.
+   */
+  paymentsPort(): PaymentsLedgerPortV1 {
+    const account = (): PaymentsAccountV1 => ({
+      subscription: this.subscription() ?? null,
+      paidPeriod: this.get<PaidAccessState>("paidAccess") ?? null,
+      subscribed: this.subscribed(),
+      suspended: this.get<boolean>("suspended") ?? false,
+      trialUsed: this.get<boolean>("trialUsed") ?? false,
+    });
+    const record = <T>(key: string) => this.get<T>(providerRecordKey(key));
+    const remember = (key: string, value: unknown) =>
+      this.set(providerRecordKey(key), value);
+    // Handed to `apply`'s callback and live only while it runs, so a Package
+    // that kept it cannot credit the account outside an event's transaction.
+    let applying = false;
+    const within =
+      <A extends unknown[]>(effect: (...args: A) => void) =>
+      (...args: A) => {
+        if (!applying)
+          throw new BillingError(
+            "Payment effects apply only inside apply",
+            409,
+          );
+        effect(...args);
+      };
+    const effects: PaymentsLedgerEffectsV1 = {
+      account,
+      record,
+      remember: within(remember),
+      recordSubscription: within((subscription: PaymentsSubscriptionV1) =>
+        this.recordSubscription(subscription),
+      ),
+      recordPaidPeriod: within((period: PaymentsPaidPeriodV1) =>
+        this.recordPaidPeriod(period),
+      ),
+      grantPurchased: within(
+        (grant: { readonly key: string; readonly micros: number }) => {
+          amount(grant.micros, "credit");
+          if (grant.micros === 0) throw new BillingError("Invalid credit", 400);
+          this.grant(
+            `topup:${providerKey(grant.key, "payment reference")}`,
+            "purchased",
+            grant.micros,
+            null,
+          );
+        },
+      ),
+      grantTrial: within(
+        (trial: {
+          readonly subscriptionId: string;
+          readonly expires: number;
+        }) => this.grantTrial(trial),
+      ),
+      suspend: within(() => this.set("suspended", true)),
+    };
+    return {
+      account,
+      record,
+      remember,
+      requireSubscription: () => this.requireSubscription(),
+      applied: (receipt, evidence) =>
+        this.receipt(providerKey(receipt, "payment receipt"), stable(evidence)),
+      apply: (receipt, evidence, apply) => {
+        this.once(providerKey(receipt, "payment receipt"), evidence, () => {
+          applying = true;
+          try {
+            const result: unknown = apply(effects);
+            // Awaited effects would land after the receipt committed, with
+            // nothing credited: the receipt must not be spent on them.
+            if (result instanceof Promise) {
+              result.catch(() => undefined);
+              throw new BillingError(
+                "Payment effects apply synchronously",
+                500,
+              );
+            }
+          } finally {
+            applying = false;
+          }
+        });
+      },
+    };
+  }
+  private recordSubscription(subscription: PaymentsSubscriptionV1) {
+    identifier(subscription.customerId);
+    identifier(subscription.subscriptionId);
+    timestamp(subscription.periodStart, "subscription period");
+    timestamp(subscription.periodEnd, "subscription period");
+    if (subscription.trialEnd !== null)
+      timestamp(subscription.trialEnd, "trial end");
+    if (
+      typeof subscription.status !== "string" ||
+      !/^[a-z_]{1,40}$/.test(subscription.status) ||
+      subscription.periodEnd <= subscription.periodStart ||
+      typeof subscription.cancelAtPeriodEnd !== "boolean"
+    )
+      throw new BillingError("Invalid subscription", 400);
+    this.subscriptionPlan(subscription.planId);
+    const existing = this.subscription();
+    if (
+      existing &&
+      existing.subscriptionId !== subscription.subscriptionId &&
+      existing.periodStart > subscription.periodStart
+    )
+      throw new BillingError("Old subscription event", 409);
+    this.set("subscription", {
+      customerId: subscription.customerId,
+      subscriptionId: subscription.subscriptionId,
+      planId: subscription.planId,
+      status: subscription.status,
+      periodStart: subscription.periodStart,
+      periodEnd: subscription.periodEnd,
+      trialEnd: subscription.trialEnd,
+      cancelAtPeriodEnd: subscription.cancelAtPeriodEnd,
+    } satisfies SubscriptionState);
+  }
+  private subscriptionPlan(planId: string) {
+    const plan = this.plan.subscriptions.find((each) => each.id === planId);
+    if (!plan)
+      throw new BillingError(
+        this.plan.subscriptions.length
+          ? "This deployment sells no such plan"
+          : "This deployment sells no subscription",
+        409,
+      );
+    return plan;
+  }
+  /**
+   * A trial's credit: the plan's, spendable without a paid period because it
+   * is complimentary, and gone when the trial ends. Once per account.
+   */
+  private grantTrial(trial: {
+    readonly subscriptionId: string;
+    readonly expires: number;
+  }) {
+    identifier(trial.subscriptionId);
+    timestamp(trial.expires, "trial end");
+    if (!this.plan.trial)
+      throw new BillingError("This deployment offers no trial", 409);
+    const id = `trial:${trial.subscriptionId}`;
+    // The same trial again is nothing; another subscription's is a second.
+    if (
+      this.get<boolean>("trialUsed") &&
+      !this.rows("SELECT id FROM billing_grants WHERE id = ?", id).length
+    )
+      throw new BillingError("This account has had its trial", 409);
+    this.grant(
+      id,
+      "complimentary",
+      this.plan.trial.creditMicros,
+      trial.expires,
+    );
+    this.set("trialUsed", true);
+  }
+  /**
+   * A paid period grants the plan's allowance for it and advances paid access,
+   * never backwards: a delayed event for an earlier period grants that
+   * period's allowance, already expired or soon to be, and leaves access alone.
+   */
+  private recordPaidPeriod(period: PaymentsPaidPeriodV1) {
+    identifier(period.subscriptionId);
+    timestamp(period.periodStart, "paid period");
+    timestamp(period.periodEnd, "paid period");
+    if (period.periodEnd <= period.periodStart)
+      throw new BillingError("Invalid paid period", 400);
+    const plan = this.subscriptionPlan(period.planId);
+    const paid = this.get<PaidAccessState>("paidAccess");
+    if (
+      !paid ||
+      period.periodEnd > paid.periodEnd ||
+      (period.periodStart === paid.periodStart &&
+        period.periodEnd === paid.periodEnd &&
+        period.subscriptionId !== paid.subscriptionId)
+    )
+      this.set("paidAccess", {
+        subscriptionId: period.subscriptionId,
+        planId: period.planId,
+        periodStart: period.periodStart,
+        periodEnd: period.periodEnd,
+      } satisfies PaidAccessState);
+    this.grant(
+      `monthly:${period.subscriptionId}:${Math.floor(period.periodStart / 1000)}`,
+      "included",
+      plan.includedMicros,
+      period.periodEnd,
+    );
+  }
   /** What the account can spend right now. Cheap: three small reads. */
   balance(): BillingBalance {
     const grants = this.rows<Grant>(
@@ -609,16 +792,21 @@ export class BillingLedger {
     const subscribed = this.subscribed();
     const suspended = this.get<boolean>("suspended") ?? false;
     const complimentaryMicros = sum("complimentary");
+    const purchasedMicros = sum("purchased");
     return {
       includedMicros: sum("included"),
-      purchasedMicros: sum("purchased"),
+      purchasedMicros,
       complimentaryMicros,
       reservedMicros:
         this.rows<{ micros: number }>(
           "SELECT COALESCE(SUM(maximum), 0) AS micros FROM billing_operations WHERE status = 'reserved'",
         )[0]?.micros ?? 0,
       subscribed,
-      canSpend: !suspended && (subscribed || complimentaryMicros > 0),
+      canSpend:
+        !suspended &&
+        (subscribed ||
+          complimentaryMicros > 0 ||
+          (!this.plan.purchasedCreditNeedsSubscription && purchasedMicros > 0)),
       suspended,
     };
   }
@@ -641,7 +829,7 @@ export class BillingLedger {
     )[0];
     return {
       endsAt: subscription.trialEnd,
-      creditMicros: grant?.original ?? BILLING_PLAN.trialMicros,
+      creditMicros: grant?.original ?? this.plan.trial?.creditMicros ?? 0,
     };
   }
   snapshot(before?: number) {
@@ -669,8 +857,9 @@ export class BillingLedger {
       payments: this.rows<SqlRow>(
         "SELECT id, kind, original AS creditMicros, expires, created FROM billing_grants ORDER BY created DESC LIMIT 100",
       ),
-      plan: BILLING_PLANS[subscription?.plan ?? "standard"],
+      plan: this.plan,
       trial: this.trial(),
+      trialUsed: this.get<boolean>("trialUsed") ?? false,
       subscription: subscription ?? null,
       usage,
     };

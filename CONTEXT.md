@@ -63,16 +63,20 @@ The words of a `send_to_user` the model is still writing, drawn in the thread wh
 _Avoid_: Partial text, streaming message, draft (that is the person's unsent composer text)
 
 **Package**:
-A swappable implementation chosen at build time, behind an interface: sign-in, the Computer host, model providers, storage. First-party Packages ship with the deploy and describe themselves with a static `PackageDefinitionV1`; only untrusted code carries a descriptor, an artifact and a generation.
+A swappable implementation chosen at build time, behind an interface: sign-in, payments, the Computer host, model providers, storage. First-party Packages ship with the deploy and describe themselves with a static `PackageDefinitionV1`; only untrusted code carries a descriptor, an artifact and a generation.
 _Avoid_: Plugin, extension
 
 **Deployment profile**:
-Who one deployment is, in a checked-in file the deployable configs are generated from: its Cloudflare account, Worker names, hostnames, resources, auth Package and identity vars. Two exist — `hosted`, which is frockbot.com, and `simple`, which an installer writes into a deployer's own account — and a profile is which auth Package is built in, which secrets exist and which workflows run, never a fork or a gated feature.
+Who one deployment is, in a checked-in file the deployable configs are generated from: its Cloudflare account, Worker names, hostnames, resources, auth and payments Packages and identity vars. Two exist — `hosted`, which is frockbot.com, and `simple`, which an installer writes into a deployer's own account — and a profile is which auth Package is built in, which secrets exist and which workflows run, never a fork or a gated feature.
 _Avoid_: Environment, tier, edition, tenant
 
 **Auth Package**:
 The sign-in Package, behind `AuthPackageV1`: resolve an identity from a request, serve the sign-in and sign-out routes, and hand the native authorize page its identity step. Two builds, better-auth with Google and Cloudflare Access, each named by one chooser file the profile selects; a build carries only its own.
 _Avoid_: Auth provider, identity provider, login backend
+
+**Payments Package**:
+How people pay for credit, behind `PaymentsPackageV1`: the plan a deployment sells, whether payments are live, the routes under `/api/billing/provider/` that start a purchase and receive the provider's events, and the Billing page's actions as data. It credits the account's ledger only through the ledger port, at most once per provider event; the ledger, metering and Spending stay the app's. Two builds, Stripe and none, each named by one chooser file the profile selects, or a white-label's own named by path ([docs/billing.md](docs/billing.md#the-payments-package)).
+_Avoid_: Billing provider, payment gateway, billing Package
 
 **Brand**:
 What a person sees that makes the product FrockBot or another: its name, the built-in model's name, icons, the palettes behind the named looks, the URL scheme its apps are handed a sign-in back on and, in the client, the tints of its accent, the sign-in provider it names and its Bot characters. A build-time seam (`#brand` on the server, `ClientBrand` in the client), never a runtime switch; where a deployment runs and who signs in belong to its Deployment profile instead ([ADR 0038](docs/adr/0038-white-label-deployments.md)).

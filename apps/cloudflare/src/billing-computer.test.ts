@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
-  BILLING_PLAN,
+  USAGE_PRICING_VERSION_V1,
   BillingError,
   type UsageReservation,
   type UsageSettlement,
@@ -155,7 +155,7 @@ describe("prepaidComputerHost", () => {
         botId: "bot-1",
         maximumMicros: 6_494,
         description: COMPUTER_RATE_DESCRIPTION,
-        pricingVersion: BILLING_PLAN.pricingVersion,
+        pricingVersion: USAGE_PRICING_VERSION_V1,
         unitRates: {
           activeMicrosPerHour: COMPUTER_ACTIVE_MICROS_PER_HOUR,
         },

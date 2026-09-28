@@ -2,7 +2,6 @@ import {
   BillingError,
   BillingLedger,
   type BillingBalance,
-  type BillingPlanIdV1,
   type ComplimentaryGrant,
   type PaidAccessState,
   type UsageReservation,
@@ -27,7 +26,8 @@ import {
   type SpendingReportV1,
   type SpendPeriodV1,
 } from "@frockbot/app/billing/spending";
-import { accountPayments, type BillingEnv } from "./billing.js";
+import { paymentsPackageV1, type BillingEnv } from "./billing.js";
+import { PAYMENTS_PACKAGE_V1 } from "#payments";
 import {
   hostedBillingEnabledV1,
   type BillingSwitchEnv,
@@ -551,7 +551,11 @@ export class UserConfiguration
     this.billing().reconcile(input.command);
   }
   private billing() {
-    return new BillingLedger(this.ctx.storage, BRAND_V1.productName);
+    return new BillingLedger(
+      this.ctx.storage,
+      BRAND_V1.productName,
+      PAYMENTS_PACKAGE_V1.plan,
+    );
   }
   async readBilling(input: { userId: string; before?: number }) {
     await this.assertUserIdentity(input.userId);
@@ -714,46 +718,30 @@ export class UserConfiguration
     ledger.grantComplimentary(input.command);
     return ledger.balance();
   }
-  async billingCheckout(input: {
+  /**
+   * One of the payments Package's account commands, in this account's ledger
+   * authority: a purchase the signed-in person started, or a provider event
+   * the Package's route verified. The Package reaches the ledger only through
+   * its port.
+   */
+  async paymentsCommand(input: {
     userId: string;
-    command: {
-      id: string;
-      kind: "subscription" | "topup";
-      cents?: number;
-      plan?: BillingPlanIdV1;
-    };
-  }) {
+    command: string;
+    input: unknown;
+    signedIn: boolean;
+  }): Promise<unknown> {
     await this.assertUserIdentity(input.userId);
-    await this.assertAccountOpen();
-    return accountPayments(this.billing(), this.env, input.userId).checkout(
-      input.command,
+    if (input.signedIn) await this.assertAccountOpen();
+    const account = paymentsPackageV1(this.env).account?.(
+      this.billing().paymentsPort(),
+      input.userId,
     );
-  }
-  async billingChangePlan(input: {
-    userId: string;
-    command: { id: string; plan: BillingPlanIdV1 };
-  }) {
-    await this.assertUserIdentity(input.userId);
-    await this.assertAccountOpen();
-    return accountPayments(this.billing(), this.env, input.userId).changePlan(
-      input.command,
-    );
-  }
-  async billingPortal(input: { userId: string; commandId: string }) {
-    await this.assertUserIdentity(input.userId);
-    await this.assertAccountOpen();
-    return accountPayments(this.billing(), this.env, input.userId).portal(
-      input.commandId,
-    );
-  }
-  async billingWebhook(input: {
-    userId: string;
-    event: Record<string, unknown>;
-  }) {
-    await this.assertUserIdentity(input.userId);
-    await accountPayments(this.billing(), this.env, input.userId).webhook(
-      input.event,
-    );
+    if (!account)
+      throw new BillingError(
+        "Payments are not available on this deployment",
+        404,
+      );
+    return account.command(input.command, input.input);
   }
   async reserveUsage(input: { userId: string; reservation: UsageReservation }) {
     await this.assertUserIdentity(input.userId);
@@ -1444,8 +1432,8 @@ export class UserConfiguration
           ? { status: "complete" }
           : { status: "pending" };
       },
-      recordedPaymentCustomer: () =>
-        sql ? this.billing().get<string>("customer") : undefined,
+      paymentRecord: <T>(key: string) =>
+        sql ? this.billing().paymentsPort().record<T>(key) : undefined,
       vectorIdsAfter: (cursor, limit) =>
         sql ? this.memoryEngine().vectorIdsAfter(cursor, limit) : [],
       deleteIdentity: async () => {
