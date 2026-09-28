@@ -15,6 +15,7 @@ import {
   type CallDecisionV1,
   type CallReviewEvidenceV1,
   type ConversationEvidenceV1,
+  type InputSegmentV1,
   type QuestionRouteV1,
   type LlmMessage,
   type LoopHooksV1,
@@ -234,14 +235,88 @@ function turnEvents(
   return events.filter((event) => "turn" in event && event.turn === turn);
 }
 
-/** Everything the Turn was asked, oldest first: a follow-up adds to the task. */
-function inputText(events: readonly SessionEvent[], turn: number): string {
-  return events
-    .flatMap((event) =>
-      event.type === "user/message" && event.turn === turn ? [event.text] : [],
-    )
-    .join("\n\n");
+/**
+ * Who wrote an input that records no parts: its origin. A Turn a person sent
+ * is theirs; anything else the host admitted records its parts, so this is
+ * only ever a person's Turn or an input admitted before parts were recorded.
+ */
+function originAuthorV1(origin: TurnInputOriginV1): InputSegmentV1["author"] {
+  return origin === "user" ||
+    origin === "voice" ||
+    origin === "email" ||
+    origin === "group"
+    ? "person"
+    : "bot";
 }
+
+/** Each part of the Turn's input, oldest first, with who wrote it. */
+function turnSegments(
+  events: readonly SessionEvent[],
+  turn: number,
+  origin: TurnInputOriginV1,
+): InputSegmentV1[] {
+  return turnEvents(events, turn).flatMap((event) =>
+    event.type === "user/message"
+      ? (event.segments ?? [
+          { author: originAuthorV1(origin), text: event.text },
+        ])
+      : [],
+  );
+}
+
+function asks(author: InputSegmentV1["author"]): boolean {
+  return author === "person" || author === "routine";
+}
+
+/** The line that separates what the person asked from what arrived with it. */
+export const SUPERVISION_CONTEXT_LABEL_V1 =
+  "Also in this Turn's input, written by others, not by the person:";
+
+/**
+ * What the Turn was asked, oldest first, then what arrived with it. The
+ * person's words lead, so a check that reads only the start of a long input
+ * still reads them; a hand-off drained in front of them follows, labelled as
+ * someone else's.
+ */
+function inputText(
+  events: readonly SessionEvent[],
+  turn: number,
+  origin: TurnInputOriginV1,
+): string {
+  return turnObjectiveV1(turnSegments(events, turn, origin));
+}
+
+/** The objective every check reads, from the parts of a Turn's input. */
+export function turnObjectiveV1(segments: readonly InputSegmentV1[]): string {
+  const join = (parts: readonly InputSegmentV1[], separator: string) =>
+    parts
+      .map((part) => part.text.trim())
+      .filter(Boolean)
+      .join(separator);
+  const asked = join(
+    segments.filter((part) => asks(part.author)),
+    "\n\n",
+  );
+  const context = join(
+    segments.filter((part) => !asks(part.author)),
+    "\n",
+  );
+  if (!context) return asked;
+  if (!asked) return context;
+  return `${asked}\n\n${SUPERVISION_CONTEXT_LABEL_V1}\n${context}`;
+}
+
+const SPEAKER_OF_AUTHOR_V1: Record<
+  InputSegmentV1["author"],
+  ConversationEvidenceV1["speaker"]
+> = {
+  person: "user",
+  routine: "routine",
+  bot: "bot",
+  plugin: "context",
+  platform: "context",
+  external: "context",
+};
 
 /** Whether the Turn owes its answer to a caller, by the tools it offered. */
 function callerAddressed(
@@ -433,10 +508,17 @@ function callDecisionOf(
 function conversationThisTurn(
   events: readonly SessionEvent[],
   turn: number,
+  origin: TurnInputOriginV1,
 ): ConversationEvidenceV1[] {
   return turnEvents(events, turn).flatMap((event): ConversationEvidenceV1[] => {
     if (event.type === "user/message") {
-      return [{ speaker: "user", text: event.text }];
+      return (
+        event.segments ?? [{ author: originAuthorV1(origin), text: event.text }]
+      ).flatMap((part) =>
+        part.text.trim()
+          ? [{ speaker: SPEAKER_OF_AUTHOR_V1[part.author], text: part.text }]
+          : [],
+      );
     }
     const shown = describeShown(event);
     return shown === undefined ? [] : [{ speaker: "bot", text: shown }];
@@ -473,7 +555,7 @@ export function stepReviewEvidenceOfV1(
       ...(speaks(call.tool) ? { speaks: true } : {}),
     }));
   return {
-    objective: inputText(events, turn),
+    objective: inputText(events, turn, origin),
     origin,
     startDirective: directiveOf(events, turn) ?? defaultTurnDirectiveV1(),
     text,
@@ -502,14 +584,14 @@ export function callReviewEvidenceOfV1(
   call: CallReviewEvidenceV1["call"],
 ): CallReviewEvidenceV1 {
   return {
-    objective: inputText(events, turn),
+    objective: inputText(events, turn, origin),
     origin,
     call,
     // This Turn only. An earlier Turn's user messages also carry text the
     // person did not type — a Routine's hand-off, a card press, another Bot
     // in a group — and nothing records which, so they must not stand as
     // authorization here.
-    conversation: conversationThisTurn(events, turn),
+    conversation: conversationThisTurn(events, turn, origin),
     priorResults: priorResults(events, turn),
     policies: emptyPolicySnapshotV1(),
   };
@@ -675,7 +757,7 @@ export function createSupervisionRuntimeFeatureV1(
       const started = Date.now();
       const decision = await host.supervisor.reviewProgress(
         {
-          objective: inputText(events, turn),
+          objective: inputText(events, turn, host.origin),
           origin: host.origin,
           step,
           actions: calls.map((call) => ({
@@ -727,7 +809,7 @@ export function createSupervisionRuntimeFeatureV1(
       try {
         decision = await host.supervisor.reviewOutcome(
           {
-            objective: inputText(events, turn),
+            objective: inputText(events, turn, host.origin),
             origin: host.origin,
             actions: calls.map((call) => ({
               tool: call.tool,
@@ -775,7 +857,7 @@ export function createSupervisionRuntimeFeatureV1(
             {
               input: {
                 messageId: `turn:${turn}`,
-                text: inputText(session.activeRunJournal, turn),
+                text: inputText(session.activeRunJournal, turn, host.origin),
                 origin: host.origin,
               },
               policies: emptyPolicySnapshotV1(),
@@ -878,7 +960,7 @@ export function createSupervisionRuntimeFeatureV1(
               kind: "denied",
               call,
               result: {
-                content: offTaskResult(inputText(events, at.turn)),
+                content: offTaskResult(inputText(events, at.turn, host.origin)),
                 isError: true,
               },
             };
@@ -934,7 +1016,7 @@ export function createSupervisionRuntimeFeatureV1(
                 }
               : await host.supervisor.reviewSend(
                   {
-                    objective: inputText(events, at.turn),
+                    objective: inputText(events, at.turn, host.origin),
                     origin: host.origin,
                     conversation: conversationBefore(session),
                     shown: shownThisTurn(events, at.turn),

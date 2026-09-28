@@ -1,3 +1,4 @@
+import type { InputSegmentV1 } from "@frockbot/core/contracts";
 import { sentTextV1 } from "./sent-text.js";
 import type { AgentHandle } from "@frockbot/core/agent-loop/agent";
 import {
@@ -137,6 +138,8 @@ export interface ExecuteBotTurnOptions {
   /** The mounted Composition for the generation this Turn was pinned to. */
   composition: ShellMountedComposition;
   resume?: boolean;
+  /** Who wrote each part of `command.text`, for supervision. */
+  segments?: readonly InputSegmentV1[];
   /**
    * Absolute sequence this run was admitted at. The completion suffix starts
    * here, including events appended while the Session was mounted.
@@ -157,6 +160,7 @@ export async function executeBotTurn(
         text: command.text,
         ...(command.skills ? { skills: command.skills } : {}),
         ...(command.attachments ? { attachments: command.attachments } : {}),
+        ...(options.segments ? { segments: options.segments } : {}),
       });
     }
     await runtime.agent.agent.whenIdle();

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   compositionFailureDurableInputV1,
-  compositionFailureTurnTextV1,
+  compositionFailureTurnInputV1,
 } from "./backend-composition-input.ts";
 
 describe("Composition failure durable Bot input", () => {
@@ -75,11 +75,18 @@ describe("Composition failure durable Bot input", () => {
     expect(text).toContain("Phase: health");
     expect(text).toContain("- reported=other");
     expect(text).toContain("Status: quarantined");
-    expect(
-      compositionFailureTurnTextV1("please continue", {
-        attemptedGenerationId: "generation-broken",
-        quarantined: false,
-      }),
-    ).toEndWith("\n\nplease continue");
+    const input = compositionFailureTurnInputV1(
+      {
+        text: "please continue",
+        segments: [{ author: "person", text: "please continue" }],
+      },
+      { attemptedGenerationId: "generation-broken", quarantined: false },
+    );
+    expect(input.text).toEndWith("\n\nplease continue");
+    // The notice is FrockBot's; the person's words stay theirs.
+    expect(input.segments.map((segment) => segment.author)).toEqual([
+      "platform",
+      "person",
+    ]);
   });
 });

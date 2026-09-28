@@ -16,6 +16,7 @@
 //     Routine, and a firing that arrives while one is unsettled queues behind
 //     it. "Record durable execution intent before invoking an external side
 //     effect", and "retries reuse the fire id as the run id".
+import type { InputSegmentV1 } from "@frockbot/core/contracts";
 import {
   isRoutineIdV1,
   RoutineDecodeError,
@@ -65,6 +66,8 @@ export interface RoutineFireV1 {
   missedCount?: number;
   /** The run-log entry this firing writes and later rewrites. */
   entryId: string;
+  /** Who last wrote the prompt this firing runs. */
+  promptBy?: "user" | "bot";
 }
 
 /**
@@ -155,7 +158,7 @@ export function decodeRoutineFireV1(value: unknown): RoutineFireV1 {
       "mintedAt",
       "entryId",
     ],
-    ["dueAt", "missedCount"],
+    ["dueAt", "missedCount", "promptBy"],
     "Routine firing",
   );
   if (candidate.schemaVersion !== 1) {
@@ -193,7 +196,17 @@ export function decodeRoutineFireV1(value: unknown): RoutineFireV1 {
             "Routine firing missedCount",
           ),
         }),
+    ...(candidate.promptBy === undefined
+      ? {}
+      : { promptBy: routineWriterKind(candidate.promptBy) }),
   };
+}
+
+function routineWriterKind(value: unknown): "user" | "bot" {
+  if (value !== "user" && value !== "bot") {
+    throw new RoutineDecodeError("Routine firing promptBy is invalid");
+  }
+  return value;
 }
 
 /** The Session a Routine's firings run in. One per Routine, never the User's. */
@@ -377,7 +390,41 @@ export function routineCueV1(input: {
     input.prompt,
   ];
   if (input.delivery !== undefined) {
-    lines.push("", "Delivered payload:", input.delivery);
+    lines.push("", ROUTINE_CUE_PAYLOAD_LABEL_V1, input.delivery);
   }
   return lines.join("\n").slice(0, ROUTINE_CUE_MAX_LENGTH);
+}
+
+const ROUTINE_CUE_PAYLOAD_LABEL_V1 = "Delivered payload:";
+
+/**
+ * Who wrote each part of a cue: the platform's line saying what fired, the
+ * prompt's writer for the prompt, and whoever sent the payload for the rest.
+ * The payload is found at the first label, so text inside a payload cannot
+ * move where the prompt ends; a prompt that itself holds the label only
+ * loses its tail to `external`, which authorizes less, never more.
+ */
+export function routineCueSegmentsV1(
+  cue: string,
+  promptBy: "user" | "bot" | undefined,
+): InputSegmentV1[] {
+  const promptAt = cue.indexOf("\n\n");
+  if (promptAt < 0) return [{ author: "platform", text: cue }];
+  const header = cue.slice(0, promptAt);
+  const rest = cue.slice(promptAt + 2);
+  const payloadAt = rest.indexOf(`\n\n${ROUTINE_CUE_PAYLOAD_LABEL_V1}\n`);
+  const prompt = payloadAt < 0 ? rest : rest.slice(0, payloadAt);
+  // Each part but the last keeps the newline that, with the joining one,
+  // makes the blank line the cue has there: the parts spell out the cue.
+  const segments: InputSegmentV1[] = [
+    { author: "platform", text: `${header}\n` },
+    {
+      author: promptBy === "user" ? "routine" : "bot",
+      text: payloadAt < 0 ? prompt : `${prompt}\n`,
+    },
+  ];
+  if (payloadAt >= 0) {
+    segments.push({ author: "external", text: rest.slice(payloadAt + 2) });
+  }
+  return segments;
 }

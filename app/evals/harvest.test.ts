@@ -79,10 +79,8 @@ test("a recorded run yields its call reviews with the evidence production built"
         arguments: { query: "newer_than:1d" },
       },
       conversation: [
-        {
-          speaker: "user",
-          text: 'Routine "Triage" fired (cron).\n\nCheck my inbox.',
-        },
+        { speaker: "context", text: 'Routine "Triage" fired (cron).\n' },
+        { speaker: "routine", text: "Check my inbox." },
       ],
       priorResults: [{ tool: "computer_exec", content: "[]" }],
     },

@@ -13,6 +13,7 @@ export * from "./loop-events.js";
 export * from "./runtime-note.js";
 export * from "./loop-hooks.js";
 export * from "./message-attachments.js";
+export * from "./input-segments.js";
 export * from "./model-invocation.js";
 export * from "./package-catalog.js";
 export * from "./package-definition.js";

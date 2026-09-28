@@ -13,6 +13,10 @@ import {
   type MessageAttachmentV1,
 } from "./message-attachments.js";
 import {
+  decodeInputSegmentsV1,
+  type InputSegmentV1,
+} from "./input-segments.js";
+import {
   decodeModelResponseFormatV1,
   STRUCTURED_OUTPUT_ISSUE_LIMIT_V1,
   type ModelResponseFormatV1,
@@ -423,6 +427,8 @@ export interface SessionEventMap {
     skills?: SkillRefV1[];
     /** The files the person attached. Absent means none. */
     attachments?: MessageAttachmentV1[];
+    /** Who wrote each part of `text`. Absent means the Turn's origin wrote all of it. */
+    segments?: InputSegmentV1[];
   };
   "input/admitted": { messageId: string; turn: number };
   "input/cancelled": { messageId: string; reason: "user" | "shutdown" };
@@ -579,6 +585,8 @@ export interface SessionEventMap {
     text: string;
     /** References to what the person attached, never the bytes. */
     attachments?: MessageAttachmentV1[];
+    /** Who wrote each part of `text`. Absent means the Turn's origin wrote all of it. */
+    segments?: InputSegmentV1[];
   };
   "model/request": {
     turn: number;
@@ -1790,11 +1798,15 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
           "text",
           ...(event.skills === undefined ? [] : ["skills"]),
           ...(event.attachments === undefined ? [] : ["attachments"]),
+          ...(event.segments === undefined ? [] : ["segments"]),
         ),
         "session event",
       );
       eventString(event.messageId, "session event.messageId");
       text();
+      if (event.segments !== undefined) {
+        decodeInputSegmentsV1(event.segments, "session event.segments");
+      }
       if (event.skills !== undefined) {
         decodeSkillRefsV1(event.skills, "session event.skills");
       }
@@ -1982,6 +1994,7 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
           "messageId",
           "text",
           ...(event.attachments === undefined ? [] : ["attachments"]),
+          ...(event.segments === undefined ? [] : ["segments"]),
         ),
         "session event",
       );
@@ -1989,6 +2002,9 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       step();
       eventString(event.messageId, "session event.messageId");
       text();
+      if (event.segments !== undefined) {
+        decodeInputSegmentsV1(event.segments, "session event.segments");
+      }
       if (event.attachments !== undefined) {
         decodeMessageAttachmentsV1(
           event.attachments,

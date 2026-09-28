@@ -24,7 +24,11 @@
 // and the `machine-result` variant is the registered machine's. Each new
 // producer widens this union rather than opening a second queue: two queues
 // would mean two drains, two receipts, and two chances to double-deliver.
-import type { SessionEvent } from "@frockbot/core/contracts";
+import {
+  inputSegmentsTextV1,
+  type InputSegmentV1,
+  type SessionEvent,
+} from "@frockbot/core/contracts";
 import { runFailureCopyV1 } from "../shell/run-failure-copy.js";
 import {
   isRoutineIdV1,
@@ -713,64 +717,98 @@ export const SUBAGENT_SUMMARY_END_V1 = "[End of the subagent's summary]";
 export function pendingBotInputPreambleV1(
   inputs: readonly PendingBotInputV1[],
 ): string {
-  if (inputs.length === 0) return "";
-  const lines: string[] = [];
+  return inputSegmentsTextV1(pendingBotInputSegmentsV1(inputs));
+}
+
+/**
+ * The preamble as its writers wrote it: each notice FrockBot writes is the
+ * platform's, a hand-off or summary is the Bot's, a card's context is its
+ * Plugin's, and a machine's output is external. Their text, read in order,
+ * is the preamble.
+ */
+export function pendingBotInputSegmentsV1(
+  inputs: readonly PendingBotInputV1[],
+): InputSegmentV1[] {
+  const segments: InputSegmentV1[] = [];
   for (const input of inputs) {
     if (input.kind === "wake") {
-      lines.push(
+      segments.push(
+        {
+          author: "platform",
+          text:
+            input.source === "subagent"
+              ? `[${input.title}] While you were away, the subagent "${input.routineId}" you dispatched finished. Its summary — not its transcript, which you cannot see — is:`
+              : `[${input.title}] While you were away, your Routine "${input.routineId}" finished and handed off:`,
+        },
         input.source === "subagent"
-          ? `[${input.title}] While you were away, the subagent "${input.routineId}" you dispatched finished. Its summary — not its transcript, which you cannot see — is:`
-          : `[${input.title}] While you were away, your Routine "${input.routineId}" finished and handed off:`,
-        input.text,
-        ...(input.source === "subagent" ? [SUBAGENT_SUMMARY_END_V1] : []),
-        "",
+          ? { author: "bot", text: input.text }
+          : { author: "bot", text: `${input.text}\n` },
       );
+      if (input.source === "subagent") {
+        segments.push({
+          author: "platform",
+          text: `${SUBAGENT_SUMMARY_END_V1}\n`,
+        });
+      }
       continue;
     }
     if (input.kind === "approval") {
-      lines.push(
-        `[Approval] The decision on "${input.approvalId}" is ${input.decision}.`,
-        "",
-      );
+      segments.push({
+        author: "platform",
+        text: `[Approval] The decision on "${input.approvalId}" is ${input.decision}.\n`,
+      });
       continue;
     }
     if (input.kind === "card-action") {
-      lines.push(
-        `[Card] The person used "${input.name}" on the card "${input.surfaceId}". This is a press on a control, not something they said.`,
-        ...(input.context === undefined ? [] : [input.context]),
-        "",
-      );
+      const press = `[Card] The person used "${input.name}" on the card "${input.surfaceId}". This is a press on a control, not something they said.`;
+      if (input.context === undefined) {
+        segments.push({ author: "platform", text: `${press}\n` });
+      } else {
+        segments.push(
+          { author: "platform", text: press },
+          { author: "plugin", text: `${input.context}\n` },
+        );
+      }
       continue;
     }
     if (input.kind === "secret-saved") {
-      lines.push(
-        `[Secret] The person saved "${input.label}". Its reference is "${input.secretId}"; you cannot read its value, and nobody will show it to you.`,
-        `Fill it into a page with computer_browser {"action":"fill","label":"<the field's label>","secret":"${input.secretId}"}.` +
-          (input.payment
-            ? " It is a payment detail, so each fill asks the person to approve that page and field first."
-            : input.origin === undefined
-              ? " It names no site, so each fill asks the person to approve the page first."
-              : ` It fills on ${input.origin} without asking; anywhere else asks the person first.`),
-        "",
-      );
+      segments.push({
+        author: "platform",
+        text: [
+          `[Secret] The person saved "${input.label}". Its reference is "${input.secretId}"; you cannot read its value, and nobody will show it to you.`,
+          `Fill it into a page with computer_browser {"action":"fill","label":"<the field's label>","secret":"${input.secretId}"}.` +
+            (input.payment
+              ? " It is a payment detail, so each fill asks the person to approve that page and field first."
+              : input.origin === undefined
+                ? " It names no site, so each fill asks the person to approve the page first."
+                : ` It fills on ${input.origin} without asking; anywhere else asks the person first.`),
+          "",
+        ].join("\n"),
+      });
       continue;
     }
     if (input.kind === "yielded-turn") {
-      lines.push(
-        "[Steering] The person sent this message while you were still working on the one before it. That work is above, with every tool result it received, and nothing in flight was lost — but it is unfinished.",
-        // A Bot answering "hi" with thirty steps of the earlier job is what
-        // this line guards against (2026-09-04): the new message is read
-        // first, and the Bot decides what becomes of the earlier work.
-        "Read this message first. It may change that work, add to it, stop it, or be about something else. Then decide whether to carry the earlier work on, and say so when the person would want to know.",
-        "",
-      );
+      segments.push({
+        author: "platform",
+        text: [
+          "[Steering] The person sent this message while you were still working on the one before it. That work is above, with every tool result it received, and nothing in flight was lost — but it is unfinished.",
+          // A Bot answering "hi" with thirty steps of the earlier job is what
+          // this line guards against (2026-09-04): the new message is read
+          // first, and the Bot decides what becomes of the earlier work.
+          "Read this message first. It may change that work, add to it, stop it, or be about something else. Then decide whether to carry the earlier work on, and say so when the person would want to know.",
+          "",
+        ].join("\n"),
+      });
       continue;
     }
-    lines.push(
-      `[Machine] Command "${input.commandId}" on machine ${input.machineId} finished ${input.outcome}: ${input.preview}`,
-      `Call machine_command_check with commandId "${input.commandId}" to read the whole result.`,
-      "",
-    );
+    segments.push({
+      author: "external",
+      text: [
+        `[Machine] Command "${input.commandId}" on machine ${input.machineId} finished ${input.outcome}: ${input.preview}`,
+        `Call machine_command_check with commandId "${input.commandId}" to read the whole result.`,
+        "",
+      ].join("\n"),
+    });
   }
-  return lines.join("\n");
+  return segments;
 }

@@ -3,6 +3,7 @@ import type {
   LoopAgentInputV1,
   LoopAgentRuntimeV1,
   LoopRequestErrorDecisionV1,
+  InputSegmentV1,
   MessageAttachmentV1,
   Session,
   SessionEvent,
@@ -121,6 +122,11 @@ export interface AgentSendV1 {
    * alone, so `text` may be empty when these are present.
    */
   attachments?: readonly MessageAttachmentV1[];
+  /**
+   * Who wrote each part of `text`, when more than the person wrote it. Only
+   * the host that admitted the input says so; a hook cannot.
+   */
+  segments?: readonly InputSegmentV1[];
 }
 
 export type PreStepDecision =

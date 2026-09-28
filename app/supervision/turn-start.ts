@@ -13,6 +13,7 @@ import {
   type TurnDirective,
   type TurnInputOriginV1,
   type TurnStartEvidence,
+  type ConversationSpeakerV1,
 } from "@frockbot/core/contracts";
 
 // The start-of-Turn Jev questions, and every threshold code applies to their
@@ -53,7 +54,7 @@ export interface TurnStartJudgmentEvidenceV1 {
   };
   /** Recent User and Bot messages, oldest first, ending before `input`. */
   readonly conversation: readonly {
-    readonly speaker: "user" | "bot";
+    readonly speaker: ConversationSpeakerV1;
     readonly text: string;
   }[];
   /** Work already in progress or offered, and where it stands. */
