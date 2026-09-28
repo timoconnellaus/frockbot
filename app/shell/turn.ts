@@ -545,6 +545,8 @@ export async function executeTurn(
           ),
         remainingEffectAdmissions: () =>
           remainingRunEffectAdmissions(state, input.command.runId),
+        sentOnce: (effectId) =>
+          sentRunEffectOnce(state, input.command.runId, effectId),
         // A group Turn yields to a newer group message rather than to the
         // person's one-to-one chat, which waits for it like any other work.
         userMessageWaiting: async () => {
@@ -1033,6 +1035,13 @@ export async function admitRunEffect(
           `effect admission "${effect.effectId}" collides with ${prior.kind}`,
         );
       }
+      // The loop settles such a call before it asks again; reaching here
+      // means something would send an unkeyed effect a second time.
+      if (prior.outcome === "admitted-once") {
+        throw new Error(
+          `effect "${effect.effectId}" was already sent and has no key to send it again under`,
+        );
+      }
       return prior.outcome === "admitted";
     }
     let matchesIntent = false;
@@ -1059,7 +1068,11 @@ export async function admitRunEffect(
     // Stop fences durably rather than advisorily: a Turn whose Agent never
     // got the signal — because the object was evicted and resumed — still
     // starts no new provider call or tool effect once the intent is recorded.
-    const outcome = run.stopRequestedAt ? "fenced" : "admitted";
+    const outcome = run.stopRequestedAt
+      ? "fenced"
+      : effect.kind === "tool" && effect.once
+        ? "admitted-once"
+        : "admitted";
     const next = requireStoredRunV1({
       ...run,
       effectAdmissions: [
@@ -1071,6 +1084,24 @@ export async function admitRunEffect(
       `${RUN_PREFIX}${runId}`,
       structuredClone(storedRunRecordV2(next)),
     );
-    return outcome === "admitted";
+    return outcome !== "fenced";
   });
+}
+
+/** Whether this run already sent `effectId` to a callee that honours no key. */
+export async function sentRunEffectOnce(
+  state: ShellBotStateV1,
+  runId: string,
+  effectId: string,
+): Promise<boolean> {
+  const run = optionalStoredRun(
+    await state.ctx.storage.get<unknown>(`${RUN_PREFIX}${runId}`),
+  );
+  return (
+    run?.effectAdmissions.some(
+      (admission) =>
+        admission.effectId === effectId &&
+        admission.outcome === "admitted-once",
+    ) ?? false
+  );
 }

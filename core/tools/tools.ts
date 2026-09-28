@@ -858,6 +858,14 @@ export class ToolRegistry implements ToolExecution {
     return prepared;
   }
 
+  sendsOnce(preparation: Extract<ToolPreparation, { kind: "ready" }>): boolean {
+    const definition = (
+      this.preparedDefinitions.get(preparation) ??
+      this.nativeDefinitions.get(preparation.call.name)
+    )?.definition;
+    return definition?.unkeyed === true && definition.idempotent !== true;
+  }
+
   async executePrepared(
     preparation: Extract<ToolPreparation, { kind: "ready" }>,
     context: ToolExecutionContext,

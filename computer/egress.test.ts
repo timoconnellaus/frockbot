@@ -14,6 +14,7 @@ import {
   createComputerEgressHandlerV1,
   openComputerEgressV1,
   signComputerEgressTokenV1,
+  syntheticReviewIdsV1,
   verifyComputerEgressTokenV1,
   type ComputerEgressAccountV1,
   type ComputerEgressRequestV1,
@@ -236,10 +237,10 @@ describe("computer egress handler", () => {
     };
     expect((await handler(request)).status).toBe(200);
     expect(reviews).toHaveLength(1);
-    expect(reviews[0]!.context).toMatchObject({
-      effect: "mutate",
-      effectId: "tool:2:1:0:egress:0",
-    });
+    expect(reviews[0]!.context).toMatchObject({ effect: "mutate" });
+    expect(reviews[0]!.context.effectId).toMatch(
+      /^tool:2:1:0:egress:[0-9a-f]{32}:0$/,
+    );
     expect(reviews[0]!.call).toMatchObject({
       name: "credentialed_request",
       input: {
@@ -253,6 +254,65 @@ describe("computer egress handler", () => {
     expect((await handler(request)).status).toBe(200);
     expect(sent).toHaveLength(1);
     expect(reviews).toHaveLength(1);
+  });
+
+  test("a write is reviewed under an id its content names, never its position", async () => {
+    async function reviewIds(
+      requests: ComputerEgressRequestV1[],
+    ): Promise<string[]> {
+      const ids: string[] = [];
+      const handler = createComputerEgressHandlerV1({
+        productName: "FrockBot",
+        accounts: () => [account([])],
+        context,
+        review: async (call, reviewContext) => {
+          ids.push(reviewContext.effectId);
+          return { kind: "ready", call, idempotent: false };
+        },
+      });
+      for (const request of requests) await handler(request);
+      return ids;
+    }
+    const issue: ComputerEgressRequestV1 = {
+      method: "POST",
+      url: "https://api.github.com/repos/o/r/issues",
+      headers: {},
+      bodyBase64: body({ title: "Broken build" }),
+    };
+    const removal: ComputerEgressRequestV1 = {
+      method: "DELETE",
+      url: "https://api.github.com/repos/o/r",
+      headers: {},
+    };
+    const [first, second] = await reviewIds([issue, removal]);
+    expect(first).not.toBe(second);
+    // Another exec that sends the same requests in a different order gets
+    // the same id for each, so no verdict follows a position.
+    expect(await reviewIds([removal, issue])).toEqual([second, first]);
+    // A different body is a different request.
+    const [other] = await reviewIds([
+      { ...issue, bodyBase64: body({ title: "Delete everything" }) },
+    ]);
+    expect(other).not.toBe(first);
+  });
+
+  test("an exact repeat is counted, and counted the same way every time", async () => {
+    const mint = () => syntheticReviewIdsV1("tool:2:1:0:review");
+    const once = mint();
+    const ids = [
+      await once({ click: "Place order" }),
+      await once({ click: "Place order" }),
+      await once({ click: "Cancel" }),
+    ];
+    expect(ids[0]).toMatch(/^tool:2:1:0:review:[0-9a-f]{32}:0$/);
+    expect(ids[1]).toBe(ids[0]!.replace(/:0$/, ":1"));
+    expect(ids[2]).toMatch(/:0$/);
+    expect(ids[2]).not.toBe(ids[0]);
+    const again = mint();
+    expect([
+      await again({ click: "Place order" }),
+      await again({ click: "Place order" }),
+    ]).toEqual([ids[0], ids[1]]);
   });
 
   test("a refused write never leaves, and the CLI is told why", async () => {

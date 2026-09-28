@@ -53,7 +53,12 @@ export function defaultRunLaneV1(turnType: TurnTypeV1): RunLaneV1 {
   return turnType === "agent" ? "agent" : "background";
 }
 
-export type StoredEffectAdmissionOutcome = "admitted" | "fenced";
+/**
+ * `admitted` may be sent again under its key; `admitted-once` went to a callee
+ * that honours no key, so it was sent and is never sent again.
+ */
+export type StoredEffectAdmissionOutcome =
+  "admitted" | "admitted-once" | "fenced";
 
 /** Durable linearization result for one exact provider or tool effect. */
 export interface StoredEffectAdmission {
@@ -1004,7 +1009,11 @@ function decodeStoredEffectAdmissions(value: unknown): StoredEffectAdmission[] {
     if (!boundedString(candidate.effectId, STORED_EFFECT_ID_MAX_BYTES)) {
       throw new Error("stored run has invalid effect admission id");
     }
-    if (candidate.outcome !== "admitted" && candidate.outcome !== "fenced") {
+    if (
+      candidate.outcome !== "admitted" &&
+      candidate.outcome !== "admitted-once" &&
+      candidate.outcome !== "fenced"
+    ) {
       throw new Error("stored run has invalid effect admission outcome");
     }
     if (effectIds.has(candidate.effectId)) {

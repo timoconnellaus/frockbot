@@ -215,6 +215,7 @@ async function resolveMcpTool(
         description: tool.description,
         inputSchema: tool.inputSchema,
         idempotent: false,
+        unkeyed: true,
         execute: (input: unknown, context: ToolExecutionContext) =>
           executeMcpToolV1(
             config,

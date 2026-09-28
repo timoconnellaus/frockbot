@@ -17,10 +17,12 @@
 // effect id. A request is sent at most once; a transport failure after it
 // left is answered as unknown, never retried.
 
-import type {
-  ToolCall,
-  ToolExecutionContext,
-  ToolPreparation,
+import {
+  canonicalJson,
+  sha256,
+  type ToolCall,
+  type ToolExecutionContext,
+  type ToolPreparation,
 } from "@frockbot/core/contracts";
 
 /** One API host a connected app is reached through, and the app it belongs to. */
@@ -339,6 +341,25 @@ export function computerEgressAccountsV1(
   return ACCOUNTS.get(key) ?? [];
 }
 
+/**
+ * Mints the ids one tool call's synthetic reviews are recorded under. A
+ * recorded verdict is found by id, so an id that named only a position — the
+ * third request — would hand one request's verdict to whatever request took
+ * that position next. The id names the reviewed content instead, and counts
+ * only exact repeats of it.
+ */
+export function syntheticReviewIdsV1(
+  prefix: string,
+): (content: unknown) => Promise<string> {
+  const repeats = new Map<string, number>();
+  return async (content) => {
+    const digest = (await sha256(canonicalJson(content))).slice(0, 32);
+    const repeat = repeats.get(digest) ?? 0;
+    repeats.set(digest, repeat + 1);
+    return `${prefix}:${digest}:${repeat}`;
+  };
+}
+
 /** The synthetic call a credentialed write is reviewed as. */
 export const COMPUTER_EGRESS_TOOL_NAME = "credentialed_request";
 const REVIEW_BODY_CHARS = 2000;
@@ -383,7 +404,7 @@ export interface ComputerEgressHandlerConfigV1 {
 export function createComputerEgressHandlerV1(
   config: ComputerEgressHandlerConfigV1,
 ): (request: ComputerEgressRequestV1) => Promise<ComputerEgressResponseV1> {
-  let sequence = 0;
+  const reviewId = syntheticReviewIdsV1(`${config.context.effectId}:egress`);
   let jevSequence = 0;
   // A CLI that retries a write it timed out on sends the same bytes again.
   // Within one exec that is the same effect, answered with what the first
@@ -488,7 +509,12 @@ export function createComputerEgressHandlerV1(
     if (!config.review) {
       return "Requests from the terminal need supervision, which this Turn does not have.";
     }
-    const effectId = `${config.context.effectId}:egress:${sequence++}`;
+    const effectId = await reviewId({
+      account: account.label,
+      method: request.method,
+      url: request.url,
+      body: request.bodyBase64 ?? null,
+    });
     const call: ToolCall = {
       id: effectId,
       name: COMPUTER_EGRESS_TOOL_NAME,

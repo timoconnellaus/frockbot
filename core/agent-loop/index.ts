@@ -36,7 +36,6 @@ import {
 import { requestModelV1 } from "./model-request.js";
 import { planResumptionV1 } from "./resume.js";
 import type {
-  EffectAdmittingAgentOptions,
   LoopRuntime,
   LoopServices,
   ModelResponse,
@@ -109,7 +108,7 @@ class LoopAgent implements Agent, LoopRuntime {
   readonly botId: string;
   readonly session: Session;
   readonly services: LoopServices;
-  readonly options: EffectAdmittingAgentOptions;
+  readonly options: AgentOptions;
   readonly maxSteps: number;
   readonly composition: CompositionPinV1;
   /** The turn type every Turn of this Agent is admitted as. */
@@ -146,7 +145,7 @@ class LoopAgent implements Agent, LoopRuntime {
   constructor(
     services: LoopServices,
     session: Session,
-    options: EffectAdmittingAgentOptions,
+    options: AgentOptions,
     maxSteps: number,
     composition: CompositionPinV1,
     turnDeadlineMs: number,
@@ -850,7 +849,7 @@ export class AgentLoop implements AgentFactory {
     const agent = new LoopAgent(
       this.services,
       session,
-      options as EffectAdmittingAgentOptions,
+      options,
       this.maxSteps,
       this.composition,
       this.turnDeadlineMs,

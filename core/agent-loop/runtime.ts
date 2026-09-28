@@ -23,13 +23,6 @@ export interface LoopServices {
   readonly hooks: LoopHookListV1;
 }
 
-export type EffectAdmittingAgentOptions = AgentOptions & {
-  admitEffect(effect: {
-    kind: "model" | "tool";
-    effectId: string;
-  }): Promise<boolean>;
-};
-
 export interface ModelResponse {
   request: NormalizedModelRequest;
   text: string;
@@ -66,7 +59,7 @@ export interface LoopRuntime {
   readonly agent: Agent;
   readonly services: LoopServices;
   readonly session: Session;
-  readonly options: EffectAdmittingAgentOptions;
+  readonly options: AgentOptions;
   readonly composition: CompositionPinV1;
   readonly turnType: TurnTypeV1;
   readonly subagentRole: string | undefined;

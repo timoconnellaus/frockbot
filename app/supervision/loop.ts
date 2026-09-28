@@ -2,6 +2,7 @@ import {
   appendRuntimeNoteV1,
   runtimeNoteLabelV1,
   BATCH_TOOL_NAME,
+  canonicalJson,
   decodeBatchCallsV1,
   defaultTurnDirectiveV1,
   emptyFailureStateV1,
@@ -10,6 +11,7 @@ import {
   SUPERVISION_NOT_AUTHORIZED_PREFIX_V1,
   SUPERVISION_OFF_TASK_PREFIX_V1,
   SUPERVISION_WITHHELD_SEND_PREFIX_V1,
+  sha256,
   type CallDecisionV1,
   type CallReviewEvidenceV1,
   type ConversationEvidenceV1,
@@ -399,16 +401,32 @@ function sendDecisionOf(
   return event?.type === "supervision/send" ? event.decision : undefined;
 }
 
+/** What a `supervision/call` verdict is bound to: the exact reviewed call. */
+function reviewedCallDigestV1(call: {
+  tool: string;
+  arguments: Record<string, unknown>;
+}): Promise<string> {
+  return sha256(canonicalJson({ tool: call.tool, arguments: call.arguments }));
+}
+
+/**
+ * The verdict recorded for this occurrence, only when it was given for this
+ * exact call. An id alone is not enough: a synthetic id reused for a
+ * different request must be reviewed afresh, never handed an earlier allow.
+ */
 function callDecisionOf(
   events: readonly SessionEvent[],
   occurrenceId: string,
+  callDigest: string,
 ): CallDecisionV1 | undefined {
   const event = events.findLast(
     (candidate) =>
       candidate.type === "supervision/call" &&
       candidate.occurrenceId === occurrenceId,
   );
-  return event?.type === "supervision/call" ? event.decision : undefined;
+  return event?.type === "supervision/call" && event.callDigest === callDigest
+    ? event.decision
+    : undefined;
 }
 
 /** The Turn's own requests and what the Bot has said in it, in order. */
@@ -866,16 +884,17 @@ export function createSupervisionRuntimeFeatureV1(
             };
           }
           if (context.effect === "mutate") {
-            let verdict = callDecisionOf(events, context.effectId);
+            const outer = context.toolCall ?? call;
+            const reviewed = {
+              tool: resolveDynamicToolNameV1(outer.name, outer.input),
+              arguments: isRecord(call.input) ? call.input : {},
+            };
+            const callDigest = await reviewedCallDigestV1(reviewed);
+            let verdict = callDecisionOf(events, context.effectId, callDigest);
             if (!verdict) {
               const started = Date.now();
-              const outer = context.toolCall ?? call;
-              const tool = resolveDynamicToolNameV1(outer.name, outer.input);
               verdict = await host.supervisor.reviewCall(
-                callReviewEvidenceOfV1(events, at.turn, host.origin, {
-                  tool,
-                  arguments: isRecord(call.input) ? call.input : {},
-                }),
+                callReviewEvidenceOfV1(events, at.turn, host.origin, reviewed),
                 context.signal,
               );
               session.append({
@@ -883,7 +902,8 @@ export function createSupervisionRuntimeFeatureV1(
                 turn: at.turn,
                 step: at.step,
                 occurrenceId: context.effectId,
-                tool,
+                tool: reviewed.tool,
+                callDigest,
                 decision: verdict,
                 latencyMs: elapsed(started),
               });

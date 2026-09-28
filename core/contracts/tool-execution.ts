@@ -138,9 +138,17 @@ export interface ToolDefinition extends ToolSchema {
   /**
    * Whether re-running this tool with the same input is free of consequence.
    * A tool that is not read-only is still re-issued after an interruption —
-   * under the same `effectId` — and is expected to honour that key.
+   * under the same `effectId` — and is expected to honour that key, unless it
+   * declares `unkeyed`.
    */
   idempotent?: boolean;
+  /**
+   * The effect reaches a callee that honours no idempotency key: a connected
+   * app, an MCP server, a shell. Such a call is sent at most once: one that
+   * was dispatched before an interruption is settled on resume as uncertain,
+   * and never sent again. Ignored on an `idempotent` tool.
+   */
+  unkeyed?: boolean;
   /**
    * Whether this tool's effect occupies a position in the conversation: a
    * message bubble, a hand-off, an answer. Two such effects are not
@@ -193,6 +201,12 @@ export interface ToolExecution {
    * effects may not race each other.
    */
   orderedEffect(call: ToolCall): boolean;
+  /**
+   * Whether this prepared call may be sent at most once, because the
+   * definition it reaches is `unkeyed`. Read after `prepare`, before the
+   * call is admitted, so the admission records it.
+   */
+  sendsOnce(preparation: Extract<ToolPreparation, { kind: "ready" }>): boolean;
   prepare(
     call: ToolCall,
     context: ToolExecutionContext,

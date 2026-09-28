@@ -123,6 +123,8 @@ export interface FoundationRuntimeOptions {
   admitEffect: AgentOptions["admitEffect"];
   /** How many further effects the run's record can admit; absent ⇒ unbounded. */
   remainingEffectAdmissions?: AgentOptions["remainingEffectAdmissions"];
+  /** Whether an unkeyed tool effect was already sent; absent ⇒ never known. */
+  sentOnce?: AgentOptions["sentOnce"];
   /** Whether a person's message is waiting; the Turn yields at its next step. */
   userMessageWaiting?: AgentOptions["userMessageWaiting"];
   /** Shown each dispatch's tool calls as they are written; never journaled. */
@@ -231,6 +233,7 @@ export async function createFoundationRuntime(
     ...(options.remainingEffectAdmissions
       ? { remainingEffectAdmissions: options.remainingEffectAdmissions }
       : {}),
+    ...(options.sentOnce ? { sentOnce: options.sentOnce } : {}),
     ...(options.userMessageWaiting
       ? { userMessageWaiting: options.userMessageWaiting }
       : {}),
