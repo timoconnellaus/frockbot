@@ -643,6 +643,7 @@ class BotSettingsView extends StatefulWidget {
 
   /// The Spending page, narrowed to this Bot.
   final VoidCallback? onOpenSpending;
+
   /// Opens the Computer's own settings, where the deployment has one: a
   /// checkpoint, Reset, and Update. The Computer is the User's, shared by
   /// every Bot, so the page is the same whichever Bot it is opened from.

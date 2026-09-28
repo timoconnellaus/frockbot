@@ -88,11 +88,13 @@ num? spendAllowance(Map billing) {
   if (billing['metered'] != true) return null;
   if (billing['subscribed'] != true && billing['trial'] is! Map) return null;
   final id = (billing['subscription'] as Map?)?['planId'];
-  final plan =
+  final plans =
       ((billing['plan'] as Map?)?['subscriptions'] as List? ?? const [])
-          .whereType<Map>()
-          .where((plan) => plan['id'] == id)
-          .firstOrNull;
+          .whereType<Map>();
+  // A subscription recorded before plans had ids is on the first.
+  final plan = id == null
+      ? plans.firstOrNull
+      : plans.where((plan) => plan['id'] == id).firstOrNull;
   final included = plan?['includedMicros'] as num?;
   return included == null || included <= 0 ? null : included;
 }

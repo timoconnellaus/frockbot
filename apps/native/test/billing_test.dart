@@ -596,6 +596,18 @@ void main() {
     },
   );
 
+  testWidgets('a subscription recorded before plans had ids reads as the '
+      'first plan', (tester) async {
+    final account = subscribed({'includedMicros': 10000000});
+    (account['subscription']! as Map).remove('planId');
+    final api = _api(account);
+    await _show(tester, api);
+    expect(find.text('50% left'), findsOneWidget);
+    expect(find.text('of this month’s Standard plan'), findsOneWidget);
+    expect(spendAllowance(account), 20000000);
+    api.close();
+  });
+
   testWidgets('Plus is not for sale where the Package offers no way to it', (
     tester,
   ) async {

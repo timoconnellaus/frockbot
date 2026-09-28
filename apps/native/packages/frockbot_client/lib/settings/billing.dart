@@ -49,10 +49,16 @@ List<_Plan> _plans(Map data) => [
     ),
 ];
 
-/// The plan the account's subscription is on, trialling or paid.
+/// The plan the account's subscription is on, trialling or paid. A
+/// subscription recorded before plans had ids is on the first, until its next
+/// provider event names one.
 _Plan? _ownPlan(Map data, List<_Plan> plans) {
-  final id = (data['subscription'] as Map?)?['planId'];
-  return plans.where((plan) => plan.id == id).firstOrNull;
+  final subscription = data['subscription'] as Map?;
+  if (subscription == null) return null;
+  final id = subscription['planId'];
+  return id == null
+      ? plans.firstOrNull
+      : plans.where((plan) => plan.id == id).firstOrNull;
 }
 
 /// What the payments Package offers the account for [purpose], and for
