@@ -11,12 +11,37 @@ const frockbotBrand = ClientBrand(
   defaultCharacterId: 'pixel',
   signInProvider: 'Google',
   nativeScheme: 'frockbot',
-  accent: ClientAccent(
-    ink: Color(0xffd92d71),
-    paper: Color(0xffd3266d),
-    soft: Color(0xfffc85ae),
-    deep: Color(0xff9a124c),
+  looks: ClientLooks(
+    ink: ThemeTokens(
+      surfaces: ThemeSurfaces(
+        window: Color(0xff15151e),
+        surface: Color(0xff181824),
+        raised: Color(0xff1f202e),
+        text: Color(0xfff1f1f6),
+        muted: Color(0xffa0a2b6),
+        line: Color(0xff2c2d3d),
+        accent: Color(0xffd92d71),
+        onAccent: Color(0xffffffff),
+      ),
+      type: ThemeTypeface.inter,
+      botBubble: BotBubble.raised,
+      meBubble: MeBubble.tint,
+    ),
+    paper: ThemeTokens(
+      surfaces: _paper,
+      type: ThemeTypeface.inter,
+      botBubble: BotBubble.raised,
+      meBubble: MeBubble.tint,
+    ),
+    studio: ThemeTokens(
+      surfaces: _paper,
+      type: ThemeTypeface.inter,
+      botBubble: BotBubble.plain,
+      meBubble: MeBubble.tint,
+    ),
   ),
+  accentSoft: Color(0xfffc85ae),
+  accentDeep: Color(0xff9a124c),
   releaseChannel: ClientReleaseChannel.shorebird,
   characters: [
     CharacterDefinition(
@@ -218,4 +243,15 @@ const frockbotBrand = ClientBrand(
       voice: 'Leda',
     ),
   ],
+);
+
+const _paper = ThemeSurfaces(
+  window: Color(0xfff5f6f9),
+  surface: Color(0xffffffff),
+  raised: Color(0xffeceef3),
+  text: Color(0xff15151e),
+  muted: Color(0xff5c5f70),
+  line: Color(0xffdfe1e8),
+  accent: Color(0xffd3266d),
+  onAccent: Color(0xffffffff),
 );

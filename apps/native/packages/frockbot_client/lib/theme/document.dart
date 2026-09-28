@@ -139,63 +139,14 @@ class ThemeDocument {
   );
 
   static ThemeDocument get ink =>
-      ThemeDocument(look: NamedLook.ink, tokens: inkTokens);
+      ThemeDocument(look: NamedLook.ink, tokens: clientBrand.looks.ink);
 
   static ThemeDocument get paper =>
-      ThemeDocument(look: NamedLook.paper, tokens: paperTokens);
+      ThemeDocument(look: NamedLook.paper, tokens: clientBrand.looks.paper);
 
   static ThemeDocument get studio =>
-      ThemeDocument(look: NamedLook.studio, tokens: studioTokens);
+      ThemeDocument(look: NamedLook.studio, tokens: clientBrand.looks.studio);
 }
-
-/// The built-in looks, in the brand's accent.
-ThemeTokens get inkTokens => ThemeTokens(
-  surfaces: ThemeSurfaces(
-    window: Color(0xff15151e),
-    surface: Color(0xff181824),
-    raised: Color(0xff1f202e),
-    text: Color(0xfff1f1f6),
-    muted: Color(0xffa0a2b6),
-    line: Color(0xff2c2d3d),
-    accent: clientBrand.accent.ink,
-    onAccent: Color(0xffffffff),
-  ),
-  type: ThemeTypeface.inter,
-  botBubble: BotBubble.raised,
-  meBubble: MeBubble.tint,
-);
-
-ThemeTokens get paperTokens => ThemeTokens(
-  surfaces: ThemeSurfaces(
-    window: Color(0xfff5f6f9),
-    surface: Color(0xffffffff),
-    raised: Color(0xffeceef3),
-    text: Color(0xff15151e),
-    muted: Color(0xff5c5f70),
-    line: Color(0xffdfe1e8),
-    accent: clientBrand.accent.paper,
-    onAccent: Color(0xffffffff),
-  ),
-  type: ThemeTypeface.inter,
-  botBubble: BotBubble.raised,
-  meBubble: MeBubble.tint,
-);
-
-ThemeTokens get studioTokens => ThemeTokens(
-  surfaces: ThemeSurfaces(
-    window: Color(0xfff5f6f9),
-    surface: Color(0xffffffff),
-    raised: Color(0xffeceef3),
-    text: Color(0xff15151e),
-    muted: Color(0xff5c5f70),
-    line: Color(0xffdfe1e8),
-    accent: clientBrand.accent.paper,
-    onAccent: Color(0xffffffff),
-  ),
-  type: ThemeTypeface.inter,
-  botBubble: BotBubble.plain,
-  meBubble: MeBubble.tint,
-);
 
 AccountLook parseAccountLook(String? value) => switch (value) {
   'paper' => AccountLook.paper,

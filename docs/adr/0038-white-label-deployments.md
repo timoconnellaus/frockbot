@@ -236,8 +236,12 @@ deployment unchanged in behaviour.
 
    **Built**, with the gaps a first white-label found closed after it: a
    `ClientBrand` also names its `nativeScheme` (the server brand's, which
-   the application's platform projects register), its accent, and the
+   the application's platform projects register), its looks, and the
    sign-in provider its sign-in page names, or none for neutral wording. A
+   `ClientBrand` names its looks: the full tokens of ink, paper and studio,
+   the shape of the server brand's `looks`, from which the app's chrome and
+   a Studio Bot paint, each held to the contrast floor a theme document
+   meets; only the soft and deep tints of its accent sit beside them. A
    character's Rive file is optional; a still-only character never loads
    one. The update-required message is the server brand's words, so the wire
    schema types it as a string rather than FrockBot's sentence.
