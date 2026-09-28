@@ -1250,7 +1250,10 @@ export function projectClientRunV1(
           stopRequestedAt: truncate(run.stopRequestedAt, MAX_TIMESTAMP_LENGTH),
         }
       : {}),
-    ...(status === "running" && run.phase === "queued"
+    // A Turn parked for the person's message waits, as a queued one does,
+    // for their Turn to finish; it is not the one at work.
+    ...(status === "running" &&
+    (run.phase === "queued" || run.phase === "parked")
       ? { queued: true as const }
       : {}),
     ...(outcome ? { outcome } : {}),

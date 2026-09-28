@@ -61,3 +61,15 @@ export class BotTurnRecoveryRequiredError extends Error {
     this.name = "BotTurnRecoveryRequiredError";
   }
 }
+
+/**
+ * The Turn stopped at a step boundary to let a person's message run, and left
+ * itself open to resume there. Not a failure and not a settlement: the kernel
+ * parks the run and gives the slot away.
+ */
+export class BotTurnParkedError extends Error {
+  constructor(readonly events: SessionEvent[]) {
+    super("Bot turn parked for a person's message");
+    this.name = "BotTurnParkedError";
+  }
+}

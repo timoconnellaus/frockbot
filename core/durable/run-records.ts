@@ -31,11 +31,13 @@ export type StoredRunStatus = "running" | "completed" | "failed" | "cancelled";
  * The admission lane a Turn was accepted on.
  *
  * A `user` admission is a person speaking to the Bot: it queues ahead of
- * agent work, and a chat Turn on this lane ends at its next step boundary when
- * one is waiting. An `agent` admission queues FIFO behind it; a `background`
- * admission — a Routine firing, a subagent dispatch — is refused while
- * anything runs. The lane is durable because it decides which Turn yields,
- * and that has to survive eviction alongside the run.
+ * agent work, and whatever runs gives way to it at its next step boundary —
+ * a Turn in the Bot's conversation ends there, and one in a Session of its
+ * own parks and resumes after. An `agent` admission queues FIFO behind it; a
+ * `background` admission — a Routine firing, a subagent dispatch — is refused
+ * while anything runs or is parked. The lane is durable because it decides
+ * the queue a Turn waits in, and that has to survive eviction alongside the
+ * run.
  */
 export type RunLaneV1 = "user" | "agent" | "background";
 
@@ -288,7 +290,12 @@ export interface StoredRunAdmissionV1 {
   origin?: StoredRunOriginV1;
 }
 
-export type StoredRunPhase = "queued" | "admitted" | "executing";
+/**
+ * `parked` is a Turn that gave the active slot to a person's message at a step
+ * boundary. Its Turn is still open in its own Session's log, and it resumes
+ * there, through recovery, once the person's Turns are done.
+ */
+export type StoredRunPhase = "queued" | "admitted" | "executing" | "parked";
 
 export interface StoredRunV1<Snapshot = unknown> {
   runId: string;
@@ -492,6 +499,7 @@ const STORED_RUN_PHASES: readonly StoredRunPhase[] = [
   "queued",
   "admitted",
   "executing",
+  "parked",
 ];
 const STORED_RUN_REQUIRED_KEYS = [
   "runId",

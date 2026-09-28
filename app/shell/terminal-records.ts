@@ -164,17 +164,23 @@ const SHELL_TERMINAL_PRODUCERS_V1 = [
  *
  * One durable input, drained once by the next conversational Turn. The session
  * log already carries everything the Turn did; this is the part that is not in
- * the log — that the work was unfinished when the message arrived. Only a chat
- * Turn on the person's own lane yields, and it is the only chat Turn that
+ * the log — that the work was unfinished when the message arrived. A
+ * conversational Turn in the Bot's conversation yields to it — the person's
+ * own, an input or a hand-off — and a yield is the only way such a Turn
  * completes still owing its reply, which is how this producer tells a yield
- * from a Turn that finished just as the message came in.
+ * from a Turn that finished just as the message came in. A Turn a caller
+ * waits on — another Bot's question, the voice session's — finishes rather
+ * than yields, and a group Turn yields to its group, which asks it again
+ * itself.
  */
 async function yieldedTurnRecordsV1(
   input: ShellTerminalInputV1,
 ): Promise<Record<string, unknown>> {
   const admission = input.run.admission;
-  if ((admission?.turnType ?? "chat") !== "chat") return {};
-  if ((admission?.lane ?? "user") !== "user") return {};
+  const turnType = admission?.turnType ?? "chat";
+  if (turnType !== "chat" && turnType !== "agent") return {};
+  const origin = admission?.origin?.kind;
+  if (origin === "group" || origin === "bot" || origin === "voice") return {};
   if (!endedOwingReplyV1(input.run.events as readonly SessionEvent[])) {
     return {};
   }

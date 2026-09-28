@@ -525,6 +525,7 @@ abstract final class WorkLogIds {
   static const showEarlier = 'work-log-show-earlier';
   static const inspector = 'work-log-inspector';
   static String filter(String slug) => 'work-log-filter-$slug';
+  static String stop(String runId) => 'work-log-stop-$runId';
 }
 
 /// Activity: what the Bots did outside the conversation.

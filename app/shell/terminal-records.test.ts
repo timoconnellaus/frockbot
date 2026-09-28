@@ -205,12 +205,15 @@ describe("the settling transaction's records", () => {
 });
 
 describe("what a Turn that yielded leaves for the next one", () => {
-  /** A chat Turn's journal: it called a tool, and maybe then answered. */
-  function journal(answered: boolean): SessionEvent[] {
+  /** A Turn's journal: it called a tool, and maybe then answered. */
+  function journal(
+    answered: boolean,
+    turnType: "chat" | "agent" | "automation" = "chat",
+  ): SessionEvent[] {
     const session = new Session("user-1:primary");
     session.appendBatch([
       { type: "turn/start", turn: 1 },
-      { type: "turn/admission", turn: 1, turnType: "chat" } as SessionEvent,
+      { type: "turn/admission", turn: 1, turnType } as SessionEvent,
       {
         type: "tool/call",
         turn: 1,
@@ -255,7 +258,11 @@ describe("what a Turn that yielded leaves for the next one", () => {
 
   async function yieldedInputs(input: {
     events: SessionEvent[];
-    admission?: { turnType?: string; lane?: string };
+    admission?: {
+      turnType?: string;
+      lane?: string;
+      origin?: { kind: string };
+    };
   }): Promise<unknown[]> {
     const records = await shellTerminalRecordsV1({
       run: { ...run, ...input },
@@ -281,17 +288,45 @@ describe("what a Turn that yielded leaves for the next one", () => {
     expect(await yieldedInputs({ events: journal(true) })).toEqual([]);
   });
 
-  test("a Turn off the person's own lane never yielded", async () => {
+  test("a conversation Turn off the person's own lane yields the same way", async () => {
+    // An input or a hand-off: each gives way to the person in the
+    // conversation it shares with them.
     expect(
       await yieldedInputs({
         events: journal(false),
         admission: { turnType: "chat", lane: "agent" },
       }),
+    ).toHaveLength(1);
+    expect(
+      await yieldedInputs({
+        events: journal(false, "agent"),
+        admission: { turnType: "agent", origin: { kind: "handoff" } },
+      }),
+    ).toHaveLength(1);
+  });
+
+  test("a Turn a caller waits on never yielded", async () => {
+    for (const kind of ["bot", "voice"]) {
+      expect(
+        await yieldedInputs({
+          events: journal(false, "agent"),
+          admission: { turnType: "agent", origin: { kind } },
+        }),
+      ).toEqual([]);
+    }
+  });
+
+  test("a Routine parks rather than yields, and a group Turn yields to its group", async () => {
+    expect(
+      await yieldedInputs({
+        events: journal(false, "automation"),
+        admission: { turnType: "automation" },
+      }),
     ).toEqual([]);
     expect(
       await yieldedInputs({
-        events: journal(false),
-        admission: { turnType: "automation" },
+        events: journal(false, "agent"),
+        admission: { turnType: "agent", origin: { kind: "group" } },
       }),
     ).toEqual([]);
   });

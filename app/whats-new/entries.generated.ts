@@ -33,6 +33,7 @@ import entry_secret_fill from "./entries/secret-fill.ts";
 import entry_spending from "./entries/spending.ts";
 import entry_steering from "./entries/steering.ts";
 import entry_stop_command from "./entries/stop-command.ts";
+import entry_talk_over_routines from "./entries/talk-over-routines.ts";
 import entry_terminal_github from "./entries/terminal-github.ts";
 import entry_unread_keeps_up from "./entries/unread-keeps-up.ts";
 import entry_voice_answers_after_tools from "./entries/voice-answers-after-tools.ts";
@@ -80,6 +81,7 @@ export const WHATS_NEW_ENTRY_FILES_V1 = [
   entry_spending,
   entry_steering,
   entry_stop_command,
+  entry_talk_over_routines,
   entry_terminal_github,
   entry_unread_keeps_up,
   entry_voice_answers_after_tools,

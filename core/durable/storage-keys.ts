@@ -22,6 +22,13 @@ export const PENDING_AGENT_RUN_PREFIX = "pending-agent-run:";
 /** A Bot cannot accumulate an unbounded cross-Bot inbox. */
 export const MAX_PENDING_AGENT_RUNS_V1 = 32;
 /**
+ * The run that gave the active slot to a person's message at a step boundary
+ * and resumes there once the person's Turns are done, ahead of agent work.
+ * One at most: only it resumes before the agent queue, and a user-lane Turn
+ * yields rather than parks.
+ */
+export const PARKED_RUN_KEY = "parked-run";
+/**
  * Due repair of a running record that is no longer the active Turn.
  * The due time is padded so a prefix list is chronological.
  */
@@ -70,6 +77,7 @@ export function conversationUpdateKeyV1(cursor: number): string {
 export function isRunStateStorageKeyV1(key: string): boolean {
   return (
     key === ACTIVE_RUN_KEY ||
+    key === PARKED_RUN_KEY ||
     key.startsWith(PENDING_USER_RUN_PREFIX) ||
     key.startsWith(RUN_PREFIX) ||
     key.startsWith(RUN_INDEX_PREFIX)

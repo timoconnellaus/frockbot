@@ -258,6 +258,9 @@ export async function stopRun(
     sessionId: admitted.sessionId,
     runId: command.runId,
   });
+  // A Routine parked for the person's message has no Agent to signal, and
+  // would otherwise settle only when its turn to resume came round.
+  await state.authority.settleStoppedParkedRun(command.runId);
   // Hydrated, like every other read the transcript is drawn from. A run
   // record stores its journal by range, not inline, so reading the record on
   // its own gives a Turn with no events — and a Turn with no events has said
@@ -544,12 +547,16 @@ export async function executeTurn(
           remainingRunEffectAdmissions(state, input.command.runId),
         // A group Turn yields to a newer group message rather than to the
         // person's one-to-one chat, which waits for it like any other work.
-        userMessageWaiting: () =>
-          input.command.origin?.kind === "group"
-            ? groupMessageWaitingV1(input.command.origin, (key) =>
-                state.ctx.storage.get(key),
-              )
-            : state.authority.userMessageWaiting(input.command.runId),
+        userMessageWaiting: async () => {
+          const origin = input.command.origin;
+          if (origin?.kind !== "group") {
+            return state.authority.userMessageWaiting(input.command.runId);
+          }
+          const waiting = await groupMessageWaitingV1(origin, (key) =>
+            state.ctx.storage.get(key),
+          );
+          return waiting ? "yield" : undefined;
+        },
         ...(watchToolInput ? { watchToolInput } : {}),
         // A model provider Plugin this Bot's selection runs (ADR 0032): the
         // provider contribution registers here, and the credential lease it
