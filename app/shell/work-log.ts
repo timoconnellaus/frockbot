@@ -76,14 +76,23 @@ export async function readWorkLogV1(
   const page = candidates.slice(0, WORK_LOG_PAGE_TURNS_V1);
   const turns: WorkLogTurn[] = [];
   for (const candidate of page) {
-    const projected = await state.authority.readRunEventProjections(
-      candidate.runId,
-    );
-    if (!projected) continue;
-    const approvals = await readApprovals(state, projected.events);
-    turns.push(
-      projectWorkLogTurnV1(projected.run, projected.events, approvals),
-    );
+    // One record this build cannot read costs its own row, never the page:
+    // the log is where a person goes when something already looks wrong.
+    try {
+      const projected = await state.authority.readRunEventProjections(
+        candidate.runId,
+      );
+      if (!projected) continue;
+      const approvals = await readApprovals(state, projected.events);
+      turns.push(
+        decodeProtocol(
+          "WorkLogTurn",
+          projectWorkLogTurnV1(projected.run, projected.events, approvals),
+        ),
+      );
+    } catch {
+      continue;
+    }
   }
   return decodeProtocol("WorkLogPage", {
     schemaVersion: 1,

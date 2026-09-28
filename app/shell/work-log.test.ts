@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 import type { ApprovalRecordV1 } from "./approvals.ts";
+import type { ShellBotStateV1 } from "./backend-state.ts";
 import {
   decodeWorkLogQueryV1,
   projectWorkLogTurnV1,
+  readWorkLogV1,
   WORK_LOG_MAX_ENTRIES_V1,
+  WORK_LOG_PAGE_TURNS_V1,
 } from "./work-log.ts";
 
 const run = {
@@ -144,7 +147,7 @@ function booking() {
         type: "approval",
         approvalId: "ap-1",
         action: "Book Diggies, Thu 7 pm, 4 people",
-        risk: "external",
+        risk: "high",
       },
     }),
     event(3000, "computer/sync", {
@@ -170,7 +173,7 @@ const approval: ApprovalRecordV1 = {
   runId: "run-42",
   sessionId: "s",
   action: "Book Diggies, Thu 7 pm, 4 people",
-  risk: "external" as ApprovalRecordV1["risk"],
+  risk: "high",
   createdAt: at(2900),
   expiresAt: at(86_400_000),
   decision: "approved",
@@ -342,5 +345,51 @@ describe("decodeWorkLogQueryV1", () => {
       decodeWorkLogQueryV1({ schemaVersion: 1, before: "nope" }),
     ).toThrow();
     expect(() => decodeWorkLogQueryV1({ schemaVersion: 1, x: 1 })).toThrow();
+  });
+});
+
+describe("readWorkLogV1", () => {
+  test("reads a page, answers approvals from the record, and skips a run it cannot read", async () => {
+    const runIds = Array.from(
+      { length: WORK_LOG_PAGE_TURNS_V1 + 1 },
+      (_, index) => `run-${index}`,
+    );
+    const asked: unknown[] = [];
+    const state = {
+      authority: {
+        listRunIndex: async (query: unknown) => {
+          asked.push(query);
+          return runIds.map((runId) => ({
+            cursor: `run-index:2026-09-28T09:14:18.000Z:${runId}`,
+            runId,
+          }));
+        },
+        readRunEventProjections: async (runId: string) => {
+          if (runId === "run-1") throw new Error("incomplete event range");
+          return {
+            run: { ...run, runId },
+            events: booking(),
+            eventCount: booking().length,
+          };
+        },
+      },
+      ctx: {
+        storage: {
+          get: async (key: string) =>
+            key.endsWith("ap-1") ? approval : undefined,
+        },
+      },
+    } as unknown as ShellBotStateV1;
+    const page = await readWorkLogV1(state, { schemaVersion: 1 });
+    expect(asked).toEqual([{ limit: WORK_LOG_PAGE_TURNS_V1 + 1 }]);
+    expect(page.turns.map((turn) => turn.runId)).toEqual(
+      runIds.slice(0, WORK_LOG_PAGE_TURNS_V1).filter((id) => id !== "run-1"),
+    );
+    expect(page.nextCursor).toBe(
+      `run-index:2026-09-28T09:14:18.000Z:run-${WORK_LOG_PAGE_TURNS_V1 - 1}`,
+    );
+    expect(
+      page.turns[0]!.entries.find((entry) => entry.kind === "send")!.detail,
+    ).toBe("approved by you in 14.0 s");
   });
 });
