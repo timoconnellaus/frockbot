@@ -226,12 +226,16 @@ class NativeApi {
           // longer holds: its sentence says which, and what to do.
           415 || 422 => _refusalReason(bytes) ?? 'That file can’t be sent.',
           // A Group Chat's refusals are written for the person — "a Group
-          // Chat has 2 to 8 Bots" — and are the only useful thing to say.
-          409 when path.startsWith('/api/groups') =>
+          // Chat has 2 to 8 Bots" — and so are a payments Package's — "that
+          // plan is not available yet": the only useful thing to say.
+          409
+              when path.startsWith('/api/groups') ||
+                  path.startsWith('/api/billing/provider/') =>
             _refusalReason(bytes) ??
                 'That action could not be completed. Refresh and try again.',
           409 => 'That action could not be completed. Refresh and try again.',
-          _ => '${clientBrand.productName} couldn’t complete that request. Please try again.',
+          _ =>
+            '${clientBrand.productName} couldn’t complete that request. Please try again.',
         };
         // A sign-in route answering 401 is refusing that exchange, not this
         // client's session, and the sign-in door already reads its sentence.

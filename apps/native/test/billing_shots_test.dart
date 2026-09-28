@@ -13,14 +13,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_client/settings/billing.dart';
 import 'package:frockbot_client/theme/frock_theme.dart';
 
-import 'billing_test.dart' show billing;
+import 'billing_test.dart' show billing, subscribed;
 import 'settings_test.dart' show SettingsApi;
 import 'widget_test.dart' show MemoryStore;
 
 const _out = String.fromEnvironment('CHAT_SHOTS');
 final _boundary = GlobalKey();
 final _now = DateTime(2026, 9, 25, 12);
-final _renews = DateTime(2026, 10, 12, 9).millisecondsSinceEpoch;
+final _renews = DateTime.now().millisecondsSinceEpoch + 16 * 86400000;
 
 const _bots = [
   ('bot-bob', 'Bob', 9840000, 94),
@@ -29,7 +29,11 @@ const _bots = [
   ('bot-ledger', 'Ledger', 1210000, 19),
 ];
 
-Map<String, Object?> _spending(Uri uri, {bool quiet = false}) {
+Map<String, Object?> _spending(
+  Uri uri, {
+  bool quiet = false,
+  int runsOutIn = 40,
+}) {
   final scale = quiet ? 0.27 : 1.0;
   final days = [
     for (var i = 29; i >= 0; i--)
@@ -89,7 +93,7 @@ Map<String, Object?> _spending(Uri uri, {bool quiet = false}) {
     'credit': {
       'availableMicros': 31380000,
       'dailyMicros': 620000,
-      'runsOutAt': _renews + 40 * 86400000,
+      'runsOutAt': DateTime.now().millisecondsSinceEpoch + runsOutIn * 86400000,
       'renewsAt': _renews,
     },
     'topTurns': [
@@ -121,33 +125,54 @@ Map<String, Object?> _spending(Uri uri, {bool quiet = false}) {
   };
 }
 
-final _subscribed = billing({
-  'subscribed': true,
+const _rates = {
+  '@frock/auto': {
+    'inputUsdPerMillion': 0.6,
+    'cachedInputUsdPerMillion': 0.15,
+    'outputUsdPerMillion': 2.4,
+  },
+  '@frock/coding': {
+    'inputUsdPerMillion': 3,
+    'cachedInputUsdPerMillion': 0.3,
+    'outputUsdPerMillion': 15,
+  },
+  '@frock/structured': {
+    'inputUsdPerMillion': 0.1,
+    'cachedInputUsdPerMillion': 0.025,
+    'outputUsdPerMillion': 0.4,
+  },
+};
+
+Map<String, Object?> _on(
+  Map<String, Object?> overrides, {
+  String plan = 'standard',
+}) => subscribed({'modelRates': _rates, ...overrides}, plan: plan);
+
+final _healthy = _on({
+  'includedMicros': 12400000,
+  'purchasedMicros': 12400000,
+  'reservedMicros': 900000,
+});
+
+final _runningOut = _on({'includedMicros': 4100000});
+
+final _reserve = _on({'includedMicros': 0, 'purchasedMicros': 8400000});
+
+final _paused = _on({});
+
+final _trialEnds =
+    DateTime.now().millisecondsSinceEpoch + 5 * 86400000 - 3600000;
+
+final _trial = billing({
+  'complimentaryMicros': 1900000,
   'subscription': {
-    'status': 'active',
-    'periodEnd': _renews,
+    'status': 'trialing',
+    'planId': 'standard',
+    'periodEnd': _trialEnds,
+    'trialEnd': _trialEnds,
     'cancelAtPeriodEnd': false,
   },
-  'includedMicros': 6380000,
-  'purchasedMicros': 25000000,
-  'reservedMicros': 420000,
-  'modelRates': {
-    '@frock/auto': {
-      'inputUsdPerMillion': 0.6,
-      'cachedInputUsdPerMillion': 0.15,
-      'outputUsdPerMillion': 2.4,
-    },
-    '@frock/coding': {
-      'inputUsdPerMillion': 3,
-      'cachedInputUsdPerMillion': 0.3,
-      'outputUsdPerMillion': 15,
-    },
-    '@frock/structured': {
-      'inputUsdPerMillion': 0.1,
-      'cachedInputUsdPerMillion': 0.025,
-      'outputUsdPerMillion': 0.4,
-    },
-  },
+  'trial': {'endsAt': _trialEnds, 'creditMicros': 3000000},
 });
 
 final _outOfCredit = billing({
@@ -164,12 +189,16 @@ Future<void> _scene(
   required Size size,
   bool quiet = false,
   bool prices = false,
+  bool dollars = false,
+  int runsOutIn = 40,
 }) async {
   tester.view.physicalSize = size * 2;
   tester.view.devicePixelRatio = 2;
-  final api = SettingsApi(MemoryStore(), (path, _) async {
+  final store = MemoryStore();
+  if (dollars) store.values['spending.dollars'] = 'true';
+  final api = SettingsApi(store, (path, _) async {
     if (path.startsWith('/api/billing/spending')) {
-      return _spending(Uri.parse(path), quiet: quiet);
+      return _spending(Uri.parse(path), quiet: quiet, runsOutIn: runsOutIn);
     }
     return account;
   });
@@ -220,7 +249,11 @@ void main() {
     await tester.runAsync(() async {
       final inter = FontLoader(interFontFamily);
       for (final weight in [400, 500, 600, 700]) {
-        inter.addFont(rootBundle.load('packages/frockbot_client/assets/fonts/inter-latin-$weight.ttf'));
+        inter.addFont(
+          rootBundle.load(
+            'packages/frockbot_client/assets/fonts/inter-latin-$weight.ttf',
+          ),
+        );
       }
       await inter.load();
       await (FontLoader(
@@ -230,36 +263,59 @@ void main() {
     addTearDown(tester.view.reset);
     await _scene(
       tester,
-      'desktop-subscribed',
-      _subscribed,
-      size: const Size(1000, 2300),
+      'desktop-healthy',
+      _healthy,
+      size: const Size(1000, 2500),
     );
     await _scene(
       tester,
-      'phone-subscribed',
-      _subscribed,
-      size: const Size(390, 2700),
+      'phone-healthy',
+      _healthy,
+      size: const Size(390, 3300),
     );
     await _scene(
       tester,
-      'phone-out-of-credit',
+      'phone-healthy-dollars',
+      _healthy,
+      size: const Size(390, 3300),
+      dollars: true,
+    );
+    await _scene(
+      tester,
+      'phone-running-out',
+      _runningOut,
+      size: const Size(390, 1100),
+      runsOutIn: 6,
+    );
+    await _scene(
+      tester,
+      'desktop-running-out',
+      _runningOut,
+      size: const Size(1000, 1100),
+      runsOutIn: 6,
+    );
+    await _scene(tester, 'phone-reserve', _reserve, size: const Size(390, 900));
+    await _scene(tester, 'phone-paused', _paused, size: const Size(390, 900));
+    await _scene(tester, 'phone-trial', _trial, size: const Size(390, 1100));
+    await _scene(
+      tester,
+      'desktop-choose-plan',
       _outOfCredit,
-      size: const Size(390, 2600),
+      size: const Size(1000, 900),
       quiet: true,
     );
     await _scene(
       tester,
-      'desktop-prices',
-      _subscribed,
-      size: const Size(1000, 700),
-      prices: true,
+      'phone-choose-plan',
+      _outOfCredit,
+      size: const Size(390, 1200),
+      quiet: true,
     );
     await _scene(
       tester,
-      'phone-prices',
-      _subscribed,
-      size: const Size(390, 844),
-      prices: true,
+      'desktop-plus',
+      _on({'includedMicros': 41000000}, plan: 'plus'),
+      size: const Size(1000, 1100),
     );
   });
 }
