@@ -11,6 +11,7 @@ import {
   SUPERVISION_OFF_TASK_PREFIX_V1,
   SUPERVISION_WITHHELD_SEND_PREFIX_V1,
   type CallDecisionV1,
+  type CallReviewEvidenceV1,
   type ConversationEvidenceV1,
   type QuestionRouteV1,
   type LlmMessage,
@@ -21,6 +22,7 @@ import {
   type Session,
   type SessionEvent,
   type StepDecision,
+  type StepProposalEvidence,
   type ToolCall,
   type TurnDirective,
   type TurnInputOriginV1,
@@ -424,6 +426,78 @@ function conversationThisTurn(
 }
 
 /**
+ * What step review is shown about one response, from the journal as it
+ * stands when the response arrives. Exported so an eval built from a recorded
+ * Turn sees exactly what production did; the earlier conversation is passed
+ * in because it lives outside this Turn's journal.
+ */
+export function stepReviewEvidenceOfV1(
+  events: readonly SessionEvent[],
+  turn: number,
+  origin: TurnInputOriginV1,
+  toolCalls: readonly ToolCall[],
+  conversation: readonly ConversationEvidenceV1[],
+): StepProposalEvidence {
+  const flat = flattenCalls(toolCalls);
+  const text = flat
+    .flatMap((call) => {
+      const send = textSendV1(call.tool, call.input);
+      return send ? [send.text] : [];
+    })
+    .join("\n\n");
+  const calls: ProposedCallV1[] = flat
+    .filter((call) => !textSendV1(call.tool, call.input))
+    .map((call) => ({
+      callId: call.id,
+      tool: call.tool,
+      arguments: isRecord(call.input) ? call.input : {},
+      effect: "mutate" as const,
+      ...(speaks(call.tool) ? { speaks: true } : {}),
+    }));
+  return {
+    objective: inputText(events, turn),
+    origin,
+    startDirective: directiveOf(events, turn) ?? defaultTurnDirectiveV1(),
+    text,
+    calls,
+    conversation,
+    shown: shownThisTurn(events, turn),
+    policies: emptyPolicySnapshotV1(),
+    authorizations: [],
+    priorResults: priorResults(events, turn),
+    specialistAdvice: [],
+    failure: emptyFailureStateV1(),
+    continuationCandidates: [],
+    finalStep: false,
+  };
+}
+
+/**
+ * What call review is shown about one call, from the journal as it stands
+ * when the call is prepared. Exported so an eval built from a recorded Turn
+ * sees exactly what production did.
+ */
+export function callReviewEvidenceOfV1(
+  events: readonly SessionEvent[],
+  turn: number,
+  origin: TurnInputOriginV1,
+  call: CallReviewEvidenceV1["call"],
+): CallReviewEvidenceV1 {
+  return {
+    objective: inputText(events, turn),
+    origin,
+    call,
+    // This Turn only. An earlier Turn's user messages also carry text the
+    // person did not type — a Routine's hand-off, a card press, another Bot
+    // in a group — and nothing records which, so they must not stand as
+    // authorization here.
+    conversation: conversationThisTurn(events, turn),
+    priorResults: priorResults(events, turn),
+    policies: emptyPolicySnapshotV1(),
+  };
+}
+
+/**
  * Whether a step withheld a send that would have ended the Turn. A Turn that
  * owes a caller its answer is not ended by a send, withheld or not.
  */
@@ -743,41 +817,15 @@ export function createSupervisionRuntimeFeatureV1(
         const session = agent.session;
         const events = session.activeRunJournal;
         if (stepDecisionOf(events, response.turn, response.step)) return;
-        const flat = flattenCalls(response.toolCalls);
-        const text = flat
-          .flatMap((call) => {
-            const send = textSendV1(call.tool, call.input);
-            return send ? [send.text] : [];
-          })
-          .join("\n\n");
-        const calls: ProposedCallV1[] = flat
-          .filter((call) => !textSendV1(call.tool, call.input))
-          .map((call) => ({
-            callId: call.id,
-            tool: call.tool,
-            arguments: isRecord(call.input) ? call.input : {},
-            effect: "mutate" as const,
-            ...(speaks(call.tool) ? { speaks: true } : {}),
-          }));
         const started = Date.now();
         const decision = await host.supervisor.reviewStep(
-          {
-            objective: inputText(events, response.turn),
-            origin: host.origin,
-            startDirective:
-              directiveOf(events, response.turn) ?? defaultTurnDirectiveV1(),
-            text,
-            calls,
-            conversation: conversationBefore(session),
-            shown: shownThisTurn(events, response.turn),
-            policies: emptyPolicySnapshotV1(),
-            authorizations: [],
-            priorResults: priorResults(events, response.turn),
-            specialistAdvice: [],
-            failure: emptyFailureStateV1(),
-            continuationCandidates: [],
-            finalStep: false,
-          },
+          stepReviewEvidenceOfV1(
+            events,
+            response.turn,
+            host.origin,
+            response.toolCalls,
+            conversationBefore(session),
+          ),
           signal,
         );
         session.append({
@@ -824,21 +872,10 @@ export function createSupervisionRuntimeFeatureV1(
               const outer = context.toolCall ?? call;
               const tool = resolveDynamicToolNameV1(outer.name, outer.input);
               verdict = await host.supervisor.reviewCall(
-                {
-                  objective: inputText(events, at.turn),
-                  origin: host.origin,
-                  call: {
-                    tool,
-                    arguments: isRecord(call.input) ? call.input : {},
-                  },
-                  // This Turn only. An earlier Turn's user messages also carry
-                  // text the person did not type — a Routine's hand-off, a
-                  // card press, another Bot in a group — and nothing records
-                  // which, so they must not stand as authorization here.
-                  conversation: conversationThisTurn(events, at.turn),
-                  priorResults: priorResults(events, at.turn),
-                  policies: emptyPolicySnapshotV1(),
-                },
+                callReviewEvidenceOfV1(events, at.turn, host.origin, {
+                  tool,
+                  arguments: isRecord(call.input) ? call.input : {},
+                }),
                 context.signal,
               );
               session.append({
