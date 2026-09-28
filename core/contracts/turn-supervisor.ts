@@ -321,6 +321,12 @@ export interface SendReviewEvidenceV1 {
    * either, so a Turn is corrected once and never held in a loop.
    */
   checkClaim: boolean;
+  /**
+   * A background Turn's hand-off: only what it says was done is checked. It
+   * is never a rewrite of the work, and never unneeded — it is all the
+   * person will be told.
+   */
+  handoff?: boolean;
 }
 
 export interface SendDecisionV1 {
@@ -367,19 +373,16 @@ export interface CallDecisionV1 {
 }
 
 /**
- * Whether a withheld finishing send is still the Turn's last word. It is when
- * the person already has what it said; it is not when it was withheld so the
- * Turn says something else instead: the work as written, or the truth about
- * what was done.
+ * Whether a withheld finishing send is still the Turn's last word: only when
+ * it was withheld as redundant, because the person already has what it said.
+ * Withheld for any other reason — off the request, unsupported, a rewrite of
+ * the work — the person has nothing yet, so the Turn goes on and says what it
+ * should.
  */
 export function withheldSendEndsTurnV1(
   reason: SupervisionReasonCode | undefined,
 ): boolean {
-  return (
-    reason !== "paraphrased_work" &&
-    reason !== "unsupported_claim" &&
-    reason !== "unsupported_fact"
-  );
+  return reason === "redundant_text";
 }
 
 /** What code saw a long Turn doing, before Jev is asked about it. */

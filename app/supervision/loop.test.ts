@@ -76,6 +76,8 @@ async function run(
     initialText?: string;
     /** Handed the Turn's hooks, for a tool that reviews synthetic calls. */
     hooks?: (hooks: LoopHookListV1) => void;
+    /** A Routine's Turn, which speaks only by handing off. */
+    automation?: boolean;
   } = {},
 ): Promise<SessionEvent[]> {
   const root = createAgentRuntimeHarness({});
@@ -137,7 +139,11 @@ async function run(
       sessionId: "user:test",
       provider: provider.id,
       model: "test",
-      turnType: options.voice ? "agent" : "chat",
+      turnType: options.automation
+        ? "automation"
+        : options.voice
+          ? "agent"
+          : "chat",
       admitEffect: () => Promise.resolve(true),
     });
     handle.agent.send(options.initialText ?? "Email Dana the March invoice.");
@@ -427,6 +433,108 @@ test("a response off its task runs none of its calls but the Bot speaking", asyn
     content: expect.stringMatching(/^Not run: supervision judged/),
   });
   expect(sent(events)).toEqual(["Which Dana?"]);
+});
+
+test("a finish withheld off its task does not end the Turn: the person has nothing yet", async () => {
+  // Audit F4: "remember Becky" judged off-task refused the memory write and
+  // withheld its "Got it" finish, and the Turn ended with nothing said.
+  const seen: NormalizedModelRequest[] = [];
+  let step = 0;
+  const events = await run(
+    scripted(
+      [
+        [
+          {
+            id: "save",
+            name: "web_fetch",
+            input: { url: "https://a.example" },
+          },
+          {
+            id: "done",
+            name: "send_to_user",
+            input: text("Got it.", "finish"),
+          },
+        ],
+        [
+          {
+            id: "honest",
+            name: "send_to_user",
+            input: text("I couldn't save that.", "finish"),
+          },
+        ],
+      ],
+      seen,
+    ),
+    createFakeTurnSupervisorV1({
+      reviewStep: async (evidence) => {
+        step += 1;
+        return step === 1
+          ? {
+              ...allowAllStepDecisionV1(evidence.calls),
+              responseAlignment: "wrong-objective",
+              text: "withhold",
+              textReason: "off_task",
+            }
+          : allowAllStepDecisionV1(evidence.calls);
+      },
+    }),
+  );
+  expect(seen).toHaveLength(2);
+  expect(sent(events)).toEqual(["I couldn't save that."]);
+  expect(
+    events.find(
+      (event) =>
+        event.type === "tool/result" && event.occurrenceId.endsWith(":1:1"),
+    ),
+  ).toMatchObject({
+    content: expect.not.stringContaining("The Turn is complete"),
+  });
+  expect(events.at(-1)).toMatchObject({
+    type: "turn/end",
+    outcome: "completed",
+  });
+});
+
+test("a hand-off claiming undone work is withheld once, and the truth goes out; off its task it still speaks", async () => {
+  const reviewed: SendReviewEvidenceV1[] = [];
+  const events = await run(
+    scripted([
+      [
+        {
+          id: "claim",
+          name: "wake_parent",
+          input: { message: "Archived 40 newsletters." },
+        },
+      ],
+      [
+        {
+          id: "truth",
+          name: "wake_parent",
+          input: { message: "I could not archive anything; it was refused." },
+        },
+      ],
+    ]),
+    createFakeTurnSupervisorV1({
+      reviewStep: async (evidence) => ({
+        ...allowAllStepDecisionV1(evidence.calls),
+        responseAlignment: "wrong-objective",
+      }),
+      reviewSend: async (evidence) => {
+        reviewed.push(evidence);
+        return evidence.message.startsWith("Archived")
+          ? { send: "withhold", reason: "unsupported_claim", judgments: [] }
+          : { send: "release", judgments: [] };
+      },
+    }),
+    { automation: true },
+  );
+  expect(
+    events.flatMap((event) =>
+      event.type === "wake/parent" ? [event.message] : [],
+    ),
+  ).toEqual(["I could not archive anything; it was refused."]);
+  expect(reviewed.map((evidence) => evidence.handoff)).toEqual([true]);
+  expect(events.at(-1)).toMatchObject({ type: "turn/end" });
 });
 
 test("the step decision is recorded before any of its calls runs", async () => {

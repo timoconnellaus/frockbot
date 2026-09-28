@@ -26,6 +26,7 @@ import {
   type SessionEvent,
   type StepDecision,
   type StepProposalEvidence,
+  type SupervisionReasonCode,
   type ToolCall,
   type TurnDirective,
   type TurnInputOriginV1,
@@ -110,6 +111,8 @@ export function turnInputOriginV1(
 
 const SEND_TO_USER = "send_to_user";
 const REPLY_TO_REQUEST = "reply_to_request";
+/** A background Turn's hand-off: the only thing it ever says. */
+const WAKE_PARENT = "wake_parent";
 
 /** The earlier conversation Jev is shown, most recent last. */
 export const SUPERVISION_CONVERSATION_MAX_V1 = 8;
@@ -198,7 +201,17 @@ export function textSendV1(
 }
 
 function speaks(tool: string): boolean {
-  return tool === SEND_TO_USER || tool === REPLY_TO_REQUEST;
+  return (
+    tool === SEND_TO_USER || tool === REPLY_TO_REQUEST || tool === WAKE_PARENT
+  );
+}
+
+/** A hand-off's message, when the call is one. */
+function handoffMessageV1(tool: string, input: unknown): string | undefined {
+  if (tool !== WAKE_PARENT || !isRecord(input)) return undefined;
+  return typeof input.message === "string" && input.message.trim()
+    ? input.message
+    : undefined;
 }
 
 /** The step's calls, a batch opened into the calls it carries. */
@@ -703,7 +716,7 @@ function withheldResult(
       ? "because the person can already see what it says."
       : "because it is not about what the person asked for.";
   const next =
-    finish && !addressed
+    finish && !addressed && reason === "redundant_text"
       ? " The Turn is complete; do not send it again."
       : reason === "redundant_text"
         ? addressed
@@ -711,6 +724,14 @@ function withheldResult(
           : " Carry on without repeating it."
         : " Go back to what they asked.";
   return `${SUPERVISION_WITHHELD_SEND_PREFIX_V1} ${why}${next}`;
+}
+
+function withheldHandoffResult(
+  reason: SupervisionReasonCode | undefined,
+): string {
+  return reason === "unsupported_fact"
+    ? `${SUPERVISION_WITHHELD_SEND_PREFIX_V1} because it says a page said something that the pages this Turn read do not say. Hand off again saying only what they say.`
+    : `${SUPERVISION_WITHHELD_SEND_PREFIX_V1} because it says something was done that this Turn's results do not show done. Hand off again saying plainly what was and was not done.`;
 }
 
 function refusedCallResult(reason: string, origin: TurnInputOriginV1): string {
@@ -963,6 +984,62 @@ export function createSupervisionRuntimeFeatureV1(
           throw new Error(
             `supervision: step ${at.turn}:${at.step} ran a call it never reviewed`,
           );
+        }
+        // A hand-off is what the person will be told the work did, so what it
+        // says was done is checked against the Turn's results, once a Turn,
+        // like a send. Whether it is needed is not asked: it is the only word
+        // a background Turn has.
+        const handoff = handoffMessageV1(call.name, call.input);
+        if (
+          handoff !== undefined &&
+          (sendDecisionOf(events, context.effectId) !== undefined ||
+            !withheldForV1(
+              events,
+              at.turn,
+              "unsupported_claim",
+              "unsupported_fact",
+            ))
+        ) {
+          let verdict = sendDecisionOf(events, context.effectId);
+          if (!verdict) {
+            const started = Date.now();
+            verdict = await host.supervisor.reviewSend(
+              {
+                objective: inputText(events, at.turn, host.origin),
+                origin: host.origin,
+                conversation: [],
+                shown: [],
+                priorResults: priorResults(events, at.turn),
+                message: handoff,
+                finish: true,
+                work: [],
+                checkClaim: true,
+                handoff: true,
+              },
+              context.signal,
+            );
+            session.append({
+              type: "supervision/send",
+              turn: at.turn,
+              step: at.step,
+              occurrenceId: context.effectId,
+              finish: true,
+              decision: verdict,
+              latencyMs: elapsed(started),
+            });
+            await session.flush();
+          }
+          if (verdict.send === "withhold") {
+            return {
+              kind: "denied",
+              call,
+              result: {
+                content: withheldHandoffResult(verdict.reason),
+                isError: false,
+              },
+            };
+          }
+          return next();
         }
         const send = textSendV1(call.name, call.input);
         if (!send) {
