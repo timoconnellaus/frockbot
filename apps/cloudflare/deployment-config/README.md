@@ -84,17 +84,17 @@ no admin operation left to administer.
 
 The tracked file, with identity applied:
 
-| Tracked                                   | Generated                                                                                                 |
-| ----------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| no `account_id`                           | the profile's account                                                                                     |
-| no `routes`                               | the Worker's hostnames as custom domains, or `workers.dev`                                                |
-| bindings with no bucket, index or db name | the profile's resource names, derived from `prefix`                                                       |
-| `services` with no target                 | the profile's own Worker names: the Computer host, the build service, and the app Worker the portal binds |
-| `vars` without identity                   | plus the identity vars below                                                                              |
-| `containers[].image` a Dockerfile path    | the published image, when the profile's `images.source` is `registry`                                     |
-| no `send_email`                           | the app Worker's `SEND_EMAIL` sender, when the profile names an `email` domain (below)                    |
-| no `alias`                                | `#auth-package` for an `access` profile or a chooser path, `#brand` for a profile that names a `brand`    |
-| `env.development`, `env.e2e`              | dropped — a named environment in a deployed config is a second Worker                                     |
+| Tracked                                   | Generated                                                                                                                                        |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| no `account_id`                           | the profile's account                                                                                                                            |
+| no `routes`                               | the Worker's hostnames as custom domains, or `workers.dev`                                                                                       |
+| bindings with no bucket, index or db name | the profile's resource names, derived from `prefix`                                                                                              |
+| `services` with no target                 | the profile's own Worker names: the Computer host, the build service, and the app Worker the portal binds                                        |
+| `vars` without identity                   | plus the identity vars below                                                                                                                     |
+| `containers[].image` a Dockerfile path    | the published image, when the profile's `images.source` is `registry`                                                                            |
+| no `send_email`                           | the app Worker's `SEND_EMAIL` sender, when the profile names an `email` domain (below)                                                           |
+| no `alias`                                | `#auth-package` for an `access` profile or a chooser path, `#payments` for `none` or a chooser path, `#brand` for a profile that names a `brand` |
+| `env.development`, `env.e2e`              | dropped — a named environment in a deployed config is a second Worker                                                                            |
 
 `assets.directory` becomes the profile's `webClient`, relative to the profile,
 when it names one: a white-label's own staged client (below).
@@ -350,8 +350,8 @@ Every workspace the Worker's graph reaches is published by `release.yml`'s
 — listed once in `scripts/npm-publish.ts`, which rewrites every `workspace:*`
 between them to that exact version. Pin the same exact version of each.
 
-Its repository holds a profile, a brand module, its own auth Package and its own
-thin Flutter application:
+Its repository holds a profile, a brand module, its own auth Package, its own
+payments Package if it takes payment, and its own thin Flutter application:
 
 ```json
 {
@@ -363,6 +363,12 @@ thin Flutter application:
   "authEnvironment": {
     "secrets": [{ "name": "SIGN_IN_SECRET", "why": "Signs every session." }],
     "vars": { "SIGN_IN_APP": "…" }
+  },
+  "payments": "../payments/chooser.ts",
+  "paymentsEnvironment": {
+    "secrets": [
+      { "name": "PAYMENTS_SECRET", "why": "Verifies payment events." }
+    ]
   },
   "brand": "../brand/brand.ts",
   "webClient": "../client/web",
@@ -379,10 +385,18 @@ thin Flutter application:
   not name exactly the settings the chooser's `required` lists — each as a
   secret the deploy carries or a var the config carries. It binds `AUTH_DB` only
   when the profile names a `d1DatabaseId`.
+- **`payments`** names `stripe` (the tracked default, and what an absent field
+  means), `none` for a deployment that does not bill, or a chooser module the
+  white-label wrote: it exports `PAYMENTS_PACKAGE_V1:
+PaymentsPackageBuildV1<PaymentsPackageEnvironmentV1>` and the
+  `PaymentsPackageEnvironmentV1` type, from nothing but
+  `@frockbot/core/contracts`, as `src/payments.ts` does. The generator aliases
+  `#payments` to it and holds it to `paymentsEnvironment` exactly as it holds
+  an auth chooser to `authEnvironment`. See [docs/billing.md](../../../docs/billing.md#the-payments-package).
 - **Secrets.** The production-secrets manifest (`src/production-secrets.ts`)
   cannot import a chooser it was not built with, so the profile's
-  `authEnvironment.secrets` are what it requires in place of a built-in
-  Package's:
+  `authEnvironment.secrets` and `paymentsEnvironment.secrets` are what it
+  requires in place of a built-in Package's:
 
   ```
   frockbot-deployment-config secrets wallet-pal check
@@ -408,11 +422,13 @@ thin Flutter application:
   this repository that names them is refused with that reason.
 
 `scripts/white-label-fixture/` is such a repository in miniature, with a STUB
-auth Package, and `bun run build:white-label` (`scripts/white-label-fixture.ts`)
-is the gate that proves the packages are consumable: it packs every published
-workspace exactly as the release does, installs the tarballs with npm into a
-scratch consumer, typechecks its chooser and brand with stock TypeScript, runs
-the bin, the secrets check and the artifact build, and runs `wrangler deploy
---dry-run`, checking that the bundle carries its chooser and brand and neither
-better-auth nor FrockBot's brand. It runs with the build category and in
+auth Package and a STUB payments Package, and `bun run build:white-label`
+(`scripts/white-label-fixture.ts`) is the gate that proves the packages are
+consumable: it packs every published workspace exactly as the release does,
+installs the tarballs with npm into a scratch consumer, typechecks its choosers
+and brand with stock TypeScript, has its payments Package credit an account
+through the published ledger's port from a test webhook, runs the bin, the
+secrets check and the artifact build, and runs `wrangler deploy --dry-run`,
+checking that the bundle carries its choosers and brand and neither
+better-auth, Stripe nor FrockBot's brand. It runs with the build category and in
 `main.yml`'s `Validate` job.

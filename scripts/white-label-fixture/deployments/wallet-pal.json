@@ -13,6 +13,15 @@
     ],
     "vars": { "WALLET_PAL_SIGN_IN_APP": "wallet-pal-fixture" }
   },
+  "payments": "../payments/chooser.ts",
+  "paymentsEnvironment": {
+    "secrets": [
+      {
+        "name": "WALLET_PAL_PAYMENTS_SECRET",
+        "why": "Authenticates the test payment webhook."
+      }
+    ]
+  },
   "brand": "../brand/brand.ts",
   "webClient": "../web",
   "workers": { "app": {} }

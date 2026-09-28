@@ -5,7 +5,7 @@ export const DEPLOYMENT_PROFILE_SCHEMA_V1 = {
   $id: "https://frockbot.com/schemas/deployment-profile-v1.json",
   title: "FrockBot deployment profile",
   description:
-    "Who a deployment is: the Cloudflare account, the Worker names, the hostnames, the auth Package and the resources that carry identity. `frockbot-deployment-config` (`bun run deployment:config` in the FrockBot repository) reads one of these and writes the deployable wrangler configs from the tracked ones, which hold bindings and migrations and no identity at all.",
+    "Who a deployment is: the Cloudflare account, the Worker names, the hostnames, the auth and payments Packages and the resources that carry identity. `frockbot-deployment-config` (`bun run deployment:config` in the FrockBot repository) reads one of these and writes the deployable wrangler configs from the tracked ones, which hold bindings and migrations and no identity at all.",
   type: "object",
   additionalProperties: false,
   required: ["schemaVersion", "name", "accountId", "prefix", "authPackage"],
@@ -119,6 +119,54 @@ export const DEPLOYMENT_PROFILE_SCHEMA_V1 = {
     authEnvironment: {
       description:
         "What a white-label's own auth Package reads off `env`, which this repository cannot know: `secrets` are required by the production-secrets check and carried by the deploy's secrets file, and `vars` are written into the app Worker's `vars`. Together they must name exactly the settings the chooser's `AUTH_PACKAGE_V1.required` lists. Only for an auth Package named by path.",
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        secrets: {
+          type: "array",
+          uniqueItems: true,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["name", "why"],
+            properties: {
+              name: {
+                $ref: "#/$defs/envName",
+              },
+              why: {
+                type: "string",
+                minLength: 1,
+              },
+            },
+          },
+        },
+        vars: {
+          type: "object",
+          propertyNames: {
+            $ref: "#/$defs/envName",
+          },
+          additionalProperties: {
+            type: "string",
+          },
+        },
+      },
+    },
+    payments: {
+      description:
+        "Which payments Package this deployment builds: `stripe`, which the tracked source resolves; `none`, a deployment that does not bill; or a path, relative to this profile file, to a chooser module a white-label wrote — a module exporting `PAYMENTS_PACKAGE_V1: PaymentsPackageBuildV1` and the `PaymentsPackageEnvironmentV1` type, as `apps/cloudflare/src/payments.ts` does (ADR 0038 §1). Written as a wrangler `alias` for `#payments` unless it is `stripe`. Absent, `stripe`.",
+      anyOf: [
+        {
+          enum: ["stripe", "none"],
+        },
+        {
+          type: "string",
+          pattern: "^\\.{1,2}/\\S+\\.(ts|mts|js|mjs)$",
+        },
+      ],
+    },
+    paymentsEnvironment: {
+      description:
+        "What a white-label's own payments Package reads off `env`, which this repository cannot know: `secrets` are required by the production-secrets check and carried by the deploy's secrets file, and `vars` are written into the app Worker's `vars`. Together they must name exactly the settings the chooser's `PAYMENTS_PACKAGE_V1.required` lists. Only for a payments Package named by path.",
       type: "object",
       additionalProperties: false,
       properties: {
@@ -352,6 +400,29 @@ export const DEPLOYMENT_PROFILE_SCHEMA_V1 = {
           authEnvironment: true,
         },
         required: ["authEnvironment"],
+      },
+    },
+    {
+      if: {
+        properties: {
+          payments: {
+            not: {
+              enum: ["stripe", "none"],
+            },
+          },
+        },
+        required: ["payments"],
+      },
+      then: {
+        properties: {
+          paymentsEnvironment: true,
+        },
+        required: ["paymentsEnvironment"],
+      },
+      else: {
+        properties: {
+          paymentsEnvironment: false,
+        },
       },
     },
   ],

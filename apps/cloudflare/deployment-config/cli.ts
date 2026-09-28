@@ -22,11 +22,15 @@ import { writeFileSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import {
   AUTH_PACKAGE_CHOOSERS_V1,
+  PAYMENTS_CHOOSERS_V1,
   generateProfileConfigsV1,
   profileAuthPackageV1,
   profileBrandModuleV1,
+  profilePaymentsPackageV1,
+  profilePaymentsV1,
   validateProfileAuthPackageV1,
   validateProfileBrandV1,
+  validateProfilePaymentsPackageV1,
   writeGeneratedConfigsV1,
 } from "./generate.ts";
 import { loadProfileV1, PACKAGE_ROOT_V1 } from "./profile.ts";
@@ -80,6 +84,7 @@ async function generate(
   const profile = loadProfileV1(name, profileDirectory);
   await validateProfileBrandV1(profile, profileDirectory);
   await validateProfileAuthPackageV1(profile, profileDirectory);
+  await validateProfilePaymentsPackageV1(profile, profileDirectory);
   const d1DatabaseId = flags["--d1-database-id"];
   const applicationHash = flags["--application-hash"];
   const generated = generateProfileConfigsV1({
@@ -94,6 +99,7 @@ async function generate(
   const shown = (path: string) => relative(options.displayRoot, path);
   const external = await profileAuthPackageV1(profile, profileDirectory);
   const brand = profileBrandModuleV1(profile, profileDirectory);
+  const payments = await profilePaymentsPackageV1(profile, profileDirectory);
   console.log(`Deployment profile ${profile.name}`);
   console.log(`  account        ${profile.accountId}`);
   console.log(
@@ -108,6 +114,20 @@ async function generate(
             ),
           )})`
         : `${external.id} (${shown(resolve(profileDirectory, profile.authPackage))})`
+    }`,
+  );
+  console.log(
+    `  payments       ${
+      payments === undefined
+        ? `${profilePaymentsV1(profile)} (${shown(
+            resolve(
+              PACKAGE_ROOT_V1,
+              PAYMENTS_CHOOSERS_V1[
+                profilePaymentsV1(profile) as keyof typeof PAYMENTS_CHOOSERS_V1
+              ],
+            ),
+          )})`
+        : `${payments.id} (${shown(resolve(profileDirectory, profilePaymentsV1(profile)))})`
     }`,
   );
   console.log(
@@ -158,18 +178,34 @@ async function secrets(
   if (!name || rest.length > 0) throw new UsageError(usage);
   const profile = loadProfileV1(name, options.profileDirectory);
   await validateProfileAuthPackageV1(profile, options.profileDirectory);
+  await validateProfilePaymentsPackageV1(profile, options.profileDirectory);
   const auth = await profileAuthPackageV1(profile, options.profileDirectory);
-  // Only here: the manifest reaches the Worker's own chooser through
-  // `#auth-package`, which writing a config has no reason to load.
+  const payments = await profilePaymentsPackageV1(
+    profile,
+    options.profileDirectory,
+  );
+  // Only here: the manifest reaches the Worker's own choosers through
+  // `#auth-package` and `#payments`, which writing a config has no reason to
+  // load. A built-in Package the profile chose is the manifest's to know by
+  // name; its own default is the tracked build's.
   const { deployedSecretNamesV1, productionSecretsReportV1 } =
     await import("../src/production-secrets.ts");
+  const paymentsBuild = payments ?? {
+    id: profilePaymentsV1(profile),
+    required: [],
+  };
   if (action === "check" && path === undefined) {
-    const report = productionSecretsReportV1(process.env, undefined, auth);
+    const report = productionSecretsReportV1(
+      process.env,
+      undefined,
+      auth,
+      paymentsBuild,
+    );
     for (const warning of report.warnings) console.log(`warning: ${warning}`);
     for (const failure of report.failures) console.error(failure);
     if (report.ok) {
       console.log(
-        `Production secrets check passed: ${deployedSecretNamesV1(auth).length} names carried by this deploy.`,
+        `Production secrets check passed: ${deployedSecretNamesV1(auth, paymentsBuild).length} names carried by this deploy.`,
       );
     }
     return report.ok ? 0 : 1;
@@ -178,7 +214,7 @@ async function secrets(
     // JSON, as `wrangler deploy --secrets-file` reads first; an unset optional
     // name is omitted rather than written empty.
     const values: Record<string, string> = {};
-    for (const secret of deployedSecretNamesV1(auth)) {
+    for (const secret of deployedSecretNamesV1(auth, paymentsBuild)) {
       const value = process.env[secret];
       if (value !== undefined && value !== "") values[secret] = value;
     }

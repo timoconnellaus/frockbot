@@ -4,21 +4,24 @@
  * every published workspace, deploys (ADR 0038 §5).
  *
  * `scripts/white-label-fixture/` is the consumer's own repository in
- * miniature — a profile, a brand module and a STUB auth Package, each named by
- * path, written against nothing but the published packages. This packs every
+ * miniature — a profile, a brand module, a STUB auth Package and a STUB
+ * payments Package, each named by path, written against nothing but the
+ * published packages. This packs every
  * workspace `scripts/npm-publish.ts` lists, rewrites each manifest exactly as
  * the release does, installs the tarballs into a scratch directory with npm,
  * and then does what a white-label does:
  *
- *   1. `tsc` checks its chooser and brand against the published contract;
- *   2. `frockbot-deployment-config wallet-pal` writes its wrangler config;
- *   3. `frockbot-deployment-config secrets wallet-pal check` demands the stub
- *      Package's own secret and none of the built-in Packages';
- *   4. `build-artifact.ts --brand` bundles the application artifact with its
+ *   1. `tsc` checks its choosers and brand against the published contract;
+ *   2. its payments Package credits an account through the published ledger's
+ *      port from its test webhook, once;
+ *   3. `frockbot-deployment-config wallet-pal` writes its wrangler config;
+ *   4. `frockbot-deployment-config secrets wallet-pal check` demands the stub
+ *      Packages' own secrets and none of the built-in Packages';
+ *   5. `build-artifact.ts --brand` bundles the application artifact with its
  *      brand;
- *   5. `wrangler deploy --dry-run` bundles the Worker, and the bundle's inputs
- *      are checked: its chooser and brand are in, better-auth and FrockBot's
- *      brand are not.
+ *   6. `wrangler deploy --dry-run` bundles the Worker, and the bundle's inputs
+ *      are checked: its choosers and brand are in; better-auth, Stripe and
+ *      FrockBot's brand are not.
  *
  * Nothing here reaches Cloudflare. It runs with the build category
  * (`bun run validate:build`) and in `main.yml`.
@@ -176,7 +179,10 @@ try {
   // 3. Its own code, against the published contract.
   const bin = join(consumer, "node_modules", ".bin");
   run([join(bin, "tsc"), "-p", "tsconfig.json"], consumer);
-  console.log("Its chooser and brand typecheck against @frockbot/core.");
+  console.log("Its choosers and brand typecheck against @frockbot/core.");
+
+  // Its payments Package, over the published ledger.
+  console.log(run(["bun", join("payments", "prove.ts")], consumer).trimEnd());
 
   // 4. Its wrangler config, from its own profile, by the published bin.
   const generated = run(
@@ -201,6 +207,14 @@ try {
     "the auth Package's secret leaked into the generated config",
   );
   check(!written.includes("d1_databases"), "an AUTH_DB nobody asked for");
+  check(
+    written.includes('"#payments"') && written.includes("payments/chooser.ts"),
+    "the generated config does not alias #payments to its chooser",
+  );
+  check(
+    !written.includes("WALLET_PAL_PAYMENTS_SECRET"),
+    "the payments Package's secret leaked into the generated config",
+  );
 
   // 5. The production-secrets check, from the profile: the stub's secret, and
   // no built-in Package's.
@@ -217,7 +231,9 @@ try {
     {
       ...process.env,
       WALLET_PAL_SIGN_IN_SECRET: "fixture",
+      WALLET_PAL_PAYMENTS_SECRET: "fixture",
       BETTER_AUTH_SECRET: "not-this-deployment's",
+      STRIPE_SECRET_KEY: "not-this-deployment's",
     },
   );
   const carried = Object.keys(JSON.parse(readFileSync(secretsFile, "utf8")));
@@ -226,7 +242,12 @@ try {
     "the secrets file does not carry the auth Package's secret",
   );
   check(
-    !carried.includes("BETTER_AUTH_SECRET"),
+    carried.includes("WALLET_PAL_PAYMENTS_SECRET"),
+    "the secrets file does not carry the payments Package's secret",
+  );
+  check(
+    !carried.includes("BETTER_AUTH_SECRET") &&
+      !carried.includes("STRIPE_SECRET_KEY"),
     "the secrets file carries a built-in Package's secret",
   );
   const missing = Bun.spawnSync({
@@ -238,10 +259,11 @@ try {
   });
   check(
     missing.exitCode === 1 &&
-      missing.stderr.toString().includes("WALLET_PAL_SIGN_IN_SECRET"),
-    "the secrets check does not demand the auth Package's secret",
+      missing.stderr.toString().includes("WALLET_PAL_SIGN_IN_SECRET") &&
+      missing.stderr.toString().includes("WALLET_PAL_PAYMENTS_SECRET"),
+    "the secrets check does not demand the stub Packages' secrets",
   );
-  console.log("The secrets check names the stub Package's secret.");
+  console.log("The secrets check names the stub Packages' secrets.");
 
   // 6. The application artifact, with its brand, from the package's build.
   const cloudflare = join(consumer, "node_modules", "@frockbot", "cloudflare");
@@ -300,6 +322,15 @@ try {
   const reaches = (fragment: string) =>
     inputs.some((input) => input.replaceAll("\\", "/").includes(fragment));
   check(reaches("auth/chooser.ts"), "the Worker does not bundle its chooser");
+  check(
+    reaches("payments/chooser.ts"),
+    "the Worker does not bundle its payments chooser",
+  );
+  check(
+    !reaches("@frockbot/app/payments/") &&
+      !reaches("@frockbot/cloudflare/src/payments"),
+    "the Worker bundles a payments Package it did not choose",
+  );
   check(reaches("brand/brand.ts"), "the Worker does not bundle its brand");
   check(
     reaches("node_modules/@frockbot/cloudflare/src/index.ts"),

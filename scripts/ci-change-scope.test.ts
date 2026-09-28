@@ -25,7 +25,7 @@ test("anything the application is built from obliges the slow tier", () => {
   for (const path of [
     "apps/cloudflare/src/gateway.ts",
     "core/deadline.ts",
-    "app/billing/stripe.ts",
+    "app/payments/stripe/stripe.ts",
     "providers/catalog/models.ts",
     "apps/native/lib/main.dart",
     "package.json",

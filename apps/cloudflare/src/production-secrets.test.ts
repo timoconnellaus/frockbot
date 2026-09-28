@@ -6,11 +6,13 @@ import {
   REQUIRED_PRODUCTION_SECRETS_V1,
   deployedSecretNamesV1,
   liveSecretPlanV1,
+  missingOptionalSecretsV1,
   missingRequiredSecretsV1,
   productionSecretsReportV1,
   requiredSecretsV1,
 } from "./production-secrets.js";
 import { AUTH_PACKAGE_V1 } from "#auth-package";
+import { PAYMENTS_PACKAGE_V1 } from "#payments";
 import { ACCESS_AUTH_PACKAGE_V1 } from "@frockbot/app/auth/access";
 import { BETTER_AUTH_PACKAGE_V1 } from "@frockbot/app/auth/better-auth";
 
@@ -153,6 +155,47 @@ describe("the production secrets manifest", () => {
     ).toEqual([
       "Missing production configuration: STUB_SIGN_IN_SECRET — Signs every session. Add it to the repository's production environment, then re-run this release.",
     ]);
+  });
+
+  test("carries Stripe's optional settings only on a build that chose Stripe", () => {
+    // Stripe's secret key is its switch, so none of its settings is required;
+    // a build that does not bill, or bills through another Package, never
+    // carries them.
+    expect(PAYMENTS_PACKAGE_V1.id).toBe("stripe");
+    const stripe = OPTIONAL_PRODUCTION_SECRETS_V1.filter(
+      (secret) => secret.paymentsPackage === "stripe",
+    ).map((secret) => secret.name);
+    expect(stripe).toEqual([
+      "STRIPE_SECRET_KEY",
+      "STRIPE_WEBHOOK_SECRET",
+      "STRIPE_MONTHLY_PRICE_ID",
+    ]);
+    for (const name of stripe) expect(deployedSecretNamesV1()).toContain(name);
+    for (const payments of [
+      { id: "none", required: [] },
+      {
+        id: "stub-payments",
+        required: [{ name: "STUB_PAYMENTS_SECRET", why: "Verifies events." }],
+      },
+    ]) {
+      const carried = deployedSecretNamesV1(AUTH_PACKAGE_V1, payments);
+      for (const name of stripe) expect(carried).not.toContain(name);
+      expect(missingOptionalSecretsV1({}, AUTH_PACKAGE_V1, payments)).toEqual(
+        missingOptionalSecretsV1({}).filter(
+          (secret) => secret.paymentsPackage === undefined,
+        ),
+      );
+    }
+    // A white-label's own payments Package's secrets are required.
+    const external = {
+      id: "stub-payments",
+      required: [{ name: "STUB_PAYMENTS_SECRET", why: "Verifies events." }],
+    };
+    expect(
+      missingRequiredSecretsV1({}, AUTH_PACKAGE_V1, external).map(
+        (secret) => secret.name,
+      ),
+    ).toContain("STUB_PAYMENTS_SECRET");
   });
 
   test("is carried by the release workflow's deploy step", () => {

@@ -191,7 +191,7 @@ ship, so they alias `typescript` to the
 `typescript-native-bridge` build that keeps the TS 6 JavaScript API while
 checking on tsgo 7.0.2. No TypeScript 5 is left in the repo.
 
-`typecheck` also runs the build-time choosing rules: `scripts/check-computer-host-imports.ts` keeps the Computer host's implementation behind its one choosing file, and `scripts/check-auth-package-imports.ts` does the same for the auth Package, so a `better-auth` import cannot reach the Access build or an Access import the hosted one.
+`typecheck` also runs the build-time choosing rules: `scripts/check-computer-host-imports.ts` keeps the Computer host's implementation behind its one choosing file, `scripts/check-auth-package-imports.ts` does the same for the auth Package, so a `better-auth` import cannot reach the Access build or an Access import the hosted one, and `scripts/check-payments-package-imports.ts` keeps Stripe inside its payments Package and each payments Package to the ledger port.
 
 ### Editor setup
 
@@ -506,7 +506,7 @@ app/              The product: `runtime.ts`, the Contribution tables, and one di
   audit/          Audited-effect projection and the User's rebuildable audit table
   auth/           The two auth Packages behind `AuthPackageV1` — `better-auth/` and `access/` — and what they share
   authoring/      The source persistence Bot-authored Plugins use, up to the build boundary
-  billing/        The account's subscription, its metered usage ledger, the Stripe seam, and the billing page
+  billing/        The account's subscription, its metered usage ledger, and the billing page
   cards/          The Bot's half of Cards: an approval, a Plugin's own action, or conversation input
   clock/          Reference feature with agent and host contributions
   composition/    The User's Composition store and RPCs, and the Bot's mirror of them
@@ -523,6 +523,7 @@ app/              The product: `runtime.ts`, the Contribution tables, and one di
   machine/        Registered machines: the desktop's signed-in enrolment, queue and ledger
   memory/         Bot, User and Group Chat memory: canonical records and Markdown tiers
   notifications/  User-visible messages, their unread cursors, and the push outbox
+  payments/       The two payments Packages behind `PaymentsPackageV1` — `stripe/` and `none/`
   plugins/        The deployment catalog and seed states, a Bot's Plugins page, its enable map behind a revision fence, and the `plugin_*` authoring tools with the approval that makes a published Plugin live
   routines/       Durable Routines, the alarm scheduler, and the webhook door
   search/         Per-User transcript index, search route, and overlay

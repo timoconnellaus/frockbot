@@ -1,11 +1,20 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
+import type { PaymentsPlanV1 } from "@frockbot/core/contracts";
 import {
-  BILLING_PLAN,
   BillingError,
   BillingLedger,
+  CREDIT_EXHAUSTED_REASON_V1,
+  USAGE_PRICING_VERSION_V1,
   type BillingStorage,
 } from "./ledger";
+
+/** A plan like the hosted one: a monthly subscription, top-ups tied to it. */
+const PLAN: PaymentsPlanV1 = {
+  subscription: { monthlyCents: 2_000, includedMicros: 15_000_000 },
+  topUpCents: [1_000, 2_500, 5_000],
+  purchasedCreditNeedsSubscription: true,
+};
 
 function storage(database = new Database(":memory:")): BillingStorage {
   return {
@@ -48,23 +57,19 @@ function reservation(id: string, maximumMicros: number) {
     kind: "model" as const,
     maximumMicros,
     description: "one model response",
-    pricingVersion: BILLING_PLAN.pricingVersion,
+    pricingVersion: USAGE_PRICING_VERSION_V1,
   };
 }
 
 describe("the billing ledger", () => {
-  test("declares the paid plan, included credit, and exact top-up menu", () => {
-    expect(BILLING_PLAN).toEqual({
-      currency: "usd",
-      monthlyCents: 2_000,
-      includedMicros: 15_000_000,
-      topUpCents: [1_000, 2_500, 5_000],
-      pricingVersion: "2026-09-09",
-    });
+  test("prices usage under its own tariff version, whatever the plan", () => {
+    expect(USAGE_PRICING_VERSION_V1).toBe("2026-09-09");
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
+    expect(ledger.snapshot().plan).toEqual(PLAN);
   });
 
   test("replays an identical grant and rejects the same payment key with different value", () => {
-    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
     ledger.grant("invoice:one", "included", 15_000_000, NOW + 1_000);
     ledger.grant("invoice:one", "included", 15_000_000, NOW + 1_000);
     expect(ledger.snapshot().includedMicros).toBe(15_000_000);
@@ -75,8 +80,8 @@ describe("the billing ledger", () => {
 
   test("serializes competing reservations so credit cannot be overspent", async () => {
     const shared = storage();
-    const first = new BillingLedger(shared, "FrockBot", () => NOW);
-    const second = new BillingLedger(shared, "FrockBot", () => NOW);
+    const first = new BillingLedger(shared, "FrockBot", PLAN, () => NOW);
+    const second = new BillingLedger(shared, "FrockBot", PLAN, () => NOW);
     active(first);
     first.grant("topup:one", "purchased", 10_000_000, null);
 
@@ -104,7 +109,7 @@ describe("the billing ledger", () => {
 
   test("an expired grant cannot fund new work, including at its exact expiry", () => {
     let now = NOW;
-    const ledger = new BillingLedger(storage(), "FrockBot", () => now);
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => now);
     active(ledger);
     ledger.grant("invoice:period", "included", 15_000_000, NOW + 100);
     now = NOW + 100;
@@ -116,7 +121,7 @@ describe("the billing ledger", () => {
 
   test("settlement replays once and refunds unused reservation without reviving expired credit", () => {
     let now = NOW;
-    const ledger = new BillingLedger(storage(), "FrockBot", () => now);
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => now);
     active(ledger);
     ledger.grant("invoice:period", "included", 10_000, NOW + 100);
     ledger.reserve(reservation("effect:settle", 8_000));
@@ -143,7 +148,7 @@ describe("the billing ledger", () => {
   });
 
   test("a settlement keeps the model that answered and how it was priced", () => {
-    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
     active(ledger);
     ledger.grant("topup:one", "purchased", 10_000, null);
     ledger.reserve({
@@ -176,7 +181,7 @@ describe("the billing ledger", () => {
   });
 
   test("zero-cost BYO model usage releases its hold without consuming credit", () => {
-    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
     active(ledger);
     ledger.grant("topup:one", "purchased", 10_000, null);
     ledger.reserve(reservation("effect:byo", 5_000));
@@ -194,7 +199,7 @@ describe("the billing ledger", () => {
   });
 
   test("insufficient credit changes neither balance nor usage history", () => {
-    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
     active(ledger);
     ledger.grant("topup:one", "purchased", 99, null);
     expect(() => ledger.reserve(reservation("effect:too-large", 100))).toThrow(
@@ -208,7 +213,7 @@ describe("the billing ledger", () => {
   });
 
   test("complimentary credit is spendable without a subscription and is idempotent by id", () => {
-    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
     expect(() => ledger.reserve(reservation("own-model", 0))).toThrow(
       "A paid FrockBot subscription is required",
     );
@@ -255,7 +260,7 @@ describe("the billing ledger", () => {
   });
 
   test("purchased credit stays locked without a subscription; complimentary is spent after monthly credit", () => {
-    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
     ledger.grant("topup:one", "purchased", 3_000_000, null);
     ledger.grantComplimentary({
       id: "gift-2",
@@ -280,7 +285,7 @@ describe("the billing ledger", () => {
   });
 
   test("a suspended account cannot spend complimentary credit either", () => {
-    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
     ledger.grantComplimentary({
       id: "gift-3",
       micros: 1_000_000,
@@ -296,7 +301,7 @@ describe("the billing ledger", () => {
 
   test("requires a current subscription and treats the period end as expired", () => {
     for (const state of [undefined, "past", "future"] as const) {
-      const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+      const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
       if (state === "past") active(ledger, NOW);
       if (state === "future") {
         active(ledger);
@@ -315,9 +320,9 @@ describe("the billing ledger", () => {
     }
   });
 
-  test("an active or trialing Stripe status without a paid invoice grants no access", () => {
+  test("an active or trialing subscription without a paid period grants no access", () => {
     for (const status of ["active", "trialing"]) {
-      const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+      const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
       active(ledger);
       ledger.set("subscription", { ...ledger.subscription()!, status });
       if (status === "active") ledger.set("paidAccess", null);
@@ -329,7 +334,7 @@ describe("the billing ledger", () => {
   });
 
   test("row cursors do not skip equal-timestamp usage and the rollup counts settlement once", () => {
-    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
     active(ledger);
     ledger.grant("topup:pagination", "purchased", 101, null);
     for (let index = 0; index < 101; index += 1) {
@@ -364,7 +369,7 @@ describe("the billing ledger", () => {
   });
 
   test("revoking a grant keeps later hold refunds expired and unspendable", () => {
-    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
     active(ledger);
     ledger.grant("topup:revoked", "purchased", 100, null);
     ledger.reserve(reservation("effect:held", 80));
@@ -390,7 +395,7 @@ describe("the billing ledger", () => {
   });
 
   test("malformed reconciliation rolls back every requested mutation", () => {
-    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
     active(ledger);
     ledger.grant("topup:safe", "purchased", 100, null);
     expect(() =>
@@ -405,5 +410,208 @@ describe("the billing ledger", () => {
       purchasedMicros: 100,
       suspended: false,
     });
+  });
+});
+
+describe("the payments port", () => {
+  const DAY = 86_400_000;
+  const subscription = (id: string, start: number, status = "active") => ({
+    customerId: "cus_port",
+    subscriptionId: id,
+    status,
+    periodStart: start,
+    periodEnd: start + 30 * DAY,
+    cancelAtPeriodEnd: false,
+  });
+
+  test("applies a provider event once by its receipt, and refuses it changed", () => {
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
+    const port = ledger.paymentsPort();
+    const evidence = { amount: 2_500 };
+    let ran = 0;
+    const credit = () =>
+      port.apply("evt_1", evidence, (effects) => {
+        ran += 1;
+        effects.grantPurchased({ key: "pay_1", micros: 25_000_000 });
+      });
+    credit();
+    credit();
+    expect(ran).toBe(1);
+    expect(port.applied("evt_1", evidence)).toBe(true);
+    expect(() => port.applied("evt_1", { amount: 5_000 })).toThrow(
+      "Billing key reused with different data",
+    );
+    expect(() =>
+      port.apply("evt_1", { amount: 5_000 }, () => undefined),
+    ).toThrow("Billing key reused with different data");
+    expect(ledger.snapshot().payments).toMatchObject([
+      { id: "topup:pay_1", kind: "purchased", creditMicros: 25_000_000 },
+    ]);
+  });
+
+  test("a second event for the same payment grants nothing, and another amount rolls it back whole", () => {
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
+    const port = ledger.paymentsPort();
+    port.apply("evt_a", { n: 1 }, (effects) =>
+      effects.grantPurchased({ key: "pay_same", micros: 10_000_000 }),
+    );
+    // A duplicate delivery under a different event id: the payment key holds.
+    port.apply("evt_b", { n: 2 }, (effects) =>
+      effects.grantPurchased({ key: "pay_same", micros: 10_000_000 }),
+    );
+    expect(() =>
+      port.apply("evt_c", { n: 3 }, (effects) => {
+        effects.remember("note", "written before the conflict");
+        effects.grantPurchased({ key: "pay_same", micros: 50_000_000 });
+      }),
+    ).toThrow("Credit grant conflicts with existing payment");
+    // Nothing of the refused event stuck, its receipt included.
+    expect(port.record("note")).toBeUndefined();
+    expect(port.applied("evt_c", { n: 3 })).toBe(false);
+    active(ledger);
+    expect(ledger.balance().purchasedMicros).toBe(10_000_000);
+  });
+
+  test("a paid period grants the plan's allowance once and access never moves back", () => {
+    const now = NOW + 40 * DAY;
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => now);
+    const port = ledger.paymentsPort();
+    const later = {
+      subscriptionId: "sub_p",
+      periodStart: NOW + 30 * DAY,
+      periodEnd: NOW + 60 * DAY,
+    };
+    const earlier = {
+      subscriptionId: "sub_p",
+      periodStart: NOW,
+      periodEnd: NOW + 30 * DAY,
+    };
+    port.apply("evt_later", later, (effects) => {
+      effects.recordSubscription(subscription("sub_p", later.periodStart));
+      effects.recordPaidPeriod(later);
+    });
+    // Reordered: the earlier invoice arrives after the later one.
+    port.apply("evt_earlier", earlier, (effects) =>
+      effects.recordPaidPeriod(earlier),
+    );
+    expect(port.account()).toMatchObject({
+      paidPeriod: later,
+      subscribed: true,
+    });
+    expect(
+      ledger
+        .snapshot()
+        .payments.map((row) => row.id)
+        .sort(),
+    ).toEqual([
+      `monthly:sub_p:${Math.floor(earlier.periodStart / 1000)}`,
+      `monthly:sub_p:${Math.floor(later.periodStart / 1000)}`,
+    ]);
+    // The earlier period's allowance expired with it.
+    expect(ledger.balance().includedMicros).toBe(15_000_000);
+  });
+
+  test("an event about an older subscription cannot replace a newer one", () => {
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
+    const port = ledger.paymentsPort();
+    port.apply("evt_new", 1, (effects) =>
+      effects.recordSubscription(subscription("sub_new", NOW)),
+    );
+    expect(() =>
+      port.apply("evt_old", 2, (effects) =>
+        effects.recordSubscription(
+          subscription("sub_old", NOW - DAY, "canceled"),
+        ),
+      ),
+    ).toThrow("Old subscription event");
+    expect(port.account().subscription?.subscriptionId).toBe("sub_new");
+    port.apply("evt_end", 3, (effects) =>
+      effects.recordSubscription(subscription("sub_new", NOW, "canceled")),
+    );
+    expect(port.account().subscription?.status).toBe("canceled");
+  });
+
+  test("a suspension stops spending until an administrator lifts it", () => {
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
+    active(ledger);
+    ledger.grant("topup:held", "purchased", 1_000, null);
+    ledger
+      .paymentsPort()
+      .apply("evt_refund", {}, (effects) => effects.suspend());
+    expect(ledger.balance()).toMatchObject({
+      suspended: true,
+      canSpend: false,
+    });
+    expect(() => ledger.reserve(reservation("after-refund", 1))).toThrow(
+      "A paid FrockBot subscription is required",
+    );
+  });
+
+  test("keeps the ledger's own state and receipts out of a Package's reach", () => {
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
+    const port = ledger.paymentsPort();
+    for (const key of [
+      "subscription",
+      "paidAccess",
+      "suspended",
+      "spike:bot|b",
+    ])
+      expect(() => port.remember(key, true)).toThrow("Invalid payment record");
+    for (const receipt of ["complimentary:gift", "reconcile:case", ""])
+      expect(() => port.apply(receipt, {}, () => undefined)).toThrow(
+        "Invalid payment receipt",
+      );
+    let kept: Parameters<Parameters<typeof port.apply>[2]>[0] | undefined;
+    port.apply("evt_keep", {}, (effects) => {
+      kept = effects;
+    });
+    expect(() =>
+      kept!.grantPurchased({ key: "later", micros: 1_000_000 }),
+    ).toThrow("Payment effects apply only inside apply");
+    expect(() =>
+      port.apply("evt_zero", {}, (effects) =>
+        effects.grantPurchased({ key: "zero", micros: 0 }),
+      ),
+    ).toThrow("Invalid credit");
+    port.remember("customer", "cus_kept");
+    expect(port.record("customer")).toBe("cus_kept");
+    expect(ledger.balance().purchasedMicros).toBe(0);
+  });
+
+  test("a plan with no subscription spends purchased credit without one", () => {
+    const plan: PaymentsPlanV1 = {
+      subscription: null,
+      topUpCents: [500],
+      purchasedCreditNeedsSubscription: false,
+    };
+    const ledger = new BillingLedger(storage(), "FrockBot", plan, () => NOW);
+    const port = ledger.paymentsPort();
+    expect(() => ledger.reserve(reservation("nothing-yet", 1))).toThrow(
+      CREDIT_EXHAUSTED_REASON_V1,
+    );
+    expect(() => ledger.requireSubscription()).toThrow(
+      CREDIT_EXHAUSTED_REASON_V1,
+    );
+    port.apply("evt_buy", {}, (effects) =>
+      effects.grantPurchased({ key: "buy", micros: 5_000_000 }),
+    );
+    expect(ledger.balance()).toMatchObject({
+      subscribed: false,
+      canSpend: true,
+      purchasedMicros: 5_000_000,
+    });
+    expect(ledger.reserve(reservation("paid-by-top-up", 1_000))).toMatchObject({
+      status: "reserved",
+    });
+    expect(() => ledger.requireSubscription()).not.toThrow();
+    expect(() =>
+      port.apply("evt_period", {}, (effects) =>
+        effects.recordPaidPeriod({
+          subscriptionId: "sub_none",
+          periodStart: NOW,
+          periodEnd: NOW + DAY,
+        }),
+      ),
+    ).toThrow("This deployment sells no subscription");
   });
 });
