@@ -75,6 +75,10 @@ import {
 } from "./backend-composition.js";
 import { compositionFailureTurnInputV1 } from "./backend-composition-input.js";
 import { createCardApprovalStoreV1 } from "./cards.js";
+import {
+  approvalDeliveryDetailsV1,
+  approvalHasDeliveryDetailV1,
+} from "@frockbot/app/approvals/delivery";
 import { createSecretRequestStoreV1 } from "@frockbot/app/secrets/bot";
 import { createReplyDraftWatchV1 } from "./reply-draft.js";
 import { turnInputOriginV1 } from "@frockbot/app/supervision";
@@ -706,7 +710,16 @@ export async function turnInputV1(
     return { text: command.text, segments: own };
   }
   const drained = await state.routineInbox.drainInto(command.runId);
-  const preamble = pendingBotInputSegmentsV1(drained);
+  const preamble = pendingBotInputSegmentsV1(
+    drained,
+    drained.some(
+      (input) =>
+        input.kind === "approval" &&
+        approvalHasDeliveryDetailV1(input.approvalId),
+    )
+      ? await approvalDeliveryDetailsV1(state.ctx.storage, drained)
+      : undefined,
+  );
   if (preamble.length === 0) {
     return isDeliveryOriginV1(command.origin)
       ? undefined

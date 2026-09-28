@@ -15,12 +15,16 @@
 // exactly one run at a time, so the firing is durable immediately and lands the
 // moment the calling Turn settles. "Queue, never drop, never parallel."
 import { sha256HexTextV1 } from "@frockbot/core/crypto";
-import type {
-  AgentRuntimeV1,
-  RuntimeFeatureV1,
-  ToolDefinition,
-  ToolExecutionContext,
+import {
+  decodeSendToUserPayloadV1,
+  type AgentRuntimeV1,
+  type RuntimeFeatureV1,
+  type ToolDefinition,
+  type ToolExecutionContext,
 } from "@frockbot/core/contracts";
+import { recordSendToUserV1 } from "../shell/agent.js";
+import { routineApprovalWordingV1 } from "./approval.js";
+import { nextRoutineRunV1, normalizeRoutineScheduleV1 } from "./cron.js";
 import {
   ROUTINE_NAME_MAX_LENGTH,
   ROUTINE_PROMPT_MAX_LENGTH,
@@ -35,6 +39,7 @@ import {
   type RoutineCommandReceiptV1,
   type RoutineCommandV1,
   type RoutineListViewV1,
+  type RoutineViewV1,
 } from "./shared.js";
 
 /** The Session and Turn a Bot-authored Routine write records as its writer. */
@@ -68,6 +73,17 @@ export interface RoutinesRuntimeHostV1 {
   ): Promise<RoutineCommandReceiptV1>;
   /** Connected-app events this Bot may start a Routine on. Absent means none. */
   listTriggers?(): Promise<RoutineConnectionTriggerOfferV1[]>;
+  /**
+   * Record a Routine change the person must approve before it is armed
+   * (`app/routines/approval.ts`), keyed by this Turn's occurrence, and answer
+   * the Approval it asks under. Idempotent: a replayed occurrence answers the
+   * same id. Absent where no approval can be asked, and then such a change is
+   * refused.
+   */
+  askApproval?(request: {
+    command: RoutineCommandV1;
+    effectId: string;
+  }): Promise<{ approvalId: string }>;
 }
 
 export const ROUTINE_MANAGE_ACTIONS = [
@@ -159,22 +175,10 @@ const ROUTINE_MANAGE_INPUT_SCHEMA = {
       required: ["pluginId", "trigger"],
       additionalProperties: false,
     },
-    userAsked: {
-      type: "boolean",
-      description:
-        "Set true only when the User asked you, in this conversation, to pause, edit, or delete this Routine. Required for those three actions on a Routine the User created. Never set it because a Routine looks wrong to you, is failing, or is no longer useful: say so and let the User decide.",
-    },
   },
   required: ["action"],
   additionalProperties: false,
 } as const;
-
-/** The actions that switch off or overwrite something already running. */
-const DESTRUCTIVE_ROUTINE_ACTIONS = new Set<RoutineManageActionV1>([
-  "pause",
-  "update",
-  "delete",
-]);
 
 interface RoutineManageInputV1 {
   action: RoutineManageActionV1;
@@ -189,7 +193,6 @@ interface RoutineManageInputV1 {
     triggerType: string;
     config?: RoutineTriggerConfigV1;
   };
-  userAsked?: boolean;
 }
 
 function decodeRoutineManageInputV1(input: unknown): RoutineManageInputV1 {
@@ -206,7 +209,6 @@ function decodeRoutineManageInputV1(input: unknown): RoutineManageInputV1 {
     "trigger",
     "pluginTrigger",
     "connectionTrigger",
-    "userAsked",
   ]);
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) {
@@ -292,9 +294,6 @@ function decodeRoutineManageInputV1(input: unknown): RoutineManageInputV1 {
           }),
     };
   }
-  if (value.userAsked !== undefined && typeof value.userAsked !== "boolean") {
-    throw new RoutineDecodeError("routine_manage userAsked must be a boolean");
-  }
   return {
     action,
     ...(optional("routineId") === undefined
@@ -310,9 +309,6 @@ function decodeRoutineManageInputV1(input: unknown): RoutineManageInputV1 {
     ...(trigger === undefined ? {} : { trigger }),
     ...(pluginTrigger === undefined ? {} : { pluginTrigger }),
     ...(connectionTrigger === undefined ? {} : { connectionTrigger }),
-    ...(value.userAsked === undefined
-      ? {}
-      : { userAsked: value.userAsked as boolean }),
   };
 }
 
@@ -409,24 +405,52 @@ export function routineManageCommandV1(
 }
 
 /**
- * Whether the User, rather than this Bot, created the Routine.
- *
- * A listing that cannot be read answers `true`: not knowing who owns a Routine
- * is a reason to ask, not a reason to switch it off. A Routine that is not in
- * the listing at all is gone, and the command below will say so properly.
+ * The Routine a command names, as the listing holds it: `undefined` when it
+ * is not there (the command then says so properly), `null` when the listing
+ * cannot be read — not knowing whose a Routine is is a reason to ask.
  */
-async function userAuthoredRoutineV1(
+async function currentRoutineV1(
   host: RoutinesRuntimeHostV1,
   routineId: string,
-): Promise<boolean> {
+): Promise<RoutineViewV1 | undefined | null> {
   try {
     const listing = await host.list();
-    const routine = listing.routines.find(
+    return listing.routines.find(
       (candidate) => candidate.routineId === routineId,
     );
-    return routine === undefined ? false : routine.createdBy.kind === "user";
   } catch {
-    return true;
+    return null;
+  }
+}
+
+/**
+ * Whether the person must approve a change on a card before it is armed.
+ *
+ * A Routine's prompt speaks for the person every time it fires, so writing
+ * one — creating it, or changing what an existing one asks or when it runs —
+ * is theirs to approve, whoever proposes it. Pausing or deleting one they set
+ * up switches off something of theirs. Renaming, resuming and running now
+ * change none of that, and pausing or deleting a Routine the Bot itself set
+ * up is its own housekeeping.
+ */
+export function routineChangeNeedsApprovalV1(
+  command: RoutineCommandV1,
+  current: Pick<RoutineViewV1, "createdBy"> | undefined | null,
+): boolean {
+  switch (command.type) {
+    case "routine/create":
+      return true;
+    case "routine/update":
+      return (
+        command.prompt !== undefined ||
+        command.schedule !== undefined ||
+        command.trigger !== undefined
+      );
+    case "routine/pause":
+    case "routine/delete":
+      return current === null || current?.createdBy.kind === "user";
+    default:
+      return false;
   }
 }
 
@@ -434,8 +458,95 @@ function refusal(reason: string): { content: string; isError: boolean } {
   return { content: `routine_manage was refused: ${reason}`, isError: true };
 }
 
+/** Where a card is recorded and drawn: the Turn's Sessions and the card seam. */
+export type RoutineApprovalRuntimeV1 = Pick<
+  AgentRuntimeV1,
+  "sessions" | "firstPartyCards"
+>;
+
+/**
+ * Record the change and put it to the person on an approval card on this
+ * Turn's log. The intent is durable before the card; both are keyed by the
+ * occurrence, so a replayed call asks nothing twice.
+ */
+async function askRoutineApproval(
+  host: RoutinesRuntimeHostV1,
+  runtime: RoutineApprovalRuntimeV1 | undefined,
+  command: RoutineCommandV1,
+  current: RoutineViewV1 | undefined | null,
+  context: ToolExecutionContext,
+): Promise<{ content: string; isError: boolean }> {
+  // A subagent runs in its own object, whose Approvals the Bot never reads.
+  if (!host.askApproval || !runtime || context.turnType === "subagent") {
+    return refusal(
+      "this change needs the User's approval on a card, which cannot be asked from here. Hand it back to the conversation, saying exactly what the change is.",
+    );
+  }
+  // The person is never asked to approve a change that cannot be applied.
+  if (command.type !== "routine/create" && current === undefined) {
+    return refusal(`there is no Routine "${command.routineId}"`);
+  }
+  const schedule =
+    command.type === "routine/create" || command.type === "routine/update"
+      ? command.schedule
+      : undefined;
+  if (schedule !== undefined) {
+    try {
+      const normalized = normalizeRoutineScheduleV1(schedule, "UTC");
+      const now = new Date();
+      if (nextRoutineRunV1(normalized, now, now) === undefined) {
+        return refusal(`schedule "${schedule}" never comes around again`);
+      }
+    } catch (error) {
+      return refusal(error instanceof Error ? error.message : String(error));
+    }
+  }
+  const wording = routineApprovalWordingV1(command, current ?? undefined);
+  if (!wording) {
+    return refusal(
+      "the prompt is too long to show the User whole on an approval card. Shorten it and ask again.",
+    );
+  }
+  let approvalId: string;
+  try {
+    ({ approvalId } = await host.askApproval({
+      command,
+      effectId: context.effectId,
+    }));
+  } catch (error) {
+    return refusal(error instanceof Error ? error.message : String(error));
+  }
+  const payload = decodeSendToUserPayloadV1(
+    { type: "approval", approvalId, ...wording },
+    "Routine approval",
+    // Minted by the host from this occurrence; the prefix is refused to
+    // every other author.
+    { kernelMinted: true },
+  );
+  const recorded = await recordSendToUserV1(runtime.sessions, payload, {
+    sessionId: context.sessionId,
+    occurrenceId: context.effectId,
+    tool: "routine_manage",
+    ...(runtime.firstPartyCards === undefined
+      ? {}
+      : { cards: runtime.firstPartyCards }),
+    context,
+  });
+  if (recorded.status !== "sent") {
+    return refusal(`the approval could not be asked: ${recorded.reason}`);
+  }
+  return {
+    content: [
+      `Asked the User to approve this on a card (approval ${approvalId}): ${wording.action}.`,
+      "Nothing is armed or changed until they approve. Do not make this change again; their answer opens a Turn of yours that says what came of it.",
+    ].join(" "),
+    isError: false,
+  };
+}
+
 export function createRoutineManageTool(
   host: RoutinesRuntimeHostV1 & { writer: RoutineWriterIdentityV1 },
+  runtime?: RoutineApprovalRuntimeV1,
 ): ToolDefinition {
   return {
     name: "routine_manage",
@@ -455,10 +566,11 @@ export function createRoutineManageTool(
       `characters and prompts at most ${ROUTINE_PROMPT_MAX_LENGTH}.`,
       "One connected-app event is one firing. To sweep an inbox, use a schedule and fetch.",
       "connectionTrigger.config is only for a coarse search such as Gmail query. Never set labelIds, userId, or interval.",
-      "Pausing, editing, or deleting a Routine the User created switches off something they set up,",
-      "so do it only when the User asked you to in this conversation, and pass userAsked: true when they did.",
+      "Creating a Routine, changing its prompt, schedule or trigger, and pausing or deleting one the User created each put an approval card in front of the User:",
+      "nothing is armed or switched off until they approve it, and their answer opens a Turn of yours that says what came of it.",
+      "Once approved, a Routine's prompt is their standing request. Renaming, resuming, running now, and pausing or deleting a Routine you created need no card.",
       "If a Routine of theirs is failing or looks wrong, tell them and let them decide — do not switch it off yourself.",
-      "Say in your reply whatever you changed.",
+      "Say in your reply whatever you changed or asked.",
     ].join(" "),
     inputSchema: ROUTINE_MANAGE_INPUT_SCHEMA as unknown as Record<
       string,
@@ -511,20 +623,16 @@ export function createRoutineManageTool(
       } catch (error) {
         return refusal(error instanceof Error ? error.message : String(error));
       }
-      // A Bot paused a User's Routine in a Turn about avatar farming, with no
-      // approval, no confirmation, and nothing in the transcript saying so.
-      // The User's own Routines are theirs: switching one off, or rewriting
-      // it, needs the User to have asked for it in this conversation. The
-      // Bot's own Routines it may manage freely — those are its housekeeping.
-      if (
-        DESTRUCTIVE_ROUTINE_ACTIONS.has(decoded.action) &&
-        decoded.userAsked !== true &&
-        decoded.routineId !== undefined &&
-        (await userAuthoredRoutineV1(host, decoded.routineId))
-      ) {
-        return refusal(
-          `Routine ${decoded.routineId} was created by the User. Ask them before you ${decoded.action === "update" ? "change" : decoded.action} it, and call this again with userAsked: true once they say so.`,
-        );
+      // A Bot paused a User's Routine in a Turn about avatar farming, and a
+      // Bot could vouch for itself with a flag it set. What a Routine asks for
+      // is the person's standing request, so writing one is theirs to approve
+      // on a card bound to exactly this command; nothing is armed until then.
+      const current =
+        "routineId" in command && command.routineId !== undefined
+          ? await currentRoutineV1(host, command.routineId)
+          : undefined;
+      if (routineChangeNeedsApprovalV1(command, current)) {
+        return askRoutineApproval(host, runtime, command, current, context);
       }
       const writer: RoutineWriterV1 = {
         kind: "bot",
@@ -586,7 +694,7 @@ export function createRoutinesRuntimeFeature(
     const writer = host.writer;
     if (!writer) return () => {};
     const dispose = runtime.tools.register(
-      createRoutineManageTool({ ...host, writer }),
+      createRoutineManageTool({ ...host, writer }, runtime),
     );
     return () => dispose();
   };

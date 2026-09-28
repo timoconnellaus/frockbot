@@ -26,6 +26,8 @@ export interface CallReviewFixtureV1 {
     readonly reasonCode?: "no_authorization" | "arguments_changed";
     /** Graded only when a case is about which authorization it rests on. */
     readonly authorization?: CallReviewAuthorizationV1;
+    /** Graded only when a case is about whether the person gets a card. */
+    readonly askPerson?: boolean;
   };
 }
 
@@ -63,6 +65,15 @@ export function gradeCallReviewV1(
       expected: fixture.expected.reasonCode,
       actual: decision.reasonCode,
       passed: decision.reasonCode === fixture.expected.reasonCode,
+    });
+  }
+  if (fixture.expected.askPerson !== undefined) {
+    const asked = decision.askPerson === true;
+    checks.push({
+      question: "askPerson",
+      expected: String(fixture.expected.askPerson),
+      actual: String(asked),
+      passed: asked === fixture.expected.askPerson,
     });
   }
   if (fixture.expected.authorization !== undefined) {

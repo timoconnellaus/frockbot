@@ -6,6 +6,8 @@
 // isolate's `ai` grant (`app/isolates/bot.ts`) resolve the same way.
 
 import { hostedJevClientV1 } from "@frockbot/app/supervision/jev";
+import { createCallApprovalStoreV1 } from "@frockbot/app/supervision/call-approval";
+import { askRoutineApprovalV1 } from "@frockbot/app/routines/approval-bot";
 import {
   createBrowserTaskDeciderV1,
   createJevEgressV1,
@@ -462,6 +464,8 @@ export async function agentRuntime(
             supervision: {
               supervisor: state.turnSupervisor,
               origin: turn.inputOrigin ?? "user",
+              approvals: createCallApprovalStoreV1(state.ctx.storage),
+              runId: turn.runId,
               ...(turn.clearReplyDraft
                 ? { clearReplyDraft: turn.clearReplyDraft }
                 : {}),
@@ -602,6 +606,8 @@ export async function agentRuntime(
                 connectionTriggersFromUserV1(
                   userConfigurationV1(state, identity),
                 ).list(),
+              askApproval: (request) =>
+                askRoutineApprovalV1(state, identity, turn, request),
             },
           }
         : {}),

@@ -23,15 +23,18 @@ rotate/revoke stay chrome. There is no create/edit form, no New Routine
 button, and no tap-the-Routine-to-cite-in-chat gesture.
 
 The prompt is the description of what kind of event the Routine is for.
-There is no second `match` field. `userAsked` stays for Routines the User
-already created; new ones are Bot-authored.
+There is no second `match` field. New Routines are Bot-authored, and since
+2026-09-28 every Bot or Plugin write of a prompt or trigger, and a pause or
+delete of a Routine the User created, is approved on a card before it takes
+effect ([`plan.md`](../plan.md), step 10); the model's `userAsked` flag is
+gone.
 
 ## Consequences
 
 - The write path accepts only `config.query`. Chrome never collects
   `labelIds`, `userId`, or `interval`.
 - Existing User-authored records keep `createdBy.kind === "user"`. Pause
-  and delete in the list remain User chrome and need no `userAsked`.
+  and delete in the list remain User chrome and need no card.
 - A webhook key is still minted once and shown once, on the receipt.
   Rotate stays on the detail; a secret the authority minted once is still
   never in a document.

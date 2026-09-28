@@ -716,8 +716,11 @@ export const SUBAGENT_SUMMARY_END_V1 = "[End of the subagent's summary]";
  */
 export function pendingBotInputPreambleV1(
   inputs: readonly PendingBotInputV1[],
+  approvalDetails?: ReadonlyMap<string, string>,
 ): string {
-  return inputSegmentsTextV1(pendingBotInputSegmentsV1(inputs));
+  return inputSegmentsTextV1(
+    pendingBotInputSegmentsV1(inputs, approvalDetails),
+  );
 }
 
 /**
@@ -728,6 +731,12 @@ export function pendingBotInputPreambleV1(
  */
 export function pendingBotInputSegmentsV1(
   inputs: readonly PendingBotInputV1[],
+  /**
+   * What the kernel's own record says a decision covered, by approval id
+   * (`app/approvals/delivery.ts`): the call a Routine asked about, or the
+   * Routine change that was applied.
+   */
+  approvalDetails?: ReadonlyMap<string, string>,
 ): InputSegmentV1[] {
   const segments: InputSegmentV1[] = [];
   for (const input of inputs) {
@@ -753,9 +762,10 @@ export function pendingBotInputSegmentsV1(
       continue;
     }
     if (input.kind === "approval") {
+      const detail = approvalDetails?.get(input.approvalId);
       segments.push({
         author: "platform",
-        text: `[Approval] The decision on "${input.approvalId}" is ${input.decision}.\n`,
+        text: `[Approval] The decision on "${input.approvalId}" is ${input.decision}.${detail === undefined ? "" : ` ${detail}`}\n`,
       });
       continue;
     }

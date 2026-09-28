@@ -14,6 +14,9 @@ import { createMemoryRoutineStorageV1 } from "../routines/testing.js";
 import { INPUT_DELIVERY_CUE_V1 } from "../routines/inbox.js";
 import { inputDeliveryRunIdV1 } from "../shell/input-delivery.js";
 import { cardApprovalBindingKeyV1 } from "@frockbot/app/shell/cards";
+import { routineIntentKeyV1 } from "../routines/approval.js";
+import { routinePromptByV1 } from "../routines/records.js";
+import { RoutineStore } from "../routines/store.js";
 import {
   ApprovalRevisionConflictError,
   decideApproval,
@@ -272,5 +275,77 @@ describe("a decision on an edited card", () => {
     expect(
       await storage.get(cardApprovalBindingKeyV1("email", SURFACE)),
     ).toMatchObject({ digest: "digest-drawn" });
+  });
+});
+
+// A Routine change a Bot proposed is armed only by the person's answer, and
+// armed as theirs.
+describe("a Routine change waiting on the person", () => {
+  async function proposed(approvalId: string) {
+    const { state, storage, admitted } = await harness([
+      { ...pending(approvalId), action: 'Set up the Routine "Brief"' },
+    ]);
+    const routines = new RoutineStore(storage);
+    Object.assign(state, {
+      routines,
+      env: {
+        USER_CONFIGURATIONS: { idFromName: () => "user", get: () => ({}) },
+      },
+    });
+    Object.assign(state.authority, {
+      refreshRecoveryAlarm: () => Promise.resolve(),
+    });
+    await storage.put(routineIntentKeyV1(approvalId), {
+      schemaVersion: 1,
+      approvalId,
+      botId: IDENTITY.botId,
+      sessionId: "user-1:bot-1",
+      runId: "ask-1",
+      turnId: "ask-1",
+      createdAt: "2026-09-23T10:00:00.000Z",
+      command: {
+        schemaVersion: 1,
+        type: "routine/create",
+        commandId: "rt-brief",
+        botId: IDENTITY.botId,
+        routineId: "brief",
+        name: "Brief",
+        prompt: "Summarize overnight email.",
+        schedule: "@daily",
+      },
+    });
+    return { state, storage, routines, admitted };
+  }
+
+  test("approved, it is armed with the Approval on it, so it fires as the person's", async () => {
+    const approvalId = "routine-approval-0123456789abcdef";
+    const { state, storage, routines, admitted } = await proposed(approvalId);
+    await decideApproval(state, IDENTITY, approvalId, {
+      schemaVersion: 1,
+      decision: "approved",
+    });
+    const record = await routines.read("brief");
+    expect(record).toMatchObject({
+      prompt: "Summarize overnight email.",
+      promptApprovalId: approvalId,
+      createdBy: { kind: "bot", botId: IDENTITY.botId },
+    });
+    expect(routinePromptByV1(record!)).toBe("user");
+    expect(await storage.get(routineIntentKeyV1(approvalId))).toMatchObject({
+      decision: "approved",
+      outcome: { status: "applied" },
+    });
+    // The Turn the answer opens is told what the change came to.
+    expect(admitted).toHaveLength(1);
+  });
+
+  test("declined, nothing is armed", async () => {
+    const approvalId = "routine-approval-fedcba9876543210";
+    const { state, routines } = await proposed(approvalId);
+    await decideApproval(state, IDENTITY, approvalId, {
+      schemaVersion: 1,
+      decision: "denied",
+    });
+    expect(await routines.read("brief")).toBeUndefined();
   });
 });

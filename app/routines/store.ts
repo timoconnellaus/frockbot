@@ -763,6 +763,8 @@ export class RoutineStore {
     command: RoutineCommandV1,
     writer: RoutineWriterV1,
     timezone: string,
+    /** The Approval a Bot's write was approved on, recorded with its prompt. */
+    options: { approvalId?: string } = {},
   ): Promise<RoutineCommandReceiptV1> {
     const fingerprint = routineCommandFingerprintV1(command);
     // A refused command is returned out of the transaction rather than thrown
@@ -789,7 +791,13 @@ export class RoutineStore {
       }
       let receipt: RoutineCommandReceiptV1;
       try {
-        receipt = await this.#apply(transaction, command, writer, timezone);
+        receipt = await this.#apply(
+          transaction,
+          command,
+          writer,
+          timezone,
+          options.approvalId,
+        );
       } catch (error) {
         return { ok: false, error };
       }
@@ -811,6 +819,7 @@ export class RoutineStore {
     command: RoutineCommandV1,
     writer: RoutineWriterV1,
     timezone: string,
+    approvalId: string | undefined,
   ): Promise<RoutineCommandReceiptV1> {
     const at = this.#now().toISOString();
     if (command.type === "routine/create") {
@@ -844,6 +853,7 @@ export class RoutineStore {
           ? {}
           : { schedule: command.schedule }),
         ...(command.trigger === undefined ? {} : { trigger: command.trigger }),
+        ...(approvalId === undefined ? {} : { promptApprovalId: approvalId }),
       };
       const record = this.#validated(draft, timezone);
       await transaction.put(routineKeyV1(routineId), record);
@@ -991,6 +1001,15 @@ export class RoutineStore {
         delete next.trigger;
         if (command.schedule !== undefined) next.schedule = command.schedule;
         if (command.trigger !== undefined) next.trigger = command.trigger;
+      }
+      // What the prompt speaks for follows who wrote it: a Bot's new prompt
+      // or trigger is the person's only on the Approval they gave it.
+      if (
+        writer.kind === "bot" &&
+        (command.prompt !== undefined || replacesTiming)
+      ) {
+        delete next.promptApprovalId;
+        if (approvalId !== undefined) next.promptApprovalId = approvalId;
       }
     }
     const record = this.#validated(next, timezone);

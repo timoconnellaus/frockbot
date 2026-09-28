@@ -19,6 +19,11 @@ import {
 import { applyApprovedPluginIntentV1 } from "@frockbot/app/plugins/authoring-bot";
 import { enqueuePendingBotInputV1 } from "@frockbot/app/routines/inbox-store";
 import {
+  settleRoutineIntentV1,
+  type RoutineIntentRecordV1,
+} from "@frockbot/app/routines/approval";
+import { applyApprovedRoutineIntentV1 } from "@frockbot/app/routines/approval-bot";
+import {
   approvalKeyV1,
   decodeApprovalRecordV1,
   projectApprovalCardV1,
@@ -125,6 +130,8 @@ async function settleApproval(
   machineIntent?: MachineIntentRecordV1;
   /** Present when the card was a Plugin publish or enable (ADR 0026). */
   pluginIntent?: PluginIntentRecordV1;
+  /** Present when the card was a Routine change a Bot proposed. */
+  routineIntent?: RoutineIntentRecordV1;
 }> {
   const key = approvalKeyV1(approvalId);
   const at = new Date().toISOString();
@@ -178,11 +185,20 @@ async function settleApproval(
       decision,
       at,
     );
+    // Or a Routine change a Bot proposed: armed only once approved, and
+    // applied after the commit like the rest.
+    const routineIntent = await settleRoutineIntentV1(
+      transaction,
+      approvalId,
+      decision,
+      at,
+    );
     return {
       approval: decided,
       status: "recorded" as const,
       ...(machineIntent === undefined ? {} : { machineIntent }),
       ...(pluginIntent === undefined ? {} : { pluginIntent }),
+      ...(routineIntent === undefined ? {} : { routineIntent }),
     };
   });
 }
@@ -303,6 +319,14 @@ export async function decideApproval(
     settled.pluginIntent?.decision === "approved"
   ) {
     await applyApprovedPluginIntentV1(state, identity, settled.pluginIntent);
+  }
+  // An approved Routine change is armed now, with the Approval recorded on
+  // the Routine so its prompt fires as the person's.
+  if (
+    settled.status === "recorded" &&
+    settled.routineIntent?.decision === "approved"
+  ) {
+    await applyApprovedRoutineIntentV1(state, identity, settled.routineIntent);
   }
   // The Bot ended its Turn to ask, so the answer opens the Turn that acts on
   // it. Last, so an approved Plugin is already on when that Turn is admitted.

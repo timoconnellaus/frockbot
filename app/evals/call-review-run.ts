@@ -16,7 +16,9 @@ import {
   RESPONSE_REVIEW_RUN_TIMEOUT_MS_V1,
 } from "../supervision/response-review.js";
 import {
+  CALL_REVIEW_ARGUMENTS_SURE_V1,
   CALL_REVIEW_ARGUMENTS_YES_V1,
+  CALL_REVIEW_AUTHORIZATION_SURE_V1,
   CALL_REVIEW_OUTSIDE_MIN_V1,
   CALL_REVIEW_READ_MIN_V1,
   CALL_REVIEW_READ_NONE_MIN_V1,
@@ -140,6 +142,8 @@ async function runCallReviewEvalV1() {
     runTimeoutMs: RESPONSE_REVIEW_RUN_TIMEOUT_MS_V1,
     thresholds: {
       argumentsYes: CALL_REVIEW_ARGUMENTS_YES_V1,
+      argumentsSure: CALL_REVIEW_ARGUMENTS_SURE_V1,
+      authorizationSure: CALL_REVIEW_AUTHORIZATION_SURE_V1,
       outsideMin: CALL_REVIEW_OUTSIDE_MIN_V1,
       readMin: CALL_REVIEW_READ_MIN_V1,
       readNoneMin: CALL_REVIEW_READ_NONE_MIN_V1,
