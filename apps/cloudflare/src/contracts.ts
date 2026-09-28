@@ -785,8 +785,9 @@ export interface GatewayDependencies {
   admitAccount(
     identity: AdmissionIdentityV1,
   ): Promise<AccountAdmissionDecisionV1>;
-  /** Raw deployment secret; only the derived `isAdmin` boolean reaches clients. */
+  /** Raw deployment secrets; only the derived `isAdmin` boolean reaches clients. */
   adminEmails?: string;
+  adminUserIds?: string;
   applicationHashFor(userId: string): Promise<string>;
   botStateFor(userId: string): UserBotStateBinding;
   userConfigurationFor(userId: string): UserConfigurationBinding;

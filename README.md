@@ -427,21 +427,22 @@ The tracked Wrangler files declare Cloudflare's `AI` binding for production and 
 
 Configure these GitHub `production` environment values:
 
-| Type     | Name                    | Purpose                                                                                                               |
-| -------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Secret   | `CLOUDFLARE_API_TOKEN`  | Cloudflare token permitted to edit Workers, D1, and R2 for the target account                                         |
-| Secret   | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account containing the production resources                                                                |
-| Variable | `BETTER_AUTH_URL`       | Set to `https://bot.frockbot.com`                                                                                     |
-| Secret   | `BETTER_AUTH_SECRET`    | Better Auth secret with at least 32 random characters                                                                 |
-| Secret   | `GOOGLE_CLIENT_ID`      | Google Web application OAuth client ID                                                                                |
-| Secret   | `GOOGLE_CLIENT_SECRET`  | Google Web application OAuth client secret                                                                            |
-| Secret   | `FROCKBOT_ADMIN_EMAILS` | Comma-separated owner emails allowed to administer deployment policy (optional; warns)                                |
-| Secret   | `SPRITES_TOKEN`         | Fly Sprites token used only by the backend Computer provider                                                          |
-| Secret   | `COMPUTER_HOST_TOKEN`   | Shared secret the app Worker presents to the Computer host; generate it                                               |
-| Secret   | `CREDENTIAL_KEYRING`    | Versioned AES-GCM keyring for per-User Connection credentials                                                         |
-| Secret   | `ROUTINE_HOOK_SECRET`   | HMAC secret every Routine webhook key is signed with; generate it                                                     |
-| Secret   | `MACHINE_TOKEN_SECRET`  | HMAC secret every registered-machine token and pairing code is signed with; generate it                               |
-| Secret   | `FCM_SERVICE_ACCOUNT`   | Firebase service-account JSON authorizing Android push delivery; see [`docs/notifications.md`](docs/notifications.md) |
+| Type     | Name                      | Purpose                                                                                                               |
+| -------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Secret   | `CLOUDFLARE_API_TOKEN`    | Cloudflare token permitted to edit Workers, D1, and R2 for the target account                                         |
+| Secret   | `CLOUDFLARE_ACCOUNT_ID`   | Cloudflare account containing the production resources                                                                |
+| Variable | `BETTER_AUTH_URL`         | Set to `https://bot.frockbot.com`                                                                                     |
+| Secret   | `BETTER_AUTH_SECRET`      | Better Auth secret with at least 32 random characters                                                                 |
+| Secret   | `GOOGLE_CLIENT_ID`        | Google Web application OAuth client ID                                                                                |
+| Secret   | `GOOGLE_CLIENT_SECRET`    | Google Web application OAuth client secret                                                                            |
+| Secret   | `FROCKBOT_ADMIN_EMAILS`   | Comma-separated owner emails allowed to administer deployment policy (optional; warns)                                |
+| Secret   | `FROCKBOT_ADMIN_USER_IDS` | Comma-separated User ids that are admins too, for people with no verified email (optional; warns)                     |
+| Secret   | `SPRITES_TOKEN`           | Fly Sprites token used only by the backend Computer provider                                                          |
+| Secret   | `COMPUTER_HOST_TOKEN`     | Shared secret the app Worker presents to the Computer host; generate it                                               |
+| Secret   | `CREDENTIAL_KEYRING`      | Versioned AES-GCM keyring for per-User Connection credentials                                                         |
+| Secret   | `ROUTINE_HOOK_SECRET`     | HMAC secret every Routine webhook key is signed with; generate it                                                     |
+| Secret   | `MACHINE_TOKEN_SECRET`    | HMAC secret every registered-machine token and pairing code is signed with; generate it                               |
+| Secret   | `FCM_SERVICE_ACCOUNT`     | Firebase service-account JSON authorizing Android push delivery; see [`docs/notifications.md`](docs/notifications.md) |
 
 Admission is closed by default. Set `FROCKBOT_ADMIN_EMAILS` to one or more comma-separated email addresses in the GitHub `production` environment; those identities are always admitted and may open the operator surface. Administration itself is not in the app: it is the [admin portal](#the-admin-portal) at `admin.frockbot.com`, and the same list says who may use it. Every other account needs access from the beta-access authority, and having signed in before is not access; see [`docs/beta-access.md`](docs/beta-access.md), including the release step that retired the signups switch.
 

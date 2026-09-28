@@ -316,6 +316,7 @@ describe("the keys only a deployer has", () => {
       ...MINTED_SECRETS_V1.map((secret) => secret.name),
       ...HUMAN_SECRETS_V1.map((secret) => secret.name),
       "FROCKBOT_ADMIN_EMAILS",
+      "FROCKBOT_ADMIN_USER_IDS",
     ]);
     expect(
       accessBuildSecretNamesV1().filter((name) => !asked.has(name)),

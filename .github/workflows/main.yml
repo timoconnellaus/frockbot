@@ -599,6 +599,7 @@ jobs:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           FROCKBOT_ADMIN_EMAILS: ${{ secrets.FROCKBOT_ADMIN_EMAILS }}
+          FROCKBOT_ADMIN_USER_IDS: ${{ secrets.FROCKBOT_ADMIN_USER_IDS }}
           SPRITES_TOKEN: ${{ secrets.SPRITES_TOKEN }}
           COMPUTER_HOST_TOKEN: ${{ secrets.COMPUTER_HOST_TOKEN }}
           CREDENTIAL_KEYRING: ${{ secrets.CREDENTIAL_KEYRING }}
@@ -780,6 +781,7 @@ jobs:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           FROCKBOT_ADMIN_EMAILS: ${{ secrets.FROCKBOT_ADMIN_EMAILS }}
+          FROCKBOT_ADMIN_USER_IDS: ${{ secrets.FROCKBOT_ADMIN_USER_IDS }}
           SPRITES_TOKEN: ${{ secrets.SPRITES_TOKEN }}
           COMPUTER_HOST_TOKEN: ${{ secrets.COMPUTER_HOST_TOKEN }}
           CREDENTIAL_KEYRING: ${{ secrets.CREDENTIAL_KEYRING }}
@@ -823,6 +825,7 @@ jobs:
             'FCM_SERVICE_ACCOUNT',
           ];
           const optional = [
+            'FROCKBOT_ADMIN_USER_IDS',
             'DEBUG_TOKEN',
             'OPENAI_API_KEY',
             'GEMINI_API_KEY',

@@ -435,7 +435,10 @@ async function identifyRequest(
         emailVerified: session?.user.emailVerified === true,
         mode: development.userId ? "development" : "better-auth",
       },
-      dependencies.adminEmails,
+      {
+        emails: dependencies.adminEmails,
+        userIds: dependencies.adminUserIds,
+      },
     );
   // Every authenticated request asks, so pausing an account takes effect on
   // its next request rather than at its next sign-in. An admin is never

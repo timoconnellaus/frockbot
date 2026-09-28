@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { adminEmailsV1, isDeploymentAdminV1 } from "./admin-identities.js";
+import {
+  adminEmailsV1,
+  adminUserIdsV1,
+  isDeploymentAdminV1,
+} from "./admin-identities.js";
 
 describe("deployment admin identities", () => {
   test("normalizes the comma-separated email allowlist", () => {
@@ -18,7 +22,7 @@ describe("deployment admin identities", () => {
           emailVerified: true,
           mode: "better-auth",
         },
-        "owner@example.com",
+        { emails: "owner@example.com" },
       ),
     ).toBe(true);
     expect(
@@ -29,7 +33,7 @@ describe("deployment admin identities", () => {
           emailVerified: true,
           mode: "better-auth",
         },
-        "owner@example.com",
+        { emails: "owner@example.com" },
       ),
     ).toBe(false);
   });
@@ -40,17 +44,19 @@ describe("deployment admin identities", () => {
       email: "owner@example.com",
       mode: "better-auth",
     } as const;
-    expect(isDeploymentAdminV1(identity, "owner@example.com")).toBe(false);
+    expect(isDeploymentAdminV1(identity, { emails: "owner@example.com" })).toBe(
+      false,
+    );
     expect(
       isDeploymentAdminV1(
         { ...identity, emailVerified: false },
-        "owner@example.com",
+        { emails: "owner@example.com" },
       ),
     ).toBe(false);
     expect(
       isDeploymentAdminV1(
         { ...identity, emailVerified: true },
-        "owner@example.com",
+        { emails: "owner@example.com" },
       ),
     ).toBe(true);
   });
@@ -59,22 +65,55 @@ describe("deployment admin identities", () => {
     expect(
       isDeploymentAdminV1(
         { id: "development", mode: "development" },
-        "owner@example.com",
+        { emails: "owner@example.com" },
       ),
     ).toBe(true);
   });
 
   test("makes every development identity admin only when no allowlist is configured", () => {
     expect(
-      isDeploymentAdminV1(
-        { id: "local-alice", mode: "development" },
-        undefined,
-      ),
+      isDeploymentAdminV1({ id: "local-alice", mode: "development" }, {}),
     ).toBe(true);
     expect(
       isDeploymentAdminV1(
         { id: "local-alice", mode: "development" },
-        "owner@example.com",
+        { emails: "owner@example.com" },
+      ),
+    ).toBe(false);
+  });
+
+  test("reads the User id allowlist exactly, trimmed", () => {
+    expect([...adminUserIdsV1(" discord-Abc , user-2,, ")]).toEqual([
+      "discord-Abc",
+      "user-2",
+    ]);
+    expect([...adminUserIdsV1(undefined)]).toEqual([]);
+  });
+
+  test("grants admin by User id to a signed-in User with no email", () => {
+    const admins = { userIds: "discord-abc,user-2" };
+    expect(
+      isDeploymentAdminV1({ id: "discord-abc", mode: "better-auth" }, admins),
+    ).toBe(true);
+    expect(
+      isDeploymentAdminV1({ id: "discord-ABC", mode: "better-auth" }, admins),
+    ).toBe(false);
+    expect(
+      isDeploymentAdminV1({ id: "user-3", mode: "better-auth" }, admins),
+    ).toBe(false);
+  });
+
+  test("never grants admin by User id to a development identity somebody named", () => {
+    expect(
+      isDeploymentAdminV1(
+        { id: "user-2", mode: "development" },
+        { userIds: "user-2" },
+      ),
+    ).toBe(false);
+    expect(
+      isDeploymentAdminV1(
+        { id: "local-alice", mode: "development" },
+        { userIds: "user-2" },
       ),
     ).toBe(false);
   });

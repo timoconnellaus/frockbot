@@ -222,6 +222,12 @@ export const OPTIONAL_PRODUCTION_SECRETS_V1: readonly OptionalProductionSecretV1
         "nobody can administer beta access, so admission stays closed and only accounts already granted access can sign in",
     },
     {
+      name: "FROCKBOT_ADMIN_USER_IDS",
+      why: "Admins by User id, beside `FROCKBOT_ADMIN_EMAILS`, for a deployment whose people have no verified email.",
+      degraded:
+        "only a verified email on `FROCKBOT_ADMIN_EMAILS` makes an admin",
+    },
+    {
       name: "DEBUG_TOKEN",
       why: "Authorizes the read-only `/api/debug` operator surface.",
       degraded: "the operator debug routes 404",

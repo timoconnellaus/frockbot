@@ -1149,6 +1149,7 @@ function createTestGateway(
   access?: {
     admitAccount?: GatewayDependencies["admitAccount"];
     adminEmails?: string;
+    adminUserIds?: string;
   },
   openBotStateChannel?: NonNullable<GatewayDependencies["openBotStateChannel"]>,
   voice?: GatewayDependencies["voice"],
@@ -1172,6 +1173,7 @@ function createTestGateway(
     admitAccount:
       access?.admitAccount ?? (() => Promise.resolve(activeAccount)),
     ...(access?.adminEmails ? { adminEmails: access.adminEmails } : {}),
+    ...(access?.adminUserIds ? { adminUserIds: access.adminUserIds } : {}),
     applicationHashFor,
     botStateFor: (userId) => {
       const state = states.get(userId) ?? new MemoryBotState();
@@ -2793,6 +2795,31 @@ describe("Cloudflare user application gateway", () => {
 
     expect(response.status).toBe(200);
     expect(loader.ids).toEqual(["owner-user:foundation-v1"]);
+  });
+
+  test("admits an admin named by User id who has no email", async () => {
+    const auth = testAuthPackage({
+      handler: unauthenticatedAuth.handler,
+      getSession: () => Promise.resolve({ user: { id: "discord-owner" } }),
+    });
+    const { gateway, loader } = createTestGateway(
+      undefined,
+      auth,
+      false,
+      undefined,
+      {
+        admitAccount: () =>
+          Promise.reject(
+            new Error("an admin must not depend on the authority"),
+          ),
+        adminUserIds: "discord-owner",
+      },
+    );
+
+    const response = await gateway(new Request("https://frockbot.test/"));
+
+    expect(response.status).toBe(200);
+    expect(loader.ids).toEqual(["discord-owner:foundation-v1"]);
   });
 
   test("asks the authority for an allowlisted email the provider never verified", async () => {

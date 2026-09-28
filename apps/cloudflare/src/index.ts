@@ -163,6 +163,7 @@ import {
 import {
   DEVELOPMENT_USER_ID,
   isDeploymentAdminV1,
+  type DeploymentAdminsV1,
 } from "./admin-identities.js";
 import type { DebugGatewaySurface } from "./debug.js";
 import type { BotDebugQueryV1 } from "@frockbot/app/shell/debug-protocol";
@@ -369,6 +370,8 @@ interface Env {
   MACHINE_TOKEN_SECRET?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
   FROCKBOT_ADMIN_EMAILS?: string;
+  /** Admins by User id, for a deployment whose people have no email. */
+  FROCKBOT_ADMIN_USER_IDS?: string;
   ALLOWED_CLIENT_ORIGINS?: string;
   /** Authorizes `/api/debug/*`. Absent disables the surface entirely. */
   DEBUG_TOKEN?: string;
@@ -432,7 +435,7 @@ function debugSurface(env: Env): DebugGatewaySurface {
       (await getAgentByName(env.VOICE_ASSISTANTS, userId)).debugSnapshot(),
     isAdminUser: async (userId) => {
       // The auth Package's store is the durable identity source. The path's
-      // User id is never trusted on its own: it must resolve to a stored email,
+      // User id is never trusted on its own: it must resolve to a stored identity,
       // and that identity is evaluated by the same allowlist policy as the
       // signed-in gateway. A Package that stores nothing resolves nothing, so
       // the one write on this surface is refused rather than granted on the
@@ -447,7 +450,7 @@ function debugSurface(env: Env): DebugGatewaySurface {
             emailVerified: identity.emailVerified,
             mode: "better-auth",
           },
-          env.FROCKBOT_ADMIN_EMAILS,
+          deploymentAdmins(env),
         )
       );
     },
@@ -841,6 +844,13 @@ async function admitAccount(
   );
 }
 
+function deploymentAdmins(env: Env): DeploymentAdminsV1 {
+  return {
+    emails: env.FROCKBOT_ADMIN_EMAILS,
+    userIds: env.FROCKBOT_ADMIN_USER_IDS,
+  };
+}
+
 async function storedAdmissionIdentity(
   env: Env,
   userId: string,
@@ -860,7 +870,7 @@ async function storedAdmissionIdentity(
         emailVerified: identity.emailVerified,
         mode: "better-auth",
       },
-      env.FROCKBOT_ADMIN_EMAILS,
+      deploymentAdmins(env),
     ),
   };
 }
@@ -930,7 +940,8 @@ async function mayCreateIdentity(
         emailVerified: candidate.emailVerified,
         mode: "better-auth",
       },
-      env.FROCKBOT_ADMIN_EMAILS,
+      // No User exists yet, so only the email list can name one.
+      { emails: env.FROCKBOT_ADMIN_EMAILS },
     )
   ) {
     return true;
@@ -2753,6 +2764,9 @@ export default {
           admitAccount: (identity) => admitAccount(env, identity),
           ...(env.FROCKBOT_ADMIN_EMAILS
             ? { adminEmails: env.FROCKBOT_ADMIN_EMAILS }
+            : {}),
+          ...(env.FROCKBOT_ADMIN_USER_IDS
+            ? { adminUserIds: env.FROCKBOT_ADMIN_USER_IDS }
             : {}),
           applicationHashFor: async () => env.DEFAULT_APPLICATION_HASH,
           botStateFor: (userId) =>
