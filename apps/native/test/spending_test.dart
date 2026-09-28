@@ -97,6 +97,8 @@ void main() {
       addTearDown(tester.view.reset);
       final asked = <Uri>[];
       final api = SettingsApi(MemoryStore(), (path, body) async {
+        // Without a plan to measure against, figures stay in dollars.
+        if (path == '/api/billing') return {'metered': true};
         final uri = Uri.parse(path);
         asked.add(uri);
         expect(uri.path, '/api/billing/spending');
@@ -206,6 +208,59 @@ void main() {
       api.close();
     },
   );
+
+  testWidgets('with a plan: shares of it, until dollars are asked for', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final store = MemoryStore();
+    final api = SettingsApi(store, (path, _) async {
+      if (path == '/api/billing') {
+        return {
+          'metered': true,
+          'subscribed': true,
+          'plan': {'id': 'standard', 'includedMicros': 20000000},
+        };
+      }
+      return _report(
+        Uri.parse(path),
+        groups: [
+          {..._digest, 'chargeMicros': 26000000},
+        ],
+        topTurns: const [],
+        credit: {
+          'availableMicros': 4760000,
+          'dailyMicros': 340000,
+          'runsOutAt': _runsOut,
+          'renewsAt': _renews,
+        },
+      );
+    });
+    await tester.pumpWidget(MaterialApp(home: SpendingPage(api: api)));
+    await tester.pumpAndSettle();
+    expect(find.text('130%'), findsOneWidget);
+    expect(find.text('of your plan'), findsOneWidget);
+    expect(find.textContaining('vs 2.2% the period before'), findsOneWidget);
+    expect(
+      find.textContaining('At 1.7% of your plan a day', findRichText: true),
+      findsOneWidget,
+    );
+    // What is left to spend is money, whichever way spending reads.
+    expect(find.text('US\$4.76'), findsOneWidget);
+
+    await tester.tap(find.text('Show in dollars'));
+    await tester.pumpAndSettle();
+    expect(find.text('US\$26.00'), findsWidgets);
+    expect(find.text('130%'), findsNothing);
+    expect(store.values[spendDollarsKey], 'true');
+    await tester.tap(find.text('Show in dollars'));
+    await tester.pumpAndSettle();
+    expect(find.text('130%'), findsOneWidget);
+    expect(store.values.containsKey(spendDollarsKey), isFalse);
+    api.close();
+  });
 
   testWidgets('wide: the biggest driver, a Turns column, and no credit card '
       'where nothing is billed', (tester) async {

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -13,11 +14,15 @@ import '../theme/rows.dart';
 import '../theme/states.dart';
 import 'spending.dart';
 
-/// The plan as `/api/billing` states it; these are only what a reply without
-/// one falls back to.
-const _defaultMonthlyCents = 2000;
-const _defaultIncludedMicros = 15000000;
+/// The plans as `/api/billing` states them; these are only what a reply
+/// without them falls back to.
+const _fallbackPlans = {
+  'standard': (monthlyCents: 2000, includedMicros: 20000000),
+  'plus': (monthlyCents: 5000, includedMicros: 60000000),
+};
 const _defaultTopUps = [1000, 2500, 5000];
+
+const _day = 86400000;
 
 /// How wide Billing reads: one column, the width of the design, centred.
 const _column = 760.0;
@@ -31,6 +36,38 @@ String _dollars(num cents) => cents % 100 == 0
     : 'US\$${(cents / 100).toStringAsFixed(2)}';
 
 String _wholeMicros(num micros) => _dollars((micros / 10000).round());
+
+typedef _Plan = ({
+  String id,
+  String name,
+  int monthlyCents,
+  int includedMicros,
+});
+
+_Plan _readPlan(Object? raw) {
+  final plan = raw is Map ? raw : const {};
+  final id = plan['id'] == 'plus' ? 'plus' : 'standard';
+  final fallback = _fallbackPlans[id]!;
+  return (
+    id: id,
+    name: id == 'plus' ? 'Plus' : 'Standard',
+    monthlyCents:
+        (plan['monthlyCents'] as num?)?.toInt() ?? fallback.monthlyCents,
+    includedMicros:
+        (plan['includedMicros'] as num?)?.toInt() ?? fallback.includedMicros,
+  );
+}
+
+/// Both plans, Standard first.
+List<_Plan> _plans(Map data) {
+  final listed = (data['plans'] as List? ?? const []).map(_readPlan).toList();
+  if (listed.length >= 2) return listed;
+  final own = _readPlan(data['plan']);
+  return [
+    own.id == 'standard' ? own : _readPlan(const {'id': 'standard'}),
+    own.id == 'plus' ? own : _readPlan(const {'id': 'plus'}),
+  ];
+}
 
 /// Billing: what the account can spend, how to add more, and where it went.
 class BillingPage extends StatefulWidget {
@@ -140,18 +177,23 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
     });
   }
 
-  Future<void> _openPayment(String kind, {int? cents}) async {
+  Future<void> _openPayment(String kind, {int? cents, String? plan}) async {
     if (busy) return;
     setState(() {
       busy = true;
       message = null;
     });
-    final key = '$kind:${cents ?? 0}';
+    final key = '$kind:${cents ?? plan ?? 0}';
     final id = checkoutIds.putIfAbsent(key, randomId);
     try {
       final response = await widget.api.request(
         kind == 'portal' ? '/api/billing/portal' : '/api/billing/checkout',
-        body: {'id': id, if (kind != 'portal') 'kind': kind, 'cents': ?cents},
+        body: {
+          'id': id,
+          if (kind != 'portal') 'kind': kind,
+          'cents': ?cents,
+          'plan': ?plan,
+        },
       );
       if (response is! Map || response['url'] is! String) {
         throw const FormatException('Payment link is unavailable');
@@ -176,6 +218,81 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
       if (mounted) {
         setState(
           () => message = 'Couldn’t open payment just now. Check your connection and try again.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> _chooseTopUp(List<int> topUps) async {
+    final cents = await showDialog<int>(
+      context: context,
+      builder: (_) => _TopUpDialog(topUps: topUps, initial: topUpCents),
+    );
+    if (cents == null || !mounted) return;
+    setState(() => topUpCents = cents);
+    await _openPayment('topup', cents: cents);
+  }
+
+  /// Plus takes effect now: it is charged and starts a new billing month, so
+  /// it is confirmed first.
+  Future<void> _moveToPlus(_Plan plus) async {
+    if (busy) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Move to Plus?'),
+        content: Text(
+          'Plus is ${_dollars(plus.monthlyCents)} a month with ${_wholeMicros(plus.includedMicros)} of usage. It starts now: you are charged today and a new billing month begins. Top-ups you have stay yours.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Move to Plus'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() {
+      busy = true;
+      message = null;
+    });
+    const key = 'plan:plus';
+    final id = checkoutIds.putIfAbsent(key, randomId);
+    try {
+      final response = await widget.api.request(
+        '/api/billing/plan',
+        body: {'id': id, 'plan': 'plus'},
+      );
+      if (response is! Map || response['plan'] != 'plus') {
+        throw const FormatException('Invalid plan response');
+      }
+      checkoutIds.remove(key);
+      if (mounted) {
+        setState(
+          () =>
+              message = 'You’re on Plus. Your new billing month starts today.',
+        );
+      }
+      await _refresh();
+    } on RequestFailure catch (error) {
+      // A refusal is an answer, not a lost request: the next try is new.
+      if (error.status == 409) checkoutIds.remove(key);
+      if (mounted) {
+        setState(
+          () => message = error.status == 409 ? error.message : 'Couldn’t change your plan just now. Check your connection and try again.',
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => message = 'Couldn’t change your plan just now. Check your connection and try again.',
         );
       }
     } finally {
@@ -247,33 +364,35 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
     final theme = Theme.of(context);
     final subscription = data['subscription'] as Map?;
     final subscribed = data['subscribed'] == true;
+    final trial = subscribed ? null : data['trial'] as Map?;
     final metered = data['metered'] == true;
     final payments = data['paymentsAvailable'] == true;
+    final plans = _plans(data);
+    final own = _readPlan(data['plan']);
     int micros(String key) => (data[key] as num?)?.toInt() ?? 0;
-    final available = subscribed
-        ? micros('includedMicros') +
-              micros('complimentaryMicros') +
-              micros('purchasedMicros')
-        : micros('complimentaryMicros');
+    // A subscribed account out of credit is told so in its own gauge; this
+    // is for an account with no plan to draw on, or one under review.
     final blocked = !metered
         ? null
         : data['suspended'] == true
         ? 'Payments need review. Contact support before starting more paid work.'
-        : data['canSpend'] != true
+        : data['canSpend'] != true && !subscribed
         ? _hadComplimentary(data)
               ? 'Your complimentary credit is used up. Subscribe to keep them working.'
               : 'They reply once you subscribe or receive credit.'
-        : subscribed && available <= 0
-        ? 'You have no usage credit left. Add credit to keep them working.'
         : null;
     final balance =
         subscribed ||
+        trial != null ||
         [
           'includedMicros',
           'complimentaryMicros',
           'purchasedMicros',
           'reservedMicros',
         ].any((key) => micros(key) > 0);
+    final topUps = _topUps(data);
+    final canTopUp = payments && subscribed && !busy;
+    final canMove = payments && subscribed && own.id == 'standard' && !busy;
     return [
       if (message case final String text) _Notice(text),
       if (!payments) const _Notice('Payments are not available yet.'),
@@ -284,15 +403,13 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
       if (balance) ...[
         identified(
           BillingIds.balance,
-          _BalanceCard(
+          _FuelCard(
+            fuel: _fuel(data, pace, DateTime.now().millisecondsSinceEpoch),
             data: data,
-            available: available,
-            pace: pace,
-            topUps: _topUps(data),
-            topUpCents: topUpCents,
-            onTopUpChosen: (cents) => setState(() => topUpCents = cents),
-            onTopUp: payments && subscribed && !busy
-                ? () => unawaited(_openPayment('topup', cents: topUpCents))
+            plan: own,
+            onTopUp: canTopUp ? () => unawaited(_chooseTopUp(topUps)) : null,
+            onMoveToPlus: canMove
+                ? () => unawaited(_moveToPlus(plans.last))
                 : null,
             onPortal: payments && subscription != null && !busy
                 ? () => unawaited(_openPayment('portal'))
@@ -301,29 +418,39 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
         ),
         const SizedBox(height: 16),
       ],
-      if (!subscribed) ...[
-        identified(
-          BillingIds.plan,
-          _PlanCard(
-            plan: data['plan'] as Map?,
-            payments: payments,
-            // A subscription that lapsed or is past due is mended where it
-            // is kept, not bought again.
-            onSubscribe: _canSubscribe(subscription) && payments && !busy
-                ? () => unawaited(_openPayment('subscription'))
-                : null,
-            onPortal:
-                !_canSubscribe(subscription) &&
-                    subscription != null &&
-                    payments &&
-                    !busy
-                ? () => unawaited(_openPayment('portal'))
-                : null,
-          ),
+      identified(
+        BillingIds.plan,
+        _PlansCard(
+          plans: plans,
+          current: subscribed || trial != null ? own.id : null,
+          trial: trial != null,
+          selling: !subscribed && trial == null && _canSubscribe(subscription),
+          payments: payments,
+          // A subscription that lapsed or is past due is mended where it
+          // is kept, not bought again.
+          onChoose:
+              !subscribed &&
+                  trial == null &&
+                  _canSubscribe(subscription) &&
+                  payments &&
+                  !busy
+              ? (id) => unawaited(_openPayment('subscription', plan: id))
+              : null,
+          onMoveToPlus: canMove
+              ? () => unawaited(_moveToPlus(plans.last))
+              : null,
+          onMend:
+              !subscribed &&
+                  trial == null &&
+                  !_canSubscribe(subscription) &&
+                  subscription != null &&
+                  payments &&
+                  !busy
+              ? () => unawaited(_openPayment('portal'))
+              : null,
         ),
-        const SizedBox(height: 16),
-      ],
-      const SizedBox(height: 16),
+      ),
+      const SizedBox(height: 32),
       KeyedSubtree(
         key: _spendingSection,
         child: identified(
@@ -333,6 +460,7 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
             api: widget.api,
             heading: 'Spending',
             showCredit: false,
+            allowanceMicros: spendAllowance(data),
             onCredit: (credit) {
               if (mounted) setState(() => pace = credit);
             },
@@ -485,24 +613,207 @@ class _Blocked extends StatelessWidget {
   }
 }
 
-/// What the account can spend, what it is made of, and how to add more.
-class _BalanceCard extends StatelessWidget {
+enum _Tone { calm, warn, stop }
+
+/// What the gauge says: one large answer, the line under it, the bar, and
+/// whether it runs out before the plan renews.
+class _Fuel {
+  final String lead;
+  final _Tone leadTone;
+  final String? caption;
+
+  /// Null where there is no allowance to measure against.
+  final ({double left, double held, double? pace})? gauge;
+  final String? pace;
+  final _Tone paceTone;
+
+  /// Top up and Move to Plus sit beside the answer: credit is short.
+  final bool short;
+  final List<String> notes;
+  const _Fuel({
+    required this.lead,
+    this.leadTone = _Tone.calm,
+    this.caption,
+    this.gauge,
+    this.pace,
+    this.paceTone = _Tone.calm,
+    this.short = false,
+    this.notes = const [],
+  });
+}
+
+/// Whether the account has a week of history, so the last seven days' pace
+/// says something about the rest of the month.
+bool _hasWeek(Map data, int now) {
+  final created = (data['payments'] as List? ?? const [])
+      .whereType<Map>()
+      .map((grant) => grant['created'])
+      .whereType<num>();
+  return created.isNotEmpty && created.reduce(math.min) <= now - 7 * _day;
+}
+
+/// The billing month that ends at [end]: one calendar month before it.
+int _monthBefore(int end) {
+  final at = DateTime.fromMillisecondsSinceEpoch(end);
+  return DateTime(
+    at.year,
+    at.month - 1,
+    at.day,
+    at.hour,
+    at.minute,
+  ).millisecondsSinceEpoch;
+}
+
+String _percent(num part, num whole) =>
+    '${whole > 0 ? (part / whole * 100).clamp(0, 100).round() : 0}%';
+
+_Fuel _fuel(Map data, Map? credit, int now) {
+  int micros(String key) => (data[key] as num?)?.toInt() ?? 0;
+  final subscribed = data['subscribed'] == true;
+  final trial = subscribed ? null : data['trial'] as Map?;
+  final subscription = data['subscription'] as Map?;
+  final plan = _readPlan(data['plan']);
+  final end =
+      ((subscription?['periodEnd'] ??
+                  (data['paidAccess'] as Map?)?['periodEnd'])
+              as num?)
+          ?.toInt();
+  final ending = subscription?['cancelAtPeriodEnd'] == true;
+  final included = micros('includedMicros');
+  final purchased = micros('purchasedMicros');
+  final complimentary = micros('complimentaryMicros');
+  final held = micros('reservedMicros');
+  final runsOut = (credit?['runsOutAt'] as num?)?.toInt();
+
+  ({double left, double held, double? pace}) gauge(
+    int left,
+    int whole, {
+    int? start,
+    int? until,
+  }) {
+    double share(int part) => whole > 0 ? (part / whole).clamp(0, 1) : 0;
+    return (
+      left: share(left),
+      held: share(math.min(held, left)),
+      pace: start == null || until == null || until <= start
+          ? null
+          : ((until - now) / (until - start)).clamp(0, 1).toDouble(),
+    );
+  }
+
+  final reserve = [
+    if (purchased > 0)
+      '+ ${_money(purchased)} in reserve · used after this month’s runs out · never expires',
+    if (complimentary > 0 && trial == null)
+      '+ ${_money(complimentary)} complimentary credit from ${clientBrand.productName}',
+  ];
+
+  if (trial != null) {
+    final endsAt = (trial['endsAt'] as num?)?.toInt() ?? now;
+    final whole = (trial['creditMicros'] as num?)?.toInt() ?? 0;
+    final days = math.max(0, ((endsAt - now) / _day).ceil());
+    return _Fuel(
+      lead: 'Trial · $days ${days == 1 ? 'day' : 'days'} left',
+      caption:
+          '${_percent(complimentary, whole)} of your trial credit left. ${plan.name} begins ${spendDate(endsAt)}.',
+      gauge: gauge(
+        complimentary,
+        whole,
+        start: endsAt - 7 * _day,
+        until: endsAt,
+      ),
+      notes: reserve,
+    );
+  }
+
+  if (!subscribed) {
+    return _Fuel(
+      lead: complimentary > 0
+          ? '${_money(complimentary)} of complimentary credit'
+          : 'No plan',
+      caption: complimentary > 0
+          ? 'From ${clientBrand.productName}. Spendable without a subscription.'
+          : null,
+      notes: [
+        if (purchased > 0)
+          '${_money(purchased)} of top-up credit · used once you subscribe again · never expires',
+      ],
+    );
+  }
+
+  final renews = end == null ? '' : spendDate(end);
+  final start = end == null ? null : _monthBefore(end);
+  if (included + purchased + complimentary <= 0) {
+    return _Fuel(
+      lead: end == null ? 'Paused' : 'Paused until $renews',
+      leadTone: _Tone.stop,
+      caption: 'This month’s allowance is used up. Top up to keep your Bots working now.',
+      gauge: gauge(0, plan.includedMicros),
+      short: true,
+    );
+  }
+
+  // Past the date the plan renews, the pace says nothing about running out.
+  final knowsPace = credit != null && _hasWeek(data, now);
+  final lasts = runsOut == null || (end != null && runsOut >= end);
+  final pace = !knowsPace
+      ? null
+      : lasts
+      ? end == null
+            ? null
+            : 'Lasts until your plan ${ending ? 'ends' : 'renews'} on $renews'
+      : 'At your pace, runs out around ${spendDate(runsOut)}';
+  final short = knowsPace && !lasts;
+
+  if (included <= 0) {
+    return _Fuel(
+      lead: '${_money(purchased + complimentary)} of top-up left',
+      caption: end == null
+          ? 'This month’s allowance is used.'
+          : 'This month’s allowance is used. It renews on $renews.',
+      gauge: gauge(0, plan.includedMicros, start: start, until: end),
+      pace: short ? pace : null,
+      paceTone: _Tone.warn,
+      short: short,
+    );
+  }
+
+  return _Fuel(
+    lead: '${_percent(included, plan.includedMicros)} left',
+    caption: 'of this month’s ${plan.name} plan',
+    gauge: gauge(included, plan.includedMicros, start: start, until: end),
+    pace: pace,
+    paceTone: short ? _Tone.warn : _Tone.calm,
+    short: short,
+    notes: reserve,
+  );
+}
+
+Color _ink(BuildContext context, _Tone tone) {
+  final theme = Theme.of(context);
+  final dark = theme.brightness == Brightness.dark;
+  return switch (tone) {
+    _Tone.calm => theme.colorScheme.onSurface,
+    _Tone.warn => dark ? FrockTheme.warning : FrockTheme.warningInk,
+    _Tone.stop => theme.colorScheme.error,
+  };
+}
+
+/// Billing's first answer: how much of this month's plan is left, and
+/// whether it lasts.
+class _FuelCard extends StatelessWidget {
+  final _Fuel fuel;
   final Map<String, dynamic> data;
-  final int available;
-  final Map? pace;
-  final List<int> topUps;
-  final int topUpCents;
-  final void Function(int cents) onTopUpChosen;
+  final _Plan plan;
   final VoidCallback? onTopUp;
+  final VoidCallback? onMoveToPlus;
   final VoidCallback? onPortal;
-  const _BalanceCard({
+  const _FuelCard({
+    required this.fuel,
     required this.data,
-    required this.available,
-    required this.pace,
-    required this.topUps,
-    required this.topUpCents,
-    required this.onTopUpChosen,
+    required this.plan,
     required this.onTopUp,
+    required this.onMoveToPlus,
     required this.onPortal,
   });
 
@@ -517,72 +828,99 @@ class _BalanceCard extends StatelessWidget {
                 (data['paidAccess'] as Map?)?['periodEnd'])
             as num?;
     final ending = subscription?['cancelAtPeriodEnd'] == true;
-    final included =
-        ((data['plan'] as Map?)?['includedMicros'] as num?) ??
-        _defaultIncludedMicros;
-    int micros(String key) => (data[key] as num?)?.toInt() ?? 0;
-    final reserved = micros('reservedMicros');
-    final parts = [
-      if (subscribed || micros('includedMicros') > 0)
-        _Part(
-          title: 'Monthly credit',
-          amount:
-              '${_money(micros('includedMicros'))} of ${_wholeMicros(included)} left',
-          fraction: included > 0 ? micros('includedMicros') / included : 0,
-          detail: periodEnd == null
-              ? 'Used first. Resets each billing month.'
-              : 'Used first. Resets ${spendDate(periodEnd)}.',
-        ),
-      if (subscribed || micros('purchasedMicros') > 0)
-        _Part(
-          title: 'Top-up credit',
-          amount: _money(micros('purchasedMicros')),
-          fraction: micros('purchasedMicros') > 0 ? 1 : 0,
-          detail: 'Never expires.',
-          soft: true,
-        ),
-      if (micros('complimentaryMicros') > 0)
-        _Part(
-          title: 'Complimentary credit',
-          amount: _money(micros('complimentaryMicros')),
-          fraction: 1,
-          detail: 'From ${clientBrand.productName}. Spendable without a subscription.',
-          soft: true,
-        ),
-    ];
-    final runway = pace == null ? null : spendRunway(context, pace!);
+    final held = (data['reservedMicros'] as num? ?? 0) > 0;
     final pill = subscribed
         ? _Pill(
             periodEnd == null
-                ? 'Subscribed'
-                : 'Subscribed · ${ending ? 'ends' : 'renews'} ${spendDate(periodEnd)}',
+                ? plan.name
+                : '${plan.name} · ${ending ? 'ends' : 'renews'} ${spendDate(periodEnd)}',
           )
         : null;
+    final more = [
+      if (onTopUp != null)
+        OutlinedButton(onPressed: onTopUp, child: const Text('Top up')),
+      if (onMoveToPlus != null)
+        FilledButton(
+          onPressed: onMoveToPlus,
+          child: const Text('Move to Plus'),
+        ),
+    ];
+    final portal = onPortal == null
+        ? null
+        : TextButton.icon(
+            onPressed: onPortal,
+            iconAlignment: IconAlignment.end,
+            icon: const Icon(Icons.north_east_rounded, size: 16),
+            label: const Text('Plan, invoices & card'),
+          );
     return Card(
       margin: EdgeInsets.zero,
       child: LayoutBuilder(
         builder: (context, constraints) {
           final wide = constraints.maxWidth >= 560;
           final pad = wide ? 24.0 : 18.0;
-          final total = Column(
+          final lead = Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Available to spend',
-                style: theme.textTheme.bodyMedium?.copyWith(color: muted),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                _money(available),
+                fuel.lead,
                 style: theme.textTheme.headlineLarge?.copyWith(
-                  fontSize: 40,
+                  fontSize: 34,
                   fontWeight: FontWeight.w700,
                   letterSpacing: -0.8,
+                  color: _ink(context, fuel.leadTone),
                   fontFeatures: FrockTheme.tabularFigures,
                 ),
               ),
+              if (fuel.caption case final String caption) ...[
+                const SizedBox(height: 2),
+                Text(
+                  caption,
+                  style: theme.textTheme.bodyMedium?.copyWith(color: muted),
+                ),
+              ],
             ],
           );
+          final paceLine = fuel.pace == null
+              ? null
+              : Text(
+                  fuel.pace!,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: _ink(context, fuel.paceTone),
+                    fontWeight: FontWeight.w600,
+                  ),
+                );
+          // Short of credit, what adds more sits beside what says so.
+          final beside = fuel.short && more.isNotEmpty;
+          final answer = fuel.pace == null && !beside
+              ? null
+              : wide
+              ? Row(
+                  children: [
+                    Expanded(child: paceLine ?? const SizedBox()),
+                    if (beside)
+                      for (final button in more) ...[
+                        const SizedBox(width: 10),
+                        button,
+                      ],
+                  ],
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ?paceLine,
+                    if (beside) ...[
+                      if (paceLine != null) const SizedBox(height: 10),
+                      Wrap(spacing: 10, runSpacing: 10, children: more),
+                    ],
+                  ],
+                );
+          // Plus is offered from the plan card until credit runs short.
+          final actions = [
+            if (!beside && onTopUp != null)
+              OutlinedButton(onPressed: onTopUp, child: const Text('Top up')),
+            ?portal,
+          ];
           return Padding(
             padding: EdgeInsets.all(pad),
             child: Column(
@@ -592,40 +930,45 @@ class _BalanceCard extends StatelessWidget {
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(child: total),
+                      Expanded(child: lead),
                       ?pill,
                     ],
                   )
                 else ...[
-                  total,
                   if (pill != null) ...[
-                    const SizedBox(height: 10),
                     Align(alignment: Alignment.centerLeft, child: pill),
+                    const SizedBox(height: 12),
                   ],
+                  lead,
                 ],
-                if (parts.isNotEmpty) ...[
-                  const SizedBox(height: 20),
-                  if (wide)
-                    IntrinsicHeight(
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          for (var i = 0; i < parts.length; i++) ...[
-                            if (i > 0) const SizedBox(width: 12),
-                            Expanded(child: parts[i]),
-                          ],
-                        ],
-                      ),
-                    )
-                  else
-                    for (var i = 0; i < parts.length; i++) ...[
-                      if (i > 0) const SizedBox(height: 10),
-                      parts[i],
-                    ],
+                if (fuel.gauge case final gauge?) ...[
+                  const SizedBox(height: 16),
+                  _Gauge(
+                    left: gauge.left,
+                    held: gauge.held,
+                    pace: gauge.pace,
+                    tone: fuel.paceTone,
+                  ),
                 ],
-                if (onTopUp != null || onPortal != null) ...[
-                  const SizedBox(height: 20),
-                  _actions(context, wide: wide),
+                if (answer != null) ...[const SizedBox(height: 14), answer],
+                for (final note in fuel.notes) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    note,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: muted,
+                      fontSize: 12.5,
+                    ),
+                  ),
+                ],
+                if (actions.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: actions,
+                  ),
                 ],
                 const SizedBox(height: 18),
                 Divider(
@@ -633,26 +976,11 @@ class _BalanceCard extends StatelessWidget {
                   color: FrockTheme.hairline(theme.colorScheme),
                 ),
                 const SizedBox(height: 14),
-                Text.rich(
-                  TextSpan(
-                    children: [
-                      if (runway != null) ...[
-                        TextSpan(
-                          children: [runway],
-                          style: TextStyle(color: theme.colorScheme.onSurface),
-                        ),
-                        const TextSpan(text: ' '),
-                      ],
-                      const TextSpan(
-                        text: 'Hosted models and your Bots’ Computers draw on it. When it runs out, new work pauses; there is never an overage charge.',
-                      ),
-                      if (reserved > 0)
-                        TextSpan(
-                          text:
-                              ' ${_money(reserved)} is held for work still running.',
-                        ),
-                    ],
-                  ),
+                Text(
+                  [
+                    'Hosted models and your Bots’ Computers draw on your plan. When it runs out, new work pauses; there is never an overage charge.',
+                    if (held && fuel.gauge != null) 'The lighter part of the bar is held for work still running.',
+                  ].join(' '),
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: muted,
                     fontSize: 12.5,
@@ -666,154 +994,94 @@ class _BalanceCard extends StatelessWidget {
       ),
     );
   }
-
-  Widget _actions(BuildContext context, {required bool wide}) {
-    final theme = Theme.of(context);
-    final portal = onPortal == null
-        ? null
-        : OutlinedButton.icon(
-            onPressed: onPortal,
-            iconAlignment: IconAlignment.end,
-            icon: const Icon(Icons.north_east_rounded, size: 16),
-            label: const Text('Plan, invoices & card'),
-          );
-    final topUp = onTopUp == null
-        ? null
-        : Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              if (wide)
-                Text(
-                  'Add credit',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              FrockSegmented(
-                label: 'Top-up amount',
-                selected: '$topUpCents',
-                options: [
-                  for (final cents in topUps)
-                    (slug: '$cents', label: _dollars(cents)),
-                ],
-                onChosen: (slug) => onTopUpChosen(int.parse(slug)),
-              ),
-              FilledButton(
-                onPressed: onTopUp,
-                child: Text('Add ${_dollars(topUpCents)}'),
-              ),
-            ],
-          );
-    if (wide) {
-      return Row(
-        children: [
-          if (topUp != null) Expanded(child: topUp) else const Spacer(),
-          if (portal != null) ...[const SizedBox(width: 12), portal],
-        ],
-      );
-    }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (topUp != null) ...[
-          Text(
-            'Add credit',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 8),
-          topUp,
-        ],
-        if (topUp != null && portal != null) const SizedBox(height: 12),
-        ?portal,
-      ],
-    );
-  }
 }
 
-/// One kind of credit inside the balance.
-class _Part extends StatelessWidget {
-  final String title;
-  final String amount;
-  final double fraction;
-  final String detail;
-  final bool soft;
-  const _Part({
-    required this.title,
-    required this.amount,
-    required this.fraction,
-    required this.detail,
-    this.soft = false,
+/// The share of the allowance left, what of it is held for running work, and
+/// a tick where an even pace through the month would be.
+class _Gauge extends StatelessWidget {
+  final double left;
+  final double held;
+  final double? pace;
+  final _Tone tone;
+  const _Gauge({
+    required this.left,
+    required this.held,
+    required this.pace,
+    required this.tone,
   });
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final muted = theme.textTheme.bodySmall?.copyWith(
-      color: scheme.onSurfaceVariant,
-      fontSize: 12.5,
-    );
+    final scheme = Theme.of(context).colorScheme;
+    final fill = tone == _Tone.warn ? _ink(context, tone) : scheme.primary;
+    final free = math.max(0.0, left - held);
     return Semantics(
       container: true,
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-        decoration: BoxDecoration(
-          color: scheme.onSurface.withValues(alpha: 0.05),
-          borderRadius: BorderRadius.circular(FrockTheme.radiusControl),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Wrap(
-              alignment: WrapAlignment.spaceBetween,
-              spacing: 8,
-              children: [
-                Text(
-                  title,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                Text(
-                  amount,
-                  style: muted?.copyWith(
-                    fontSize: 13,
-                    fontFeatures: FrockTheme.tabularFigures,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            ExcludeSemantics(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(3),
-                child: SizedBox(
-                  height: 6,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      ColoredBox(
-                        color: scheme.onSurface.withValues(alpha: 0.08),
+      label: [
+        '${(left * 100).round()}% left',
+        if (held > 0) '${(held * 100).round()}% of it held for work running',
+        if (pace != null) 'an even pace would leave ${(pace! * 100).round()}%',
+      ].join(', '),
+      child: ExcludeSemantics(
+        child: SizedBox(
+          height: 18,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final width = constraints.maxWidth;
+              return Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    top: 4,
+                    height: 10,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(5),
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: ColoredBox(
+                              color: scheme.onSurface.withValues(alpha: 0.08),
+                            ),
+                          ),
+                          Positioned(
+                            left: 0,
+                            top: 0,
+                            bottom: 0,
+                            width: width * free,
+                            child: ColoredBox(color: fill),
+                          ),
+                          Positioned(
+                            left: width * free,
+                            top: 0,
+                            bottom: 0,
+                            width: width * (left - free),
+                            child: ColoredBox(
+                              color: fill.withValues(alpha: 0.4),
+                            ),
+                          ),
+                        ],
                       ),
-                      FractionallySizedBox(
-                        alignment: Alignment.centerLeft,
-                        widthFactor: fraction.clamp(0, 1).toDouble(),
-                        child: ColoredBox(
-                          color: soft ? FrockTheme.accentSoft : scheme.primary,
+                    ),
+                  ),
+                  if (pace != null)
+                    Positioned(
+                      left: (width * pace! - 1).clamp(0, width - 2),
+                      top: 0,
+                      bottom: 0,
+                      width: 2,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: scheme.onSurface.withValues(alpha: 0.7),
+                          borderRadius: BorderRadius.circular(1),
                         ),
                       ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(detail, style: muted),
-          ],
+                    ),
+                ],
+              );
+            },
+          ),
         ),
       ),
     );
@@ -858,120 +1126,154 @@ class _Pill extends StatelessWidget {
   }
 }
 
-/// The one plan, for an account that has not taken it.
-class _PlanCard extends StatelessWidget {
-  final Map? plan;
+/// One of the plan's top-up amounts, bought in the browser.
+class _TopUpDialog extends StatefulWidget {
+  final List<int> topUps;
+  final int initial;
+  const _TopUpDialog({required this.topUps, required this.initial});
+
+  @override
+  State<_TopUpDialog> createState() => _TopUpDialogState();
+}
+
+class _TopUpDialogState extends State<_TopUpDialog> {
+  late int cents = widget.initial;
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Top up'),
+    content: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Top-up credit is used after this month’s allowance runs out, and never expires.',
+        ),
+        const SizedBox(height: 16),
+        FrockSegmented(
+          label: 'Top-up amount',
+          selected: '$cents',
+          options: [
+            for (final amount in widget.topUps)
+              (slug: '$amount', label: _dollars(amount)),
+          ],
+          onChosen: (slug) => setState(() => cents = int.parse(slug)),
+        ),
+      ],
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed: () => Navigator.of(context).pop(cents),
+        child: Text('Add ${_dollars(cents)}'),
+      ),
+    ],
+  );
+}
+
+/// Standard beside Plus, described by how much room each gives the account's
+/// Bots; the credit behind it is the small print.
+class _PlansCard extends StatelessWidget {
+  final List<_Plan> plans;
+
+  /// The plan the account is on, or null without one.
+  final String? current;
+  final bool trial;
+
+  /// The account can take a plan here, whether or not payments are open.
+  final bool selling;
   final bool payments;
-  final VoidCallback? onSubscribe;
-  final VoidCallback? onPortal;
-  const _PlanCard({
-    required this.plan,
+  final void Function(String id)? onChoose;
+  final VoidCallback? onMoveToPlus;
+  final VoidCallback? onMend;
+  const _PlansCard({
+    required this.plans,
+    required this.current,
+    required this.trial,
+    required this.selling,
     required this.payments,
-    required this.onSubscribe,
-    required this.onPortal,
+    required this.onChoose,
+    required this.onMoveToPlus,
+    required this.onMend,
   });
+
+  String _room(_Plan plan) {
+    final base = plans.first.includedMicros;
+    if (plan.id == 'standard' || base <= 0) {
+      return 'Room for everyday chats and a few Routines.';
+    }
+    final times = plan.includedMicros / base;
+    final label = times == times.roundToDouble()
+        ? '${times.round()}'
+        : times.toStringAsFixed(1);
+    return '$label× the room, for Bots and Routines that work all day.';
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
-    final monthly = (plan?['monthlyCents'] as num?) ?? _defaultMonthlyCents;
-    final included =
-        (plan?['includedMicros'] as num?) ?? _defaultIncludedMicros;
-    final check = theme.brightness == Brightness.dark
-        ? FrockTheme.success
-        : FrockTheme.successInk;
-    final points = [
-      '${_wholeMicros(included)} of usage included every month',
-      'Top up any time. Top-ups never expire.',
-      'Work pauses when credit runs out. No overage charges.',
-    ];
-    final mend = onPortal != null;
     return Card(
       margin: EdgeInsets.zero,
       child: LayoutBuilder(
         builder: (context, constraints) {
           final wide = constraints.maxWidth >= 560;
-          final button = mend
-              ? FilledButton.icon(
-                  onPressed: onPortal,
-                  iconAlignment: IconAlignment.end,
-                  icon: const Icon(Icons.north_east_rounded, size: 16),
-                  label: const Text('Plan, invoices & card'),
-                )
-              : FilledButton(
-                  onPressed: onSubscribe,
-                  child: const Text('Subscribe'),
-                );
+          final tiles = [for (final plan in plans) _tile(context, plan, wide)];
           return Padding(
-            padding: EdgeInsets.all(wide ? 24 : 20),
+            padding: EdgeInsets.all(wide ? 24 : 18),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  'One plan for your whole flock',
-                  style: theme.textTheme.bodyMedium?.copyWith(color: muted),
+                  selling ? 'Choose a plan' : 'Plans',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
-                const SizedBox(height: 4),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.baseline,
-                  textBaseline: TextBaseline.alphabetic,
-                  children: [
-                    Text(
-                      _dollars(monthly),
-                      style: theme.textTheme.headlineLarge?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.6,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      '/ month',
-                      style: theme.textTheme.bodyMedium?.copyWith(color: muted),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                for (final point in points)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
+                const SizedBox(height: 14),
+                if (wide)
+                  IntrinsicHeight(
                     child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Padding(
-                          padding: const EdgeInsets.only(top: 1),
-                          child: Icon(
-                            Icons.check_rounded,
-                            size: 18,
-                            color: check,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            point,
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              height: 1.4,
-                            ),
-                          ),
-                        ),
+                        for (var i = 0; i < tiles.length; i++) ...[
+                          if (i > 0) const SizedBox(width: 12),
+                          Expanded(child: tiles[i]),
+                        ],
                       ],
                     ),
-                  ),
-                const SizedBox(height: 6),
-                if (wide)
-                  Row(
-                    children: [
-                      button,
-                      const SizedBox(width: 14),
-                      Expanded(child: _caption(context, mend)),
-                    ],
                   )
-                else ...[
-                  SizedBox(height: 46, child: button),
-                  const SizedBox(height: 8),
-                  Center(child: _caption(context, mend)),
+                else
+                  for (var i = 0; i < tiles.length; i++) ...[
+                    if (i > 0) const SizedBox(height: 10),
+                    tiles[i],
+                  ],
+                if (onMend != null) ...[
+                  const SizedBox(height: 16),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: FilledButton.icon(
+                      onPressed: onMend,
+                      iconAlignment: IconAlignment.end,
+                      icon: const Icon(Icons.north_east_rounded, size: 16),
+                      label: const Text('Plan, invoices & card'),
+                    ),
+                  ),
                 ],
+                const SizedBox(height: 14),
+                Text(
+                  !payments
+                      ? 'Payments are not available yet.'
+                      : onMend != null
+                      ? 'Your subscription needs attention. Fix it in your browser.'
+                      : selling
+                      ? 'A first subscription starts with a 7-day trial. Checkout opens in your browser and asks for a card. Cancel any time.'
+                      : 'Top-ups never expire, and work pauses rather than running up an overage.',
+                  style: theme.textTheme.bodySmall?.copyWith(color: muted),
+                ),
               ],
             ),
           );
@@ -980,16 +1282,103 @@ class _PlanCard extends StatelessWidget {
     );
   }
 
-  Widget _caption(BuildContext context, bool mend) {
+  Widget _tile(BuildContext context, _Plan plan, bool wide) {
     final theme = Theme.of(context);
-    return Text(
-      !payments
-          ? 'Payments are not available yet.'
-          : mend
-          ? 'Your subscription needs attention. Fix it in your browser.'
-          : 'Checkout opens in your browser. Cancel any time.',
-      style: theme.textTheme.bodySmall?.copyWith(
-        color: theme.colorScheme.onSurfaceVariant,
+    final scheme = theme.colorScheme;
+    final muted = theme.textTheme.bodySmall?.copyWith(
+      color: scheme.onSurfaceVariant,
+      fontSize: 12.5,
+    );
+    final mine = plan.id == current;
+    final Widget? action = selling
+        ? FilledButton(
+            onPressed: onChoose == null ? null : () => onChoose!(plan.id),
+            child: Text('Choose ${plan.name}'),
+          )
+        : plan.id == 'plus' && onMoveToPlus != null
+        ? FilledButton(
+            onPressed: onMoveToPlus,
+            child: const Text('Move to Plus'),
+          )
+        : null;
+    final String? after = plan.id == 'plus' && onMoveToPlus != null
+        ? 'Starts now, with a new billing month.'
+        : plan.id == 'standard' && current == 'plus' && !trial
+        ? 'Move back at renewal, from Plan, invoices & card.'
+        : null;
+    return Semantics(
+      container: true,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+        decoration: BoxDecoration(
+          color: scheme.onSurface.withValues(alpha: 0.04),
+          borderRadius: BorderRadius.circular(FrockTheme.radiusControl),
+          border: Border.all(
+            color: mine ? scheme.primary : FrockTheme.hairline(scheme),
+            width: mine ? 1.5 : 1,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    plan.name,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                if (mine)
+                  Text(
+                    trial ? 'Your plan · trial' : 'Your plan',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: scheme.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                Text(
+                  _dollars(plan.monthlyCents),
+                  style: theme.textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -0.4,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Text('/ month', style: muted),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _room(plan),
+              style: theme.textTheme.bodyMedium?.copyWith(height: 1.4),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '${_wholeMicros(plan.includedMicros)} of usage included each month',
+              style: muted,
+            ),
+            // Side by side, the buttons line up along the bottom.
+            if (wide && (action != null || after != null)) const Spacer(),
+            if (action != null) ...[
+              const SizedBox(height: 14),
+              SizedBox(width: double.infinity, child: action),
+            ],
+            if (after != null) ...[
+              const SizedBox(height: 8),
+              Text(after, style: muted),
+            ],
+          ],
+        ),
       ),
     );
   }

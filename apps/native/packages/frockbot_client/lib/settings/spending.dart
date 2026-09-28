@@ -82,6 +82,54 @@ String spendMoney(Object? micros) {
 String _perTurn(num micros, num turns) =>
     turns > 0 ? '\$${(micros / turns / 1000000).toStringAsFixed(3)}' : '—';
 
+/// The monthly allowance Spending measures against, from `/api/billing`, or
+/// null where there is no plan to measure against and figures stay dollars.
+num? spendAllowance(Map billing) {
+  if (billing['metered'] != true) return null;
+  if (billing['subscribed'] != true && billing['trial'] is! Map) return null;
+  final included = (billing['plan'] as Map?)?['includedMicros'] as num?;
+  return included == null || included <= 0 ? null : included;
+}
+
+/// An amount as a share of the monthly plan: `130%`, `2.5%`, `< 0.1%`.
+String spendShare(num micros, num allowance) {
+  if (allowance <= 0) return '—';
+  final percent = micros / allowance * 100;
+  if (percent <= 0) return '0%';
+  if (percent < 0.1) return '< 0.1%';
+  if (percent < 10) {
+    final one = percent.toStringAsFixed(1);
+    return '${one.endsWith('.0') ? one.substring(0, one.length - 2) : one}%';
+  }
+  return '${percent.round()}%';
+}
+
+/// How Spending states an amount: a share of the account's monthly plan, or,
+/// without one or when the person asked, dollars.
+class _Units {
+  final num? allowance;
+  const _Units(this.allowance);
+
+  bool get dollars => allowance == null;
+
+  /// A figure alone, where a column or caption says what it is of.
+  String amount(num micros) =>
+      dollars ? spendMoney(micros) : spendShare(micros, allowance!);
+
+  /// A figure in a sentence.
+  String phrase(num micros) =>
+      dollars ? spendMoney(micros) : '${amount(micros)} of your plan';
+
+  String perTurn(num micros, num turns) => turns <= 0
+      ? '—'
+      : dollars
+      ? _perTurn(micros, turns)
+      : '${spendShare(micros / turns, allowance!)} of your plan';
+}
+
+/// Where the person's choice of dollars is kept, on this device.
+const spendDollarsKey = 'spending.dollars';
+
 const _months = [
   'Jan',
   'Feb',
@@ -171,6 +219,27 @@ class SpendingPage extends StatefulWidget {
 
 class _SpendingPageState extends State<SpendingPage> {
   final _view = GlobalKey<SpendingViewState>();
+  num? allowance;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_readPlan());
+  }
+
+  /// The plan the figures are shares of. Without it they read in dollars.
+  Future<void> _readPlan() async {
+    try {
+      final billing = await widget.api.request('/api/billing');
+      if (billing is Map && mounted) {
+        setState(() => allowance = spendAllowance(billing));
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _reload() async {
+    await Future.wait([_readPlan(), ?_view.currentState?.reload()]);
+  }
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -180,7 +249,7 @@ class _SpendingPageState extends State<SpendingPage> {
         actions: [
           IconButton(
             tooltip: 'Refresh spending',
-            onPressed: () => _view.currentState?.reload(),
+            onPressed: () => unawaited(_reload()),
             icon: const Icon(Icons.refresh_rounded),
           ),
         ],
@@ -189,7 +258,7 @@ class _SpendingPageState extends State<SpendingPage> {
     body: SafeArea(
       top: false,
       child: RefreshIndicator(
-        onRefresh: () => _view.currentState?.reload() ?? Future.value(),
+        onRefresh: _reload,
         child: LayoutBuilder(
           builder: (context, constraints) {
             final wide = constraints.maxWidth >= 900;
@@ -204,6 +273,7 @@ class _SpendingPageState extends State<SpendingPage> {
                   api: widget.api,
                   filters: widget.filters,
                   groupBy: widget.groupBy,
+                  allowanceMicros: allowance,
                   onOpenBot: widget.onOpenBot,
                 ),
               ],
@@ -229,6 +299,10 @@ class SpendingView extends StatefulWidget {
   final String? heading;
   final bool showCredit;
 
+  /// The account's monthly plan allowance: each figure is a share of it,
+  /// unless the person asked for dollars. Null reads in dollars.
+  final num? allowanceMicros;
+
   /// The account's credit and its pace, as each answer reports it.
   /// Account-wide whatever the view, so Billing can say how long it lasts.
   final void Function(Map? credit)? onCredit;
@@ -242,6 +316,7 @@ class SpendingView extends StatefulWidget {
     this.groupBy,
     this.heading,
     this.showCredit = true,
+    this.allowanceMicros,
     this.onCredit,
     this.onOpenBot,
   });
@@ -259,6 +334,9 @@ class SpendingViewState extends State<SpendingView> {
   bool loading = true;
   int _request = 0;
 
+  /// The person would rather read dollars than shares of the plan.
+  bool dollars = false;
+
   @override
   void initState() {
     super.initState();
@@ -266,7 +344,27 @@ class SpendingViewState extends State<SpendingView> {
     groupBy =
         widget.groupBy ?? nextSpendGroupBy(filters.map((f) => f.dimension));
     unawaited(reload());
+    unawaited(_readDollars());
   }
+
+  Future<void> _readDollars() async {
+    try {
+      final saved = await widget.api.store.read(spendDollarsKey) == 'true';
+      if (mounted && saved != dollars) setState(() => dollars = saved);
+    } catch (_) {}
+  }
+
+  void _showDollars(bool value) {
+    setState(() => dollars = value);
+    unawaited(
+      (value
+              ? widget.api.store.write(spendDollarsKey, 'true')
+              : widget.api.store.delete(spendDollarsKey))
+          .catchError((_) {}),
+    );
+  }
+
+  _Units get _units => _Units(dollars ? null : widget.allowanceMicros);
 
   /// Reads the view again, as it stands.
   Future<void> reload() async {
@@ -402,6 +500,13 @@ class SpendingViewState extends State<SpendingView> {
           deleteButtonTooltipMessage: 'Show all again',
         ),
     ];
+    final toggle = widget.allowanceMicros == null
+        ? null
+        : FilterChip(
+            label: const Text('Show in dollars'),
+            selected: dollars,
+            onSelected: _showDollars,
+          );
     final title = heading == null
         ? null
         : Text(
@@ -420,9 +525,13 @@ class SpendingViewState extends State<SpendingView> {
                   periods,
                 ],
               ),
-              if (chips.isNotEmpty) ...[
+              if (toggle != null || chips.isNotEmpty) ...[
                 const SizedBox(height: 12),
-                Wrap(spacing: 12, runSpacing: 12, children: chips),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [?toggle, ...chips],
+                ),
               ],
             ],
           )
@@ -434,7 +543,7 @@ class SpendingViewState extends State<SpendingView> {
                 spacing: 12,
                 runSpacing: 12,
                 crossAxisAlignment: WrapCrossAlignment.center,
-                children: [periods, ...chips],
+                children: [periods, ?toggle, ...chips],
               ),
             ],
           );
@@ -464,7 +573,9 @@ class SpendingViewState extends State<SpendingView> {
         if (!pinned.contains(d.key)) d,
     ];
     final canNarrow = tabs.length > 1;
+    final units = _units;
     final breakdown = _Breakdown(
+      units: units,
       groups: groups,
       total: data['totalMicros'] as num? ?? 0,
       colors: colors,
@@ -476,10 +587,12 @@ class SpendingViewState extends State<SpendingView> {
       onLimit: _editLimit,
     );
     final turns = _TopTurns(
+      units: units,
       turns: data['topTurns'] as List?,
       onOpenBot: widget.onOpenBot,
     );
     final chart = _DailyChart(
+      units: units,
       days: (data['days'] as List? ?? const []).whereType<Map>().toList(),
       groups: groups,
       colors: colors,
@@ -497,6 +610,7 @@ class SpendingViewState extends State<SpendingView> {
           if (message != null) _error(context),
           SizedBox(height: wide ? 20 : 16),
           _Headline(
+            units: units,
             data: data,
             period: period,
             wide: wide,
@@ -599,21 +713,23 @@ class _Failure extends StatelessWidget {
 
 /// How long the account's credit lasts at its recent pace, from a Spending
 /// answer's `credit`, or null while nothing is being spent.
-InlineSpan? spendRunway(BuildContext context, Map credit) {
-  final daily = credit['dailyMicros'] as num? ?? 0;
+InlineSpan? _runway(
+  BuildContext context,
+  Map credit, {
+  String Function(num micros) daily = spendMoney,
+}) {
+  final pace = daily(credit['dailyMicros'] as num? ?? 0);
   final runsOut = credit['runsOutAt'] as num?;
   final renews = credit['renewsAt'] as num?;
   if (runsOut == null) return null;
   if (renews == null) {
     return TextSpan(
-      text:
-          'At ${spendMoney(daily)} a day, it lasts until about ${_date(runsOut)}.',
+      text: 'At $pace a day, it lasts until about ${_date(runsOut)}.',
     );
   }
   if (runsOut >= renews) {
     return TextSpan(
-      text:
-          'At ${spendMoney(daily)} a day, it lasts past renewal on ${_date(renews)}.',
+      text: 'At $pace a day, it lasts past renewal on ${_date(renews)}.',
     );
   }
   final theme = Theme.of(context);
@@ -622,7 +738,7 @@ InlineSpan? spendRunway(BuildContext context, Map credit) {
       : FrockTheme.warningInk;
   return TextSpan(
     children: [
-      TextSpan(text: 'At ${spendMoney(daily)} a day, it runs out '),
+      TextSpan(text: 'At $pace a day, it runs out '),
       TextSpan(
         text: 'around ${_date(runsOut)}',
         style: TextStyle(color: warn, fontWeight: FontWeight.w600),
@@ -641,11 +757,13 @@ String spendDate(num at) => _date(at);
 /// The answer before the detail: what was spent, how long the credit lasts,
 /// and what drove it.
 class _Headline extends StatelessWidget {
+  final _Units units;
   final Map<String, dynamic> data;
   final String period;
   final bool wide;
   final bool showCredit;
   const _Headline({
+    required this.units,
     required this.data,
     required this.period,
     required this.wide,
@@ -705,8 +823,20 @@ class _Headline extends StatelessWidget {
           spacing: 12,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            Text(
-              spendMoney(total),
+            Text.rich(
+              TextSpan(
+                text: units.amount(total),
+                children: [
+                  if (!units.dollars)
+                    TextSpan(
+                      text: ' of your plan',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                ],
+              ),
               style: theme.textTheme.headlineLarge?.copyWith(
                 fontWeight: FontWeight.w700,
               ),
@@ -718,7 +848,7 @@ class _Headline extends StatelessWidget {
         _Caption(
           [
             previous > 0
-                ? 'vs ${spendMoney(previous)} the period before'
+                ? 'vs ${units.amount(previous)} the period before'
                 : 'Nothing spent the period before',
             if (turns != null) '$turns ${turns == 1 ? 'Turn' : 'Turns'}',
           ].join(' · '),
@@ -729,7 +859,7 @@ class _Headline extends StatelessWidget {
 
   Widget _credit(BuildContext context, Map credit) {
     final theme = Theme.of(context);
-    final runway = spendRunway(context, credit);
+    final runway = _runway(context, credit, daily: units.phrase);
     return _Panel(
       children: [
         const _Caption('Credit left'),
@@ -770,7 +900,7 @@ class _Headline extends StatelessWidget {
           [
             '$share% of spend',
             if (turns > 0)
-              '${_perTurn(charge, turns)} a ${key.startsWith('routine') ? 'run' : 'Turn'}',
+              '${units.perTurn(charge, turns)} a ${key.startsWith('routine') ? 'run' : 'Turn'}',
           ].join(' · '),
           style: theme.textTheme.bodyMedium,
         ),
@@ -871,12 +1001,14 @@ class _Caption extends StatelessWidget {
 /// A bar for each of the person's days, split by the groups the breakdown
 /// lists, in the breakdown's colours.
 class _DailyChart extends StatelessWidget {
+  final _Units units;
   final List<Map> days;
   final List<Map> groups;
   final List<Color> colors;
   final String title;
   final bool wide;
   const _DailyChart({
+    required this.units,
     required this.days,
     required this.groups,
     required this.colors,
@@ -946,9 +1078,9 @@ class _DailyChart extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(spendMoney(most), style: caption),
-                    Text(spendMoney(most / 2), style: caption),
-                    Text('\$0', style: caption),
+                    Text(units.amount(most), style: caption),
+                    Text(units.amount(most / 2), style: caption),
+                    Text(units.dollars ? '\$0' : '0%', style: caption),
                   ],
                 ),
               ),
@@ -966,7 +1098,7 @@ class _DailyChart extends StatelessWidget {
                       Expanded(
                         child: Tooltip(
                           message:
-                              '${spendDay('${day['day']}')}: ${spendMoney(day['chargeMicros'])}',
+                              '${spendDay('${day['day']}')}: ${units.phrase(day['chargeMicros'] as num? ?? 0)}',
                           child: Padding(
                             padding: EdgeInsets.symmetric(
                               horizontal: days.length > 45 ? 0.5 : 1.5,
@@ -1073,6 +1205,7 @@ class _Swatch extends StatelessWidget {
 /// The groups of one dimension, largest first, each one tap from being the
 /// whole page.
 class _Breakdown extends StatelessWidget {
+  final _Units units;
   final List<Map> groups;
   final num total;
   final List<Color> colors;
@@ -1083,6 +1216,7 @@ class _Breakdown extends StatelessWidget {
   final void Function(Map group)? onRow;
   final void Function(Map group) onLimit;
   const _Breakdown({
+    required this.units,
     required this.groups,
     required this.total,
     required this.colors,
@@ -1185,7 +1319,7 @@ class _Breakdown extends StatelessWidget {
                       ),
                     ),
                     SizedBox(
-                      width: 90,
+                      width: units.dollars ? 90 : 130,
                       child: Text(
                         'PER TURN',
                         style: header,
@@ -1196,7 +1330,7 @@ class _Breakdown extends StatelessWidget {
                   SizedBox(
                     width: 110,
                     child: Text(
-                      'SPENT',
+                      units.dollars ? 'SPENT' : 'OF YOUR PLAN',
                       style: header,
                       textAlign: TextAlign.right,
                     ),
@@ -1208,6 +1342,7 @@ class _Breakdown extends StatelessWidget {
             ),
           for (var i = 0; i < groups.length; i++)
             _GroupRow(
+              units: units,
               group: groups[i],
               total: total,
               color: _color(i),
@@ -1224,6 +1359,7 @@ class _Breakdown extends StatelessWidget {
 }
 
 class _GroupRow extends StatelessWidget {
+  final _Units units;
   final Map group;
   final num total;
   final Color color;
@@ -1233,6 +1369,7 @@ class _GroupRow extends StatelessWidget {
   final bool limits;
   final VoidCallback onLimit;
   const _GroupRow({
+    required this.units,
     required this.group,
     required this.total,
     required this.color,
@@ -1271,15 +1408,20 @@ class _GroupRow extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         Text(
-          spendMoney(charge),
+          units.amount(charge),
           style: figures?.copyWith(fontWeight: FontWeight.w600),
         ),
-        Text(share, style: muted),
+        // Shares of the plan could be read for shares of the total, so a
+        // share of the plan says so and leaves the split to the bar above.
+        if (units.dollars)
+          Text(share, style: muted)
+        else if (!wide)
+          Text('of your plan', style: muted),
       ],
     );
     final subtitle = [
       ?detail,
-      if (!wide && turns != null) '${_perTurn(charge, turns)} a Turn',
+      if (!wide && turns != null) '${units.perTurn(charge, turns)} a Turn',
     ].join(' · ');
     return InkWell(
       onTap: onTap,
@@ -1336,9 +1478,13 @@ class _GroupRow extends StatelessWidget {
                   ),
                 ),
                 SizedBox(
-                  width: 90,
+                  width: units.dollars ? 90 : 130,
                   child: Text(
-                    turns == null ? '—' : _perTurn(charge, turns),
+                    turns == null
+                        ? '—'
+                        : units.dollars
+                        ? _perTurn(charge, turns)
+                        : spendShare(charge / turns, units.allowance!),
                     style: figures,
                     textAlign: TextAlign.right,
                   ),
@@ -1383,9 +1529,14 @@ class _GroupRow extends StatelessWidget {
 }
 
 class _TopTurns extends StatelessWidget {
+  final _Units units;
   final List? turns;
   final void Function(String botId)? onOpenBot;
-  const _TopTurns({required this.turns, required this.onOpenBot});
+  const _TopTurns({
+    required this.units,
+    required this.turns,
+    required this.onOpenBot,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1458,7 +1609,7 @@ class _TopTurns extends StatelessWidget {
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        spendMoney(turn['chargeMicros']),
+                        units.amount(turn['chargeMicros'] as num? ?? 0),
                         style: theme.textTheme.bodyMedium?.copyWith(
                           fontWeight: FontWeight.w600,
                           fontFeatures: const [FontFeature.tabularFigures()],
