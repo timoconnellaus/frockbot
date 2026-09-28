@@ -40,6 +40,10 @@ import {
   type MessageAttachmentV1,
 } from "./message-attachments.js";
 import {
+  decodeInputSegmentsV1,
+  type InputSegmentV1,
+} from "./input-segments.js";
+import {
   decodeThemeDocumentV1,
   type BotLookV1,
   type ThemeDocumentV1,
@@ -88,6 +92,8 @@ export interface LoopAgentInputV1 {
   skills?: SkillRefV1[];
   /** References to the files the person attached; never their bytes. */
   attachments?: MessageAttachmentV1[];
+  /** Who wrote each part of `text`, when more than the person wrote it. */
+  segments?: InputSegmentV1[];
 }
 
 export type LoopPreStepDecisionV1 =
@@ -382,7 +388,7 @@ function decodeHookInputs(value: unknown, label: string): LoopAgentInputV1[] {
     hookExactKeys(
       item,
       ["messageId", "text"],
-      ["skills", "attachments"],
+      ["skills", "attachments", "segments"],
       itemLabel,
     );
     const skills = item.skills;
@@ -401,11 +407,16 @@ function decodeHookInputs(value: unknown, label: string): LoopAgentInputV1[] {
             `${itemLabel}.attachments`,
             true,
           );
+    const segments =
+      item.segments === undefined
+        ? undefined
+        : decodeInputSegmentsV1(item.segments, `${itemLabel}.segments`);
     return {
       messageId: hookString(item.messageId, `${itemLabel}.messageId`, 256),
       text: hookString(item.text, `${itemLabel}.text`, 1_000_000, true),
       ...(decodedSkills === undefined ? {} : { skills: decodedSkills }),
       ...(attachments === undefined ? {} : { attachments }),
+      ...(segments === undefined ? {} : { segments }),
     };
   });
 }

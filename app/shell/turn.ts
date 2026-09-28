@@ -10,9 +10,12 @@ import { createUploadReaderV1 } from "@frockbot/app/uploads/bot";
 import { createModelAttachmentResolverV1 } from "@frockbot/app/uploads/resolver";
 import type { AgentEffectAdmission } from "@frockbot/core/agent-loop/agent";
 import {
+  inputSegmentsTextV1,
   validateToolOccurrenceJournal,
+  type InputSegmentV1,
   type TurnTypeV1,
 } from "@frockbot/core/contracts";
+import { routineCueSegmentsV1 } from "@frockbot/app/routines/firing";
 import {
   activateCompositionV1,
   ACTIVE_RUN_KEY,
@@ -56,7 +59,7 @@ import { isolateMountOptions } from "@frockbot/app/isolates/bot";
 import { settlePluginHealthV1 } from "@frockbot/app/plugins/health";
 import {
   inputDeliveryGuidanceV1,
-  pendingBotInputPreambleV1,
+  pendingBotInputSegmentsV1,
 } from "@frockbot/app/routines/inbox";
 import { requeueDrainedInputsV1 } from "@frockbot/app/routines/inbox-store";
 import {
@@ -70,7 +73,7 @@ import {
   createShellCompositionHost,
   type ShellMountedComposition,
 } from "./backend-composition.js";
-import { compositionFailureTurnTextV1 } from "./backend-composition-input.js";
+import { compositionFailureTurnInputV1 } from "./backend-composition-input.js";
 import { createCardApprovalStoreV1 } from "./cards.js";
 import { createSecretRequestStoreV1 } from "@frockbot/app/secrets/bot";
 import { createReplyDraftWatchV1 } from "./reply-draft.js";
@@ -621,13 +624,13 @@ export async function executeTurn(
   };
   state.turn.set(active);
   try {
-    const ordinaryInput = await turnInputTextV1(state, input.command);
+    const ordinaryInput = await turnInputV1(state, input.command);
     if (ordinaryInput === undefined) {
       return { runId: input.command.runId, text: "", events: [] };
     }
     const durableInput =
       activation.status === "failed-closed"
-        ? compositionFailureTurnTextV1(ordinaryInput, {
+        ? compositionFailureTurnInputV1(ordinaryInput, {
             attemptedGenerationId: input.compositionGenerationId,
             ...(activation.generation
               ? { generation: activation.generation }
@@ -639,8 +642,9 @@ export async function executeTurn(
     return await executeBotTurn({
       command: {
         ...input.command,
-        text: durableInput,
+        text: durableInput.text,
       },
+      segments: durableInput.segments,
       composition: activation.mounted,
       resume: input.resume,
       // A resumed journal is the run's own suffix, already numbered from
@@ -688,7 +692,7 @@ export async function executeTurn(
  * decided here, by what the drain actually carried, because the drain takes
  * the whole queue and not only the input that opened the Turn.
  */
-export async function turnInputTextV1(
+export async function turnInputV1(
   state: ShellBotStateV1,
   command: {
     runId: string;
@@ -696,21 +700,66 @@ export async function turnInputTextV1(
     turnType?: TurnTypeV1;
     origin?: StoredRunOriginV1;
   },
-): Promise<string | undefined> {
-  if ((command.turnType ?? "chat") !== "chat") return command.text;
+): Promise<TurnInputV1 | undefined> {
+  const own = commandSegmentsV1(command);
+  if ((command.turnType ?? "chat") !== "chat") {
+    return { text: command.text, segments: own };
+  }
   const drained = await state.routineInbox.drainInto(command.runId);
-  const preamble = pendingBotInputPreambleV1(drained);
+  const preamble = pendingBotInputSegmentsV1(drained);
   if (preamble.length === 0) {
-    return isDeliveryOriginV1(command.origin) ? undefined : command.text;
+    return isDeliveryOriginV1(command.origin)
+      ? undefined
+      : { text: command.text, segments: own };
   }
   const guidance =
     command.origin?.kind === "input-delivery"
       ? inputDeliveryGuidanceV1(drained)
       : "";
-  if (guidance.length > 0) {
-    return `${preamble}\n${command.text}\n${guidance}`;
+  const segments = [
+    ...preamble,
+    ...own,
+    ...(guidance.length > 0
+      ? [{ author: "platform" as const, text: guidance }]
+      : []),
+  ];
+  return { text: inputSegmentsTextV1(segments), segments };
+}
+
+/** A Turn's input: the text the model reads, and who wrote each part of it. */
+export interface TurnInputV1 {
+  text: string;
+  segments: InputSegmentV1[];
+}
+
+/**
+ * Who wrote the command's own text, by where it came from. A person's chat,
+ * call or email is theirs; a Routine's cue is FrockBot's header, the
+ * prompt's writer's prompt and the sender's payload; a hand-off, a brief or
+ * another Bot's message is a Bot's; a delivery cue is the platform's. A
+ * group's thread labels its own speakers and is left as the person's.
+ */
+function commandSegmentsV1(command: {
+  text: string;
+  origin?: StoredRunOriginV1;
+}): InputSegmentV1[] {
+  const origin = command.origin;
+  switch (origin?.kind) {
+    case undefined:
+    case "voice":
+    case "email":
+    case "group":
+      return [{ author: "person", text: command.text }];
+    case "routine":
+      return routineCueSegmentsV1(command.text, origin.promptBy);
+    case "routine-delivery":
+    case "input-delivery":
+      return [{ author: "platform", text: command.text }];
+    case "subagent":
+    case "handoff":
+    case "bot":
+      return [{ author: "bot", text: command.text }];
   }
-  return `${preamble}\n${command.text}`;
 }
 
 /**

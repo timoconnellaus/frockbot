@@ -8,6 +8,7 @@ import type {
   SendReviewEvidenceV1,
   SupervisionJudgmentV1,
   TurnInputOriginV1,
+  ConversationSpeakerV1,
 } from "@frockbot/core/contracts";
 import {
   RESPONSE_REVIEW_EVAL_BUDGET_V1,
@@ -65,7 +66,7 @@ export interface ClaimJudgmentEvidenceV1 {
   };
   /** What the person and the Bot said before this Turn. */
   readonly conversation: readonly {
-    readonly speaker: "user" | "bot";
+    readonly speaker: ConversationSpeakerV1;
     readonly text: string;
   }[];
   /** What this Turn's calls did, oldest first. */

@@ -4,7 +4,8 @@ import type { CallReviewFixtureV1 } from "./call-review.js";
 // The 2026-09-27 Routine: "Morning inbox triage" ran 61 steps and call review
 // refused 26 of its reads, among them a `gmail/list_threads` it allowed five
 // steps later with the same arguments. Each case is one of those calls, shaped
-// as call review saw it: the Routine's prompt as the only "user" line, and the
+// as call review sees it now: the Routine's header as context and its prompt
+// as the person's standing request, and the
 // Turn's earlier results — tool catalogs, the refusals themselves, and the
 // inbox listings the triage produced. The listings are written for the suite;
 // the real ones were a person's mail.
@@ -54,7 +55,17 @@ function routineCall(
     intent,
     evidence: {
       proposedCall: call,
-      conversation: [{ speaker: "user", text: ROUTINE_CUE }],
+      // As the cue is split: FrockBot's line, then the prompt the person wrote.
+      conversation: [
+        {
+          speaker: "context",
+          text: ROUTINE_CUE.slice(0, ROUTINE_CUE.indexOf("\n\n")),
+        },
+        {
+          speaker: "routine",
+          text: ROUTINE_CUE.slice(ROUTINE_CUE.indexOf("\n\n") + 2),
+        },
+      ],
       resultsThisTurn: results,
     },
     expected: { decision },

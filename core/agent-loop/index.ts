@@ -25,6 +25,8 @@ import {
   toolCallOccurrences,
   turnEndReason,
   validateToolOccurrenceJournal,
+  decodeInputSegmentsV1,
+  inputSegmentsTextV1,
 } from "@frockbot/core/contracts";
 import {
   EffectAdmissionFencedError,
@@ -214,11 +216,21 @@ class LoopAgent implements Agent, LoopRuntime {
           );
     // A message may be files alone, never nothing at all.
     if (!normalized && !attachments) throw new Error("agent input is empty");
+    const segments =
+      sent.segments === undefined || sent.segments.length === 0
+        ? undefined
+        : decodeInputSegmentsV1([...sent.segments], "agent input segments");
+    // The parts must spell out the text exactly, or supervision would read a
+    // writer for words the model never saw, or miss words it did.
+    if (segments && inputSegmentsTextV1(segments).trim() !== normalized) {
+      throw new Error("agent input segments do not spell out its text");
+    }
     const input: AgentInput = {
       messageId: crypto.randomUUID(),
       text: normalized,
       ...(skills && skills.length > 0 ? { skills } : {}),
       ...(attachments ? { attachments } : {}),
+      ...(segments ? { segments } : {}),
     };
     this.session.append({ type: "input/queued", ...input });
     this.#inbox.push(input);
@@ -565,6 +577,11 @@ class LoopAgent implements Agent, LoopRuntime {
           cursor.openStep = step;
           this.session.append({ type: "step/start", turn, step });
           for (const admitted of decision.inputs) {
+            // Authorship is the admitting host's word, never a hook's: a
+            // pre-step hook may rewrite an input, not say who wrote it.
+            const segments = inputs.find(
+              (input) => input.messageId === admitted.messageId,
+            )?.segments;
             this.session.append({
               type: "user/message",
               turn,
@@ -574,6 +591,7 @@ class LoopAgent implements Agent, LoopRuntime {
               ...(admitted.attachments && admitted.attachments.length > 0
                 ? { attachments: admitted.attachments }
                 : {}),
+              ...(segments && segments.length > 0 ? { segments } : {}),
             });
           }
 

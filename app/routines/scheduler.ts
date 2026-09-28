@@ -738,6 +738,7 @@ export class RoutineScheduler {
       }),
       mintedAt: now.toISOString(),
       entryId: `${routineFireIdV1(routineId, request.discriminator)}-entry`,
+      promptBy: record.updatedBy.kind,
     };
     await this.#writeClaim(transaction, record, fire, now);
     return { fire, record };
@@ -780,6 +781,7 @@ export class RoutineScheduler {
       dueAt: state.dueAt,
       ...(missedCount > 1 ? { missedCount } : {}),
       entryId: `${routineFireIdV1(record.routineId, String(state.dueAt))}-entry`,
+      promptBy: record.updatedBy.kind,
     };
     // Recompute forward from now when the firing covered more than its own
     // occurrence, and from the occurrence itself when it was on time; either

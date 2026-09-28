@@ -6,6 +6,7 @@ import type {
 } from "@frockbot/core/contracts";
 import type { StoredRunOriginV1 } from "@frockbot/core/durable";
 import { resolveDynamicToolNameV1 } from "../audit/classify.js";
+import { routineCueSegmentsV1 } from "../routines/firing.js";
 import {
   callReviewEvidenceOfV1,
   stepReviewEvidenceOfV1,
@@ -70,6 +71,7 @@ export function harvestOriginV1(
  */
 function journalOf(run: HarvestRunV1): SessionEvent[] {
   const events = [...run.events];
+  const origin = harvestOriginV1(run);
   const turn = events.find((event) => "turn" in event)?.turn;
   if (turn === undefined) return events;
   const hasInput = events.some(
@@ -83,6 +85,16 @@ function journalOf(run: HarvestRunV1): SessionEvent[] {
       step: 1,
       messageId: "harvest-restored-input",
       text: run.input,
+      // A run recorded before firings named their prompt's writer is taken
+      // as the person's: the harvest proposes cases, and a person labels them.
+      ...(origin?.kind === "routine"
+        ? {
+            segments: routineCueSegmentsV1(
+              run.input,
+              origin.promptBy ?? "user",
+            ),
+          }
+        : {}),
     } as SessionEvent,
     ...events,
   ];

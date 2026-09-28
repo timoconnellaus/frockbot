@@ -313,6 +313,7 @@ export function routineTurnCommandV1(
       routineId: fire.routineId,
       fireId: fire.fireId,
       trigger: fire.trigger,
+      ...(fire.promptBy ? { promptBy: fire.promptBy } : {}),
     },
   };
 }

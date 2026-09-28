@@ -1,3 +1,7 @@
+import {
+  inputSegmentsTextV1,
+  type InputSegmentV1,
+} from "@frockbot/core/contracts";
 import type { CompositionFailureV1 } from "@frockbot/core/durable";
 import type { CompositionGenerationV1 } from "@frockbot/core/durable";
 
@@ -50,9 +54,16 @@ export function compositionFailureDurableInputV1(input: {
 }
 
 /** The exact command text handed to the Agent loop on a fallback Turn. */
-export function compositionFailureTurnTextV1(
-  ordinaryInput: string,
+export function compositionFailureTurnInputV1(
+  ordinaryInput: { text: string; segments: InputSegmentV1[] },
   failure: Parameters<typeof compositionFailureDurableInputV1>[0],
-): string {
-  return `${compositionFailureDurableInputV1(failure)}\n\n${ordinaryInput}`;
+): { text: string; segments: InputSegmentV1[] } {
+  const segments: InputSegmentV1[] = [
+    {
+      author: "platform",
+      text: `${compositionFailureDurableInputV1(failure)}\n`,
+    },
+    ...ordinaryInput.segments,
+  ];
+  return { text: inputSegmentsTextV1(segments), segments };
 }

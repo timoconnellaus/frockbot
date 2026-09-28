@@ -120,8 +120,17 @@ export interface PolicySnapshotV1 {
   rules: readonly PolicyRuleV1[];
 }
 
+/**
+ * Who a piece of conversation evidence is from. `user` is the person;
+ * `routine` is the prompt of a Routine the person wrote, their standing
+ * request; `bot` is a Bot's words, its own or relayed; `context` is anything
+ * else the Turn carried — FrockBot's notices, a Plugin's text, a payload. Only
+ * the first two ask for anything.
+ */
+export type ConversationSpeakerV1 = "user" | "routine" | "bot" | "context";
+
 export interface ConversationEvidenceV1 {
-  speaker: "user" | "bot";
+  speaker: ConversationSpeakerV1;
   text: string;
 }
 

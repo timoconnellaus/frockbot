@@ -76,6 +76,11 @@ export interface StoredRunRoutineOriginV1 {
   routineId: string;
   fireId: string;
   trigger: StoredRunTriggerV1;
+  /**
+   * Who last wrote the Routine's prompt when it fired. Only a prompt the User
+   * wrote stands as their request; absent, the prompt is treated as a Bot's.
+   */
+  promptBy?: "user" | "bot";
 }
 
 /**
@@ -862,9 +867,22 @@ function decodeStoredRunOrigin(
   }
   requireExactOriginFields(
     candidate,
-    ["kind", "routineId", "fireId", "trigger"],
+    [
+      "kind",
+      "routineId",
+      "fireId",
+      "trigger",
+      ...(Object.hasOwn(candidate, "promptBy") ? ["promptBy"] : []),
+    ],
     runId,
   );
+  if (
+    Object.hasOwn(candidate, "promptBy") &&
+    candidate.promptBy !== "user" &&
+    candidate.promptBy !== "bot"
+  ) {
+    throw new Error(`run "${runId}" has an invalid admission origin writer`);
+  }
   const trigger = STORED_RUN_ORIGIN_TRIGGERS.find(
     (value) => value === candidate.trigger,
   );
@@ -882,6 +900,9 @@ function decodeStoredRunOrigin(
     routineId: candidate.routineId as string,
     fireId: candidate.fireId as string,
     trigger,
+    ...(candidate.promptBy === "user" || candidate.promptBy === "bot"
+      ? { promptBy: candidate.promptBy }
+      : {}),
   };
 }
 
