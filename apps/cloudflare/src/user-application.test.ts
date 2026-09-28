@@ -731,7 +731,10 @@ describe("user application Bot seam", () => {
       env,
     );
     expect(read.status).toBe(200);
-    expect(await read.json()).toEqual({ schemaVersion: 1, turns: [] });
+    expect((await read.json()) as unknown).toEqual({
+      schemaVersion: 1,
+      turns: [],
+    });
     expect(queries).toEqual([
       { botId: "primary", query: { schemaVersion: 1, before } },
     ]);
