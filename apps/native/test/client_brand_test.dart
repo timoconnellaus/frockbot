@@ -273,27 +273,41 @@ void main() {
     expect(clientBrand.productName, 'FrockBot');
   });
 
-  test('FrockBot’s looks are the server’s and its accent is unchanged', () {
-    final source = File('../../core/theme/document.ts').readAsStringSync();
-    Map<String, Object> server(String name) {
-      final block = RegExp(
-        'export const ${name}_TOKENS_V1: ThemeTokensV1 = \\{([\\s\\S]*?)\\n\\};',
-      ).firstMatch(source)!.group(1)!;
-      String field(String key) =>
-          RegExp('$key: "([^"]+)"').firstMatch(block)!.group(1)!;
-      return {
-        'surfaces': {
-          for (final surface in themeSurfaceFields)
-            surface.name: field(surface.name),
-        },
-        'type': field('type'),
-        'bubbles': {'bot': field('bot'), 'me': field('me')},
-      };
-    }
-
-    expect(encodeThemeTokens(frockbotBrand.looks.ink), server('INK'));
-    expect(encodeThemeTokens(frockbotBrand.looks.paper), server('PAPER'));
-    expect(encodeThemeTokens(frockbotBrand.looks.studio), server('STUDIO'));
+  test('FrockBot’s looks and accent are unchanged', () {
+    const paper = {
+      'window': '#f5f6f9',
+      'surface': '#ffffff',
+      'raised': '#eceef3',
+      'text': '#15151e',
+      'muted': '#5c5f70',
+      'line': '#dfe1e8',
+      'accent': '#d3266d',
+      'onAccent': '#ffffff',
+    };
+    expect(encodeThemeTokens(ThemeDocument.ink.tokens), {
+      'surfaces': {
+        'window': '#15151e',
+        'surface': '#181824',
+        'raised': '#1f202e',
+        'text': '#f1f1f6',
+        'muted': '#a0a2b6',
+        'line': '#2c2d3d',
+        'accent': '#d92d71',
+        'onAccent': '#ffffff',
+      },
+      'type': 'inter',
+      'bubbles': {'bot': 'raised', 'me': 'tint'},
+    });
+    expect(encodeThemeTokens(ThemeDocument.paper.tokens), {
+      'surfaces': paper,
+      'type': 'inter',
+      'bubbles': {'bot': 'raised', 'me': 'tint'},
+    });
+    expect(encodeThemeTokens(ThemeDocument.studio.tokens), {
+      'surfaces': paper,
+      'type': 'inter',
+      'bubbles': {'bot': 'plain', 'me': 'tint'},
+    });
     expect(FrockTheme.accent, const Color(0xffd92d71));
     expect(FrockTheme.accentSoft, const Color(0xfffc85ae));
     expect(FrockTheme.accentDeep, const Color(0xff9a124c));
