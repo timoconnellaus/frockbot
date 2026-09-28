@@ -42,11 +42,27 @@ export const CALL_REVIEW_ARGUMENTS_YES_V1 = 0.4;
 export const CALL_REVIEW_INSTRUCTS_REVIEWER_YES_V1 = 0.6;
 
 /**
- * Below this consequence, a step the request plainly needs runs without being
- * asked for by name. Level 2 is where an effect first reaches someone outside
- * FrockBot; an implied step that does is asked about first.
+ * The probability, on the consequence rubric, that a call reaches someone
+ * outside FrockBot (level 2 or 3) at or above which it counts as reaching
+ * outside. An implied step that reaches outside is asked about first, and a
+ * call whose particulars differ from the request is refused.
  */
-export const CALL_REVIEW_IMPLIED_CONSEQUENCE_MAX_V1 = 1.5;
+export const CALL_REVIEW_OUTSIDE_MIN_V1 = 0.5;
+
+/**
+ * The probability that a call changes nothing (level 0) at or above which it
+ * is treated as a read. Text addressing the reviewer cannot steer a read into
+ * doing harm — the harm is at the sink, which is judged when it is reached —
+ * so a read is not refused on that signal alone, and a near tie between "the
+ * request needs it" and "nobody asked" goes to the request.
+ */
+export const CALL_REVIEW_READ_MIN_V1 = 0.8;
+
+/** Tools whose calls run in the Bot's own Computer. */
+const CALL_REVIEW_WORKSPACE_TOOLS_V1 = new Set(["computer_exec"]);
+
+/** How sure Jev must be that nobody asked, before a read is refused. */
+export const CALL_REVIEW_READ_NONE_MIN_V1 = 0.6;
 
 /** How much of any one piece of evidence Jev is shown. */
 export const CALL_REVIEW_EVIDENCE_CHARS_V1 = 600;
@@ -97,7 +113,7 @@ export interface CallReviewJudgmentEvidenceV1 {
     readonly speaker: ConversationSpeakerV1;
     readonly text: string;
   }[];
-  /** What this Turn's tools have returned so far. */
+  /** Each earlier call this Turn, oldest first: what it was given and what it returned. */
   readonly resultsThisTurn: readonly string[];
 }
 
@@ -117,8 +133,32 @@ export function callReviewEvidenceV1(
       })),
     resultsThisTurn: evidence.priorResults
       .slice(-CALL_REVIEW_RESULTS_MAX_V1)
-      .map((result) => clip(result.content)),
+      .map((result) =>
+        callReviewResultLineV1(result.tool, result.arguments, result.content),
+      ),
   };
+}
+
+/** How much of an earlier call's arguments Jev is shown beside its result. */
+export const CALL_REVIEW_RESULT_ARGUMENTS_CHARS_V1 = 300;
+
+/**
+ * One earlier call as Jev reads it: the tool and what it was given, then what
+ * it returned. A result alone cannot say what produced it — a file the Bot
+ * wrote, a script it ran — so a later call that reads it back looks unasked.
+ */
+export function callReviewResultLineV1(
+  tool: string,
+  args: unknown,
+  content: string,
+): string {
+  if (args === undefined) return clip(content);
+  const given = JSON.stringify(args) ?? "";
+  const bounded =
+    given.length <= CALL_REVIEW_RESULT_ARGUMENTS_CHARS_V1
+      ? given
+      : `${given.slice(0, CALL_REVIEW_RESULT_ARGUMENTS_CHARS_V1)}…`;
+  return `${tool} ${bounded}\n→ ${clip(content)}`;
 }
 
 /** The state Jev sees: exactly the evidence, so nothing reaches it unseen. */
@@ -168,8 +208,11 @@ export const callReviewQuestionsV1 = {
         exclude: "A one-time approval of a single proposal",
       },
       implied_by_request: {
-        include:
+        include: [
           "A step the User's request plainly needs, such as looking something up or reading what it names, though they did not name this call",
+          "Reading, checking or re-running what the Bot itself did earlier in this Turn toward the request: its own files, logs, scripts and output",
+          "Reading one item of a listing the request asked for",
+        ],
         exclude:
           "Sending, posting, deleting or changing anything the User did not ask for",
       },
@@ -298,21 +341,38 @@ export function callReviewJudgmentsV1(
   ];
 }
 
+/** Whether anyone who can ask for a call spoke in this Turn. */
+export function callReviewPersonAskedV1(
+  conversation: readonly { readonly speaker: ConversationSpeakerV1 }[],
+): boolean {
+  return conversation.some(
+    (message) => message.speaker === "user" || message.speaker === "routine",
+  );
+}
+
 /**
  * What code makes of the answers.
  *
- * - Text trying to direct the review authorizes nothing.
+ * - Nobody who can ask spoke — only a Bot, a Plugin, FrockBot or a sender
+ *   did — so nothing but a read the input plainly needs runs. That is decided
+ *   here, never left to Jev reading who said what.
+ * - Text trying to direct the review authorizes nothing, except that a read
+ *   is not refused on it alone.
  * - A call the person asked for, or gave lasting permission for, runs when
  *   its particulars match what they asked. Particulars are judged only where
- *   the effect reaches outside FrockBot: a read the person asked for runs even
- *   when it is one of several things they asked, which Jev scores as a
- *   mismatch.
+ *   the effect reaches outside FrockBot.
  * - A step their request plainly needs runs only when it reaches nobody
  *   outside FrockBot; one that does is asked about first.
- * - Anything else is refused, and the Bot asks the person in conversation.
+ * - Anything else is refused. A read is refused as unasked only when Jev is
+ *   more sure than not that nobody asked, and never in the Bot's own
+ *   Computer while someone who can ask spoke.
  */
 export function composeCallDecisionV1(input: {
   readonly answers: CallReviewAnswersV1;
+  /** Whether a `user` or `routine` message is in the evidence. */
+  readonly personAsked: boolean;
+  /** The tool the call reaches, as the registry resolved it. */
+  readonly tool?: string;
   readonly model?: string;
 }): CallDecisionV1 {
   const { answers } = input;
@@ -325,15 +385,46 @@ export function composeCallDecisionV1(input: {
     judgments: callReviewJudgmentsV1(answers),
     ...(input.model === undefined ? {} : { model: input.model }),
   });
-  if (answers.instructsReviewer.noul >= CALL_REVIEW_INSTRUCTS_REVIEWER_YES_V1) {
+  const allow = (): CallDecisionV1 => ({
+    decision: "allow",
+    reasonCode: "authorized",
+    judgments: callReviewJudgmentsV1(answers),
+    ...(input.model === undefined ? {} : { model: input.model }),
+  });
+  const level = (score: number) =>
+    (answers.consequence.probabilities as Readonly<Record<string, number>>)[
+      String(score)
+    ] ?? 0;
+  const read = level(0) >= CALL_REVIEW_READ_MIN_V1;
+  const reachesOutside = level(2) + level(3) >= CALL_REVIEW_OUTSIDE_MIN_V1;
+  // The Bot's own Computer is its workspace: a command that changes nothing
+  // there touches nobody's data, and anything it asks of the person's
+  // accounts is reviewed on its own as it leaves (`credentialed_request`).
+  const ownWorkspaceRead =
+    read && CALL_REVIEW_WORKSPACE_TOOLS_V1.has(input.tool ?? "");
+  const unasked =
+    authorization === "none" &&
+    !ownWorkspaceRead &&
+    (!read ||
+      probability(answers.authorization, "none") >=
+        CALL_REVIEW_READ_NONE_MIN_V1);
+  if (!input.personAsked) {
+    return read &&
+      authorization !== "none" &&
+      authorization !== "materially_different"
+      ? allow()
+      : reject("no_authorization");
+  }
+  if (
+    !read &&
+    answers.instructsReviewer.noul >= CALL_REVIEW_INSTRUCTS_REVIEWER_YES_V1
+  ) {
     return reject("no_authorization");
   }
-  if (authorization === "none") return reject("no_authorization");
-  if (authorization === "materially_different") {
+  if (unasked) return reject("no_authorization");
+  if (authorization === "materially_different" && !read) {
     return reject("arguments_changed");
   }
-  const reachesOutside =
-    answers.consequence.score >= CALL_REVIEW_IMPLIED_CONSEQUENCE_MAX_V1;
   if (authorization === "implied_by_request") {
     if (reachesOutside) return reject("no_authorization");
   } else if (
@@ -342,10 +433,5 @@ export function composeCallDecisionV1(input: {
   ) {
     return reject("arguments_changed");
   }
-  return {
-    decision: "allow",
-    reasonCode: "authorized",
-    judgments: callReviewJudgmentsV1(answers),
-    ...(input.model === undefined ? {} : { model: input.model }),
-  };
+  return allow();
 }

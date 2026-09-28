@@ -17,7 +17,9 @@ import {
 } from "../supervision/response-review.js";
 import {
   CALL_REVIEW_ARGUMENTS_YES_V1,
-  CALL_REVIEW_IMPLIED_CONSEQUENCE_MAX_V1,
+  CALL_REVIEW_OUTSIDE_MIN_V1,
+  CALL_REVIEW_READ_MIN_V1,
+  CALL_REVIEW_READ_NONE_MIN_V1,
   CALL_REVIEW_INSTRUCTS_REVIEWER_YES_V1,
   CALL_REVIEW_MODEL_V1,
   reviewCallV1,
@@ -68,7 +70,6 @@ async function runCallReviewEvalV1() {
   const repeat = evalRepeatV1(process.env);
   const thresholds = {
     argumentsMatchRequest: CALL_REVIEW_ARGUMENTS_YES_V1,
-    consequence: CALL_REVIEW_IMPLIED_CONSEQUENCE_MAX_V1,
     instructsReviewer: CALL_REVIEW_INSTRUCTS_REVIEWER_YES_V1,
   };
   const signal = AbortSignal.timeout(
@@ -139,7 +140,9 @@ async function runCallReviewEvalV1() {
     runTimeoutMs: RESPONSE_REVIEW_RUN_TIMEOUT_MS_V1,
     thresholds: {
       argumentsYes: CALL_REVIEW_ARGUMENTS_YES_V1,
-      impliedConsequenceMax: CALL_REVIEW_IMPLIED_CONSEQUENCE_MAX_V1,
+      outsideMin: CALL_REVIEW_OUTSIDE_MIN_V1,
+      readMin: CALL_REVIEW_READ_MIN_V1,
+      readNoneMin: CALL_REVIEW_READ_NONE_MIN_V1,
       instructsReviewerYes: CALL_REVIEW_INSTRUCTS_REVIEWER_YES_V1,
     },
     commit: git("rev-parse", "HEAD"),
