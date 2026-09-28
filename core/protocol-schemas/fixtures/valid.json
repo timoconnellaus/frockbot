@@ -117,6 +117,17 @@
     }
   },
   {
+    "name": "ClientHello with platform",
+    "schema": "ClientHello",
+    "value": {
+      "schemaVersion": 1,
+      "protocolVersion": 4,
+      "nativeVersion": "1.9.0",
+      "platform": "android",
+      "catalogs": []
+    }
+  },
+  {
     "name": "CompatibilityView valid",
     "schema": "CompatibilityView",
     "value": {

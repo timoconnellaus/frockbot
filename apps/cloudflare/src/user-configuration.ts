@@ -1,6 +1,15 @@
 import {
+  CLIENT_PLATFORMS_V1,
+  emitProductEventV1,
+  productEventsFromAccountChangeV1,
+  type ClientPlatformV1,
+  type ProductEventV1,
+} from "@frockbot/app/analytics/events";
+import {
   BillingError,
   BillingLedger,
+  CREDIT_EXHAUSTED_REASON_V1,
+  DAILY_LIMIT_REASON_V1,
   type BillingBalance,
   type ComplimentaryGrant,
   type PaidAccessState,
@@ -349,6 +358,8 @@ const COMPUTER_TEARDOWN_RECEIPT_PREFIX = "computer:teardown:";
 
 interface UserConfigurationEnv
   extends BillingEnv, AccountDeletionEnvV1, AuthPackageEnvironmentV1 {
+  /** Product events (app/analytics/events.ts); absent writes none. */
+  ANALYTICS?: AnalyticsEngineDataset;
   FCM_SERVICE_ACCOUNT?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
   /** Where every Bot's email address is, and what it sends from. */
@@ -554,6 +565,10 @@ export class UserConfiguration
     await this.assertUserIdentity(input.userId);
     this.billing().reconcile(input.command);
   }
+  private emit(event: ProductEventV1) {
+    emitProductEventV1(this.env.ANALYTICS, event);
+  }
+
   private billing() {
     return new BillingLedger(
       this.ctx.storage,
@@ -747,10 +762,32 @@ export class UserConfiguration
           status: 404,
         },
       };
+    const port = this.billing().paymentsPort();
+    const before = port.account();
     // An error thrown over RPC loses its class, and with it the status: the
     // Package's refusal (a reused key, a plan not sold) travels as data.
     try {
-      return { value: await account.command(input.command, input.input) };
+      const value = await account.command(input.command, input.input);
+      if (input.command === "checkout") {
+        const { kind, plan } = (input.input ?? {}) as {
+          kind?: unknown;
+          plan?: unknown;
+        };
+        this.emit({
+          name: "checkout_started",
+          userId: input.userId,
+          ...(typeof kind === "string" ? { kind } : {}),
+          ...(typeof plan === "string" ? { detail: plan } : {}),
+        });
+      }
+      for (const event of productEventsFromAccountChangeV1(
+        input.userId,
+        before,
+        port.account(),
+      )) {
+        this.emit(event);
+      }
+      return { value };
     } catch (error) {
       if (error instanceof BillingError)
         return { refused: { message: error.message, status: error.status } };
@@ -763,10 +800,39 @@ export class UserConfiguration
     const ledger = this.billing();
     // Only an account with a limit pays for reading its timezone.
     const limited = readSpendLimitsV1(this.ctx.storage.sql).size > 0;
-    return ledger.reserve(
-      input.reservation,
-      limited ? await this.dayStart(input.userId) : undefined,
-    );
+    try {
+      return await ledger.reserve(
+        input.reservation,
+        limited ? await this.dayStart(input.userId) : undefined,
+      );
+    } catch (error) {
+      if (
+        error instanceof BillingError &&
+        error.message !== DAILY_LIMIT_REASON_V1
+      ) {
+        await this.noteCreditExhausted(input.userId, error.message);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Once a day at most: every Turn an account without credit tries is refused
+   * the same way, and the funnel wants the day it ran out, not each attempt.
+   */
+  private async noteCreditExhausted(userId: string, reason: string) {
+    const key = `analytics:credit-exhausted:${new Date().toISOString().slice(0, 10)}`;
+    if ((await this.ctx.storage.get(key)) !== undefined) return;
+    await this.ctx.storage.put(key, true);
+    this.emit({
+      name: "credit_exhausted",
+      userId,
+      kind:
+        reason === CREDIT_EXHAUSTED_REASON_V1
+          ? "credit"
+          : "subscription-required",
+      micros: this.billing().balance().complimentaryMicros,
+    });
   }
   async settleUsage(input: { userId: string; settlement: UsageSettlement }) {
     await this.assertUserIdentity(input.userId);
@@ -852,10 +918,16 @@ export class UserConfiguration
   async registerPush(input: { userId: string; registration: unknown }) {
     await this.assertUserIdentity(input.userId);
     await this.assertAccountOpen();
-    await registerPushDevice(
-      this.ctx.storage,
-      decodePushRegistration(input.registration),
-    );
+    const registration = decodePushRegistration(input.registration);
+    if (await registerPushDevice(this.ctx.storage, registration)) {
+      this.emit({
+        name: "push_registered",
+        userId: input.userId,
+        ...(registration.platform === undefined
+          ? {}
+          : { platform: registration.platform }),
+      });
+    }
     return { ok: true };
   }
 
@@ -1078,7 +1150,18 @@ export class UserConfiguration
       // an account is given General: before the first thing it reads, and not
       // only when a client happens to read the directory. The memo makes it
       // once per instance, and the Flock's marker makes it once ever.
-      await (await this.flockContribution()).provisionGeneral();
+      const general = await (await this.flockContribution()).provisionGeneral();
+      if (general !== undefined) {
+        this.emit({ name: "account_created", userId });
+        if (general !== null) {
+          this.emit({
+            name: "bot_created",
+            userId,
+            botId: general,
+            kind: "general",
+          });
+        }
+      }
       this.bootstrapped = true;
     }
     return userId;
@@ -2025,6 +2108,16 @@ export class UserConfiguration
     ).executeConfiguration(request);
     if (receipt.status === "applied" && before !== undefined) {
       await this.propagateRoutineTimezone(request.userId, before);
+    }
+    if (
+      receipt.status === "applied" &&
+      request.command.type === "user/install-package"
+    ) {
+      this.emit({
+        name: "plugin_installed",
+        userId: request.userId,
+        kind: request.command.packageId,
+      });
     }
     if (
       receipt.status === "applied" &&
@@ -3210,10 +3303,21 @@ export class UserConfiguration
     });
     await this.assertFlockIdentity(request.userId as string);
     await this.assertAccountOpen();
-    return (await this.flockContribution()).createBot(
-      request.userId as string,
-      request.command as ReturnType<typeof decodeCreateBotCommandV1>,
-    );
+    const command = request.command as ReturnType<
+      typeof decodeCreateBotCommandV1
+    >;
+    const receipt = await (
+      await this.flockContribution()
+    ).createBot(request.userId as string, command);
+    if (receipt.status === "applied") {
+      this.emit({
+        name: "bot_created",
+        userId: request.userId as string,
+        botId: command.botId,
+        kind: command.createdBy ? "bot" : "user",
+      });
+    }
+    return receipt;
   }
 
   async listBotLifecycles(input: unknown) {
@@ -3752,7 +3856,9 @@ export class UserConfiguration
       enrollment: rpcDecodedValue,
     });
     const userId = await this.assertUserIdentity(request.userId as string);
-    return (await this.machineContribution()).enroll(
+    const receipt = await (
+      await this.machineContribution()
+    ).enroll(
       {
         userId,
         machineId: request.machineId as string,
@@ -3760,6 +3866,16 @@ export class UserConfiguration
       },
       request.enrollment,
     );
+    const platform = (request.enrollment as { platform?: unknown } | null)
+      ?.platform;
+    this.emit({
+      name: "desktop_paired",
+      userId,
+      ...(CLIENT_PLATFORMS_V1.includes(platform as ClientPlatformV1)
+        ? { platform: platform as ClientPlatformV1 }
+        : {}),
+    });
+    return receipt;
   }
 
   /**

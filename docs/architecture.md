@@ -1295,7 +1295,7 @@ D1 schema: `apps/cloudflare/migrations/` holds `0001_better_auth.sql`, defining 
 
 Durable Object state is key-value unless a store owns tables. SQLite tables are used inside `BotState`, by the Memory engine; inside `UserConfiguration`, by the Memory engine, the search and audit stores and the billing ledger; and inside `VoiceAssistant`, by the Agents SDK's own conversation and schedule tables. `DeploymentPolicy` creates no tables but uses the synchronous `ctx.storage.kv` API, which only SQLite-backed storage provides; `GroupChat` is key-value only. Each class is declared in a `new_sqlite_classes` migration; `VoiceSession`'s v5 entry is retired by the `deleted_classes` v6 entry that follows it, and `VoiceAssistant` is a new name under v7.
 
-Not used anywhere in the repository: KV namespaces, Queues, Workflows, Hyperdrive, Browser Rendering, Analytics Engine, Pipelines. Containers appear only in `apps/computer-host`.
+Analytics Engine holds product events only, bound as `ANALYTICS` on the deployed app Worker and never in a local environment ([analytics](analytics.md)). Not used anywhere in the repository: KV namespaces, Queues, Workflows, Hyperdrive, Browser Rendering, Pipelines. Containers appear only in `apps/computer-host`.
 
 Top-level vars: `NATIVE_SLICE_2_AUTH`, `DEFAULT_APPLICATION_HASH`, `FROCK_AI_GATEWAY_ID`, `FROCK_AI_ACCOUNT_ID`, `FROCK_AI_AUTO_ROUTE`, and `EMAIL_DOMAIN` where the profile names `email` (§3, "By email"), which also binds `send_email` `SEND_EMAIL`. `ALLOWED_CLIENT_ORIGINS` is read but set nowhere: the web app is same-origin and the Flutter app sends no `Origin`.
 

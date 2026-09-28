@@ -361,6 +361,9 @@ export const DEPLOYMENT_PROFILE_SCHEMA_V1 = {
         authDatabaseName: {
           $ref: "#/$defs/resourceName",
         },
+        analyticsDataset: {
+          $ref: "#/$defs/resourceName",
+        },
       },
     },
   },

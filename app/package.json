@@ -11,6 +11,7 @@
     "./admin/operations": "./admin/operations.ts",
     "./admin/shared": "./admin/shared.ts",
     "./agent-runtime": "./agent-runtime.ts",
+    "./analytics/events": "./analytics/events.ts",
     "./approvals/bot": "./approvals/bot.ts",
     "./approvals/delivery": "./approvals/delivery.ts",
     "./authoring/source-repository": "./authoring/source-repository.ts",

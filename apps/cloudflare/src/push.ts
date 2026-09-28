@@ -77,15 +77,19 @@ export function decodePushRegistration(input: unknown): PushRegistration {
   return value as unknown as PushRegistration;
 }
 
+/**
+ * Records one registration. Answers whether it gave the Bots a token they
+ * could not reach before: a new installation, or a refreshed token.
+ */
 export async function registerPushDevice(
   storage: DurableObjectStorage,
   value: PushRegistration,
   now = Date.now(),
-): Promise<void> {
+): Promise<boolean> {
   const key = DEVICE_PREFIX + value.deviceId;
   if (value.remove) {
     await forgetDevice(storage, key, value.deviceId);
-    return;
+    return false;
   }
   const devices = await storage.list<PushDevice>({ prefix: DEVICE_PREFIX });
   for (const [oldKey, device] of devices)
@@ -119,6 +123,7 @@ export async function registerPushDevice(
       : { activeBotId: value.activeBotId }),
     updatedAt: now,
   } satisfies PushDevice);
+  return value.token !== undefined && value.token !== previous?.token;
 }
 
 /**

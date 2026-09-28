@@ -24,6 +24,7 @@ export type ClientHello = {
   schemaVersion: 1;
   protocolVersion: number;
   nativeVersion?: string;
+  platform?: "web" | "android" | "ios" | "macos" | "windows" | "linux";
   catalogs: Array<CatalogRef>;
 };
 export type CompatibilityView = {

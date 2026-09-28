@@ -54,6 +54,11 @@ import {
   type VoiceCapabilitiesV1,
 } from "@frockbot/app/voice/shared";
 import {
+  clientOfHelloV1,
+  emitProductEventV1,
+} from "@frockbot/app/analytics/events";
+import { CLIENT_HELLO_HEADER } from "./client-compatibility.js";
+import {
   whatsNewFeedV1,
   whatsNewImageNameV1,
   whatsNewPublishedAtV1,
@@ -72,6 +77,18 @@ import {
 } from "./request-body.js";
 
 const PUBLIC_APPLICATION_USER_ID = "anonymous";
+const TURN_PATH = /^\/api\/bots\/([^/]+)\/turns$/;
+
+/** Which app sent the request, as far as its hello says; a browser says nothing. */
+function clientOfRequest(request: Request) {
+  const header = request.headers.get(CLIENT_HELLO_HEADER);
+  if (!header || header.length > 4096) return {};
+  try {
+    return clientOfHelloV1(JSON.parse(header));
+  } catch {
+    return {};
+  }
+}
 /**
  * What an unauthenticated GET may reach: the document, the site icon, and
  * What’s New stills. The stills are product copy, not a secret, and Flutter
@@ -576,6 +593,14 @@ export function createGateway(
     // through before a route is even chosen.
     timing?.mark("edge-auth-ready");
     if (request.method === "GET" && url.pathname === "/api/identity") {
+      // Every client reads its identity once as it starts.
+      if (userId !== PUBLIC_APPLICATION_USER_ID) {
+        emitProductEventV1(dependencies.analytics, {
+          name: "app_opened",
+          userId,
+          ...clientOfRequest(request),
+        });
+      }
       return Response.json({ schemaVersion: 1, userId, isAdmin });
     }
     if (url.pathname === "/api/whats-new") {
@@ -1298,7 +1323,7 @@ export function createGateway(
       }
     }
 
-    return routeUserApplication(
+    const response = await routeUserApplication(
       dependencies,
       compatibilityDate,
       request,
@@ -1307,6 +1332,16 @@ export function createGateway(
       isAdmin,
       development.persist,
     );
+    const turn = request.method === "POST" && TURN_PATH.exec(url.pathname);
+    if (turn && response.ok) {
+      emitProductEventV1(dependencies.analytics, {
+        name: "message_sent",
+        userId,
+        botId: turn[1]!,
+        ...clientOfRequest(request),
+      });
+    }
+    return response;
   };
 
   const handle = async (request: Request): Promise<Response> => {

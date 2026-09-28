@@ -14,6 +14,7 @@
 // Nothing durable lives only in this object's memory. A call is a ledger row,
 // a delegation is a ledger row plus a scheduled look-up, and an eviction
 // mid-answer costs the person that answer and nothing else.
+import { emitProductEventV1 } from "@frockbot/app/analytics/events";
 import { BRAND_V1 } from "#brand";
 import {
   Agent,
@@ -286,6 +287,8 @@ const DELEGATION_MAX_CHECK_SECONDS = 5 * 60;
 const ANSWER_RETRY_SECONDS = 5;
 
 export interface VoiceAssistantEnv {
+  /** Product events (app/analytics/events.ts); absent writes none. */
+  ANALYTICS?: AnalyticsEngineDataset;
   AI?: Ai;
   OPENAI_API_KEY?: string;
   /** The Live session's key. Without it there is no voice session at all. */
@@ -2318,6 +2321,13 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     // which Memory the standing preference belongs to.
     if (target.botId && admission.call.botId !== target.botId) {
       await ledger.retargetCall(connection.id, target.botId, now);
+    }
+    if (admission.status === "admitted" && !admission.rejoined) {
+      emitProductEventV1(this.env.ANALYTICS, {
+        name: "voice_call_started",
+        userId: identity.userId,
+        ...(target.botId ? { botId: target.botId } : {}),
+      });
     }
     if (admission.replaced) {
       const replacedId = admission.replaced.connectionId;

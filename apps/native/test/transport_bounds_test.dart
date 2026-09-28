@@ -32,6 +32,15 @@ void main() {
     expect(development.nativeVersion, isNull);
   });
 
+  test('the hello names the platform the schema knows', () {
+    final android = wire.ClientHello.fromJson(
+      clientHelloForRelease('1.9.0', platform: 'android'),
+    );
+    expect(android.platform, 'android');
+    expect(clientHelloForRelease('1.9.0').containsKey('platform'), isFalse);
+    expect(wire.ClientHello.fromJson(clientHello).platform, clientPlatform);
+  });
+
   test('JSON transport bounds depth before decoding, including escaped strings and UTF-8', () {
     final sixteen =
         '${List.filled(16, '[').join()}0${List.filled(16, ']').join()}';

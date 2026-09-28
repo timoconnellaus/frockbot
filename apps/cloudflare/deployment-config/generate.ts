@@ -206,6 +206,7 @@ export function resourceNamesV1(profile: DeploymentProfileV1) {
       named.memoryFilesBucket ?? `${profile.prefix}-memory-files`,
     memoryIndex: named.memoryIndex ?? `${profile.prefix}-memory`,
     authDatabaseName: named.authDatabaseName ?? `${profile.prefix}-auth`,
+    analyticsDataset: named.analyticsDataset ?? `${profile.prefix}-events`,
   };
 }
 
@@ -693,6 +694,12 @@ export function generateWorkerConfigV1(
 
   const index = bindingNamed(asArray(config.vectorize), "MEMORY_INDEX");
   if (index) index.index_name = resources.memoryIndex;
+
+  const dataset = bindingNamed(
+    asArray(config.analytics_engine_datasets),
+    "ANALYTICS",
+  );
+  if (dataset) dataset.dataset = resources.analyticsDataset;
 
   const services = asArray(config.services);
   const computerHost = bindingNamed(services, "COMPUTER_HOST");
