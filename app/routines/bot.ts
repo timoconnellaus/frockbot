@@ -714,11 +714,11 @@ async function deliverPendingHandoffs(state: ShellBotStateV1): Promise<void> {
     );
     if (routineOwed.length === 0) return;
     // A run already occupies the object — the person is talking to the Bot, or
-    // a firing is still going. Delivering into that would be refused or make
-    // what is running yield, and the hand-off is owed, not urgent: the next
-    // alarm opens the Turn, and a conversation the person started in the
+    // a firing is still going or parked for them. Delivering into that would
+    // make what is running give way, and the hand-off is owed, not urgent: the
+    // next alarm opens the Turn, and a conversation the person started in the
     // meantime drains the queue itself, which is the better delivery anyway.
-    if (await state.authority.readActiveRunId()) return;
+    if (await objectOccupiedV1(state)) return;
     // Judged before a Turn is opened for them: a report nobody needs stays in
     // its Routine's log and comes to no one, and a delivery whose every report
     // can wait lands unread without waking a device. When the judge cannot
@@ -786,7 +786,7 @@ async function settleRoutineFirings(state: ShellBotStateV1): Promise<void> {
   // this same bail-out — which is how a Routine racing a long chat Turn
   // failed once a minute for ever. The hold is what turns the bail-out into
   // a deferral: `dueAt` does not move, so the firing still lands.
-  if (await state.authority.readActiveRunId()) {
+  if (await objectOccupiedV1(state)) {
     await state.ctx.storage.transaction((transaction) =>
       routineAccountTimezoneV1(transaction).then((timezone) =>
         state.routineScheduler.defer(transaction, timezone),
@@ -828,6 +828,18 @@ async function settleRoutineFirings(state: ShellBotStateV1): Promise<void> {
       return outcome;
     },
     await routineAccountTimezoneV1(state.ctx.storage),
+  );
+}
+
+/**
+ * Whether a Turn holds the object: one running, or one parked for the
+ * person's message and owed the rest of its Turn, which a firing would be
+ * refused behind.
+ */
+async function objectOccupiedV1(state: ShellBotStateV1): Promise<boolean> {
+  return Boolean(
+    (await state.authority.readActiveRunId()) ??
+    (await state.authority.readParkedRunId()),
   );
 }
 

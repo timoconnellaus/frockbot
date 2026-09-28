@@ -260,6 +260,49 @@ void main() {
     expect(find.text('Show earlier Turns'), findsNothing);
   });
 
+  testWidgets('a running Turn, a Routine included, can be stopped from here', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    var stopped = false;
+    final bodies = <String, Object?>{};
+    Map<String, Object?> page() {
+      final fixture = workLogPage();
+      final turns = [...fixture['turns']! as List<Object?>];
+      turns[1] = {
+        ...turns[1]! as Map<String, Object?>,
+        'status': stopped ? 'cancelled' : 'running',
+      }..remove('outcome');
+      return {...fixture, 'turns': turns};
+    }
+
+    final api = NativeSessionApi(MemoryStore(), (path, body) async {
+      if (path.endsWith('/stop')) {
+        bodies[path] = body;
+        stopped = true;
+        return <String, Object?>{};
+      }
+      return page();
+    });
+    addTearDown(api.close);
+    await tester.pumpWidget(host(api));
+    await tester.pumpAndSettle();
+
+    // The finished Turn offers nothing to stop; the running Routine does.
+    expect(find.widgetWithText(TextButton, 'Stop'), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, 'Stop'));
+    await tester.pumpAndSettle();
+
+    final sent = bodies['/api/bots/pixel/turns/run-41/stop']!;
+    expect(sent, isA<Map<String, Object?>>());
+    expect(sent, containsPair('action', 'stop'));
+    expect(sent, containsPair('runId', 'run-41'));
+    expect(find.widgetWithText(TextButton, 'Stop'), findsNothing);
+    expect(find.text('Stopped'), findsOneWidget);
+  });
+
   testWidgets('a Work log that will not load says so and retries', (
     tester,
   ) async {

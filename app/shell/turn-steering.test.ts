@@ -296,3 +296,92 @@ describe("the projection tells a waiting message from the running Turn", () => {
     expect(running.queued).toBeUndefined();
   });
 });
+
+describe("a Routine's Turn and the person's Stop", () => {
+  const firing = {
+    runId: "fire-1",
+    commandFingerprint: "routine-fingerprint",
+    sessionId: "routine:triage",
+    input: "triage the inbox",
+    admission: { schemaVersion: 1, turnType: "automation" },
+  } as Partial<StoredRun>;
+
+  /** A Routine that finished a step and parked for the person's message. */
+  function parkedEvents(): SessionEvent[] {
+    const intent = toolIntentEvents();
+    return [
+      ...intent,
+      ...events(
+        {
+          type: "tool/result",
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0",
+          name: "effect",
+          content: "done",
+          isError: false,
+          status: "completed",
+        },
+        { type: "step/end", turn: 1, step: 1, outcome: "completed" },
+      ).map((event, offset) => ({ ...event, seq: intent.length + offset })),
+    ];
+  }
+
+  test("reaches a Routine's running Turn", async () => {
+    const { storage, contribution } = await fixture(
+      storedRun({ ...firing, events: toolIntentEvents() }),
+    );
+
+    await stopRun(contribution.state, identity, {
+      schemaVersion: 1,
+      action: "stop",
+      commandId: "stop-routine",
+      runId: "fire-1",
+    });
+
+    expect(
+      (storage.values.get("run:fire-1") as StoredRun).stopRequestedAt,
+    ).toBeDefined();
+  });
+
+  test("settles a parked Routine at once, and leaves the person's Turn alone", async () => {
+    const parked = storedRun({
+      ...firing,
+      phase: "parked",
+      events: parkedEvents(),
+    });
+    const { storage, contribution } = await fixture(parked);
+    storage.values.set(
+      "run:run-2",
+      storedRun({
+        runId: "run-2",
+        acceptedAt: "2026-09-03T00:00:02.000Z",
+        input: "Can you remember that my wife is Becky",
+      }),
+    );
+    storage.values.set("active-run", "run-2");
+    storage.values.set("parked-run", "fire-1");
+    // Waiting for the person's Turn, and so not the one a Stop in the chat
+    // reaches while that Turn runs.
+    expect(projectClientRunV1(parked)).toMatchObject({
+      status: "running",
+      queued: true,
+    });
+
+    await stopRun(contribution.state, identity, {
+      schemaVersion: 1,
+      action: "stop",
+      commandId: "stop-parked",
+      runId: "fire-1",
+    });
+
+    expect((storage.values.get("run:fire-1") as StoredRun).status).toBe(
+      "cancelled",
+    );
+    expect(storage.values.get("parked-run")).toBeUndefined();
+    expect(storage.values.get("active-run")).toBe("run-2");
+    expect((storage.values.get("run:run-2") as StoredRun).status).toBe(
+      "running",
+    );
+  });
+});

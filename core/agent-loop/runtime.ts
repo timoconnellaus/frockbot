@@ -46,11 +46,14 @@ export interface TurnCursor {
  * How a Turn's body finished.
  *
  * `settlement-pending` writes no `turn/end`: the Turn's own durable commitment
- * of a model outcome has not landed, and a resume re-announces it.
+ * of a model outcome has not landed, and a resume re-announces it. `parked`
+ * writes none either: the Turn closed a step and gave way to a person's
+ * message, and a resume carries it on from that boundary.
  */
 export type TurnSettlement =
   | { kind: "settled"; outcome: StepOutcome; reason?: string }
-  | { kind: "settlement-pending" };
+  | { kind: "settlement-pending" }
+  | { kind: "parked" };
 
 /**
  * What one Turn's external work is allowed to reach.

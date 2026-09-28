@@ -174,10 +174,10 @@ export interface ShellCompositionMountOptions {
    */
   remainingEffectAdmissions?(): Promise<number>;
   /**
-   * Whether a person's message is waiting behind this Turn. The loop asks at
-   * each step boundary and ends the Turn there when it is.
+   * How this Turn gives way to a person's message waiting behind it. The loop
+   * asks at each step boundary and ends or parks the Turn there.
    */
-  userMessageWaiting?(): Promise<boolean>;
+  userMessageWaiting?: AgentOptions["userMessageWaiting"];
   /**
    * Shown each dispatch's tool calls while the model writes them, so the
    * reply can be drawn before it is sent. Never journaled.

@@ -345,8 +345,9 @@ export class RoutineScheduler {
    * Run one firing under a hard time bound.
    *
    * Nothing else bounds it: `maxSteps` bounds the loop and not the wall clock,
-   * and an automation run is not offered to the user's Stop. A firing that
-   * never comes back must still settle, or its lock outlives the isolate.
+   * a Turn parked for the person's message waits as long as they talk, and a
+   * person's Stop may never come. A firing that never comes back must still
+   * settle, or its lock outlives the isolate.
    */
   async #execute(
     execute: RoutineFireExecutorV1,

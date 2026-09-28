@@ -326,7 +326,7 @@ describe("a message sent while a Turn runs", () => {
 
     const first = probe.authority.run(command("run-1", "first"));
     await probe.handle("run-1").started;
-    expect(await probe.authority.userMessageWaiting("run-1")).toBe(false);
+    expect(await probe.authority.userMessageWaiting("run-1")).toBeUndefined();
 
     const second = probe.authority.run(command("run-2", "second"));
     await admitted();
@@ -335,7 +335,7 @@ describe("a message sent while a Turn runs", () => {
     expect(storedRun(storage, "run-2").phase).toBe("queued");
     expect(waitingUserRuns(storage)).toEqual(["run-2"]);
     expect(storedRun(storage, "run-1").stopRequestedAt).toBeUndefined();
-    expect(await probe.authority.userMessageWaiting("run-1")).toBe(true);
+    expect(await probe.authority.userMessageWaiting("run-1")).toBe("yield");
 
     probe.handle("run-1").finish();
     expect(await first).toMatchObject({ text: "done: first" });
@@ -449,11 +449,11 @@ describe("a message sent while a Turn runs", () => {
     await first;
     await probe.handle("run-2").started;
     // The one behind it is still waiting, so this Turn yields too.
-    expect(await probe.authority.userMessageWaiting("run-2")).toBe(true);
+    expect(await probe.authority.userMessageWaiting("run-2")).toBe("yield");
     probe.handle("run-2").finish();
     await second;
     await probe.handle("run-3").started;
-    expect(await probe.authority.userMessageWaiting("run-3")).toBe(false);
+    expect(await probe.authority.userMessageWaiting("run-3")).toBeUndefined();
     probe.handle("run-3").finish();
     await third;
 
@@ -509,8 +509,8 @@ describe("a message sent while a Turn runs", () => {
   });
 });
 
-describe("only a Turn on the person's own lane yields", () => {
-  test("a Turn answering another Bot finishes its job first", async () => {
+describe("every Turn gives way to the person's message", () => {
+  test("a Turn answering another Bot in the conversation yields to it", async () => {
     const storage = new MemoryStorage();
     const probe = createAuthority(storage);
     const agent = probe.authority.run(
@@ -520,9 +520,12 @@ describe("only a Turn on the person's own lane yields", () => {
     const person = probe.authority.run(command("run-user", "hello"));
     await admitted();
 
-    expect(await probe.authority.userMessageWaiting("run-agent")).toBe(false);
-    // A run that is not the active one never yields either.
-    expect(await probe.authority.userMessageWaiting("run-user")).toBe(false);
+    // It shares the person's Session log, so it ends rather than parks.
+    expect(await probe.authority.userMessageWaiting("run-agent")).toBe("yield");
+    // A run that is not the active one never gives way.
+    expect(
+      await probe.authority.userMessageWaiting("run-user"),
+    ).toBeUndefined();
 
     probe.handle("run-agent").finish();
     await agent;
@@ -588,7 +591,7 @@ describe("the agent lane", () => {
       }),
     );
     await admitted();
-    expect(await probe.authority.userMessageWaiting("run-1")).toBe(false);
+    expect(await probe.authority.userMessageWaiting("run-1")).toBeUndefined();
     expect(storedRun(storage, "run-agent")).toMatchObject({
       phase: "queued",
       admission: { turnType: "agent" },

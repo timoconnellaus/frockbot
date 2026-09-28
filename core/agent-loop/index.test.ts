@@ -190,7 +190,7 @@ describe("a Turn a person's message is waiting behind", () => {
       model: "test-model",
       userMessageWaiting: () => {
         asked += 1;
-        return Promise.resolve(true);
+        return Promise.resolve("yield");
       },
     });
 
@@ -220,7 +220,7 @@ describe("a Turn a person's message is waiting behind", () => {
       sessionId: "not-steered",
       provider: provider.id,
       model: "test-model",
-      userMessageWaiting: () => Promise.resolve(false),
+      userMessageWaiting: () => Promise.resolve(undefined),
     });
 
     handle.agent.send("look into it");
@@ -228,6 +228,75 @@ describe("a Turn a person's message is waiting behind", () => {
 
     expect(calls()).toBe(2);
     expect(handle.agent.session.activeRunJournal.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "completed",
+    });
+  });
+
+  test("parks at the step boundary, open, and a resume carries it on from there", async () => {
+    const { provider, calls } = toolThenAnswer();
+    let looked = 0;
+    const counted: ToolDefinition = {
+      ...look,
+      execute: () => {
+        looked += 1;
+        return Promise.resolve({ content: "what it saw", isError: false });
+      },
+    };
+    const first = mountRuntime(provider, counted);
+    const parked = await first.loop.create({
+      ...allowEffectOptions,
+      botId: "bot-parked",
+      sessionId: "parked",
+      provider: provider.id,
+      model: "test-model",
+      userMessageWaiting: () => Promise.resolve("park"),
+    });
+
+    parked.agent.send("look into it");
+    await parked.agent.whenIdle();
+
+    const journal = [...parked.agent.session.activeRunJournal];
+    expect(parked.agent.parked).toBe(true);
+    expect(calls()).toBe(1);
+    expect(looked).toBe(1);
+    // The step closed; the Turn did not.
+    expect(journal.at(-1)).toMatchObject({
+      type: "step/end",
+      step: 1,
+      outcome: "completed",
+    });
+    expect(journal.some((event) => event.type === "turn/end")).toBe(false);
+
+    const second = mountRuntime(provider, counted, undefined, {
+      parked: journal,
+    });
+    const resumed = await second.loop.create({
+      ...allowEffectOptions,
+      botId: "bot-parked",
+      sessionId: "parked",
+      provider: provider.id,
+      model: "test-model",
+      userMessageWaiting: () => Promise.resolve(undefined),
+    });
+    resumed.agent.resume();
+    await resumed.agent.whenIdle();
+
+    const settled = resumed.agent.session.activeRunJournal;
+    expect(resumed.agent.parked).toBe(false);
+    // One more model call for the next step, and the tool is not run again.
+    expect(calls()).toBe(2);
+    expect(looked).toBe(1);
+    expect(settled.filter((event) => event.type === "turn/start")).toHaveLength(
+      1,
+    );
+    expect(
+      settled.filter((event) => event.type === "model/request"),
+    ).toHaveLength(2);
+    expect(
+      settled.find((event) => event.type === "step/start" && event.step === 2),
+    ).toBeDefined();
+    expect(settled.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "completed",
     });
@@ -277,7 +346,7 @@ describe("a tool call being written", () => {
       sessionId: "writing",
       provider: provider.id,
       model: "test-model",
-      userMessageWaiting: () => Promise.resolve(true),
+      userMessageWaiting: () => Promise.resolve("yield"),
       watchToolInput: (dispatch) => {
         seen.push(
           `open ${dispatch.turn}:${dispatch.step} ${dispatch.journal.some((event) => event.type === "model/request")}`,
@@ -320,7 +389,7 @@ describe("a tool call being written", () => {
       sessionId: "writing-broken",
       provider: provider.id,
       model: "test-model",
-      userMessageWaiting: () => Promise.resolve(true),
+      userMessageWaiting: () => Promise.resolve("yield"),
       watchToolInput: () => ({
         delta: () => {
           throw new Error("watcher broke");

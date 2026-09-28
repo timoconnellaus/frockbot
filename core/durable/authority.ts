@@ -62,6 +62,7 @@ import {
   type SessionEventLogStorage,
 } from "./session-event-log.js";
 import {
+  BotTurnParkedError,
   BotTurnRecoveryRequiredError,
   BotTurnRefusedError,
 } from "./turn-errors.js";
@@ -73,6 +74,7 @@ import {
   PENDING_AGENT_RUN_PREFIX,
   PENDING_USER_RUN_PREFIX,
   MAX_PENDING_USER_RUNS_V1,
+  PARKED_RUN_KEY,
   IDENTITY_KEY,
   LATEST_EVENTS_KEY,
   MAX_RUN_ADMISSION_FENCES,
@@ -472,6 +474,16 @@ export class BotDurableAuthority<Snapshot> {
       if (run.phase === "queued" && !this.drive && !this.executingActivity) {
         return this.runQueuedRun(command);
       }
+      if (run.phase === "parked" && !this.drive && !this.executingActivity) {
+        // Nothing in this isolate is carrying the parked run on. Recovery runs
+        // whatever is ahead of it — the person's Turns — and then resumes it;
+        // a recovery that fails leaves it to the alarm and this waits.
+        const recovered = await this.recoverActiveRun().then(
+          () => true,
+          () => false,
+        );
+        if (recovered) continue;
+      }
       const watch = this.waitSettled(command.runId);
       const becameSettled = await this.completionOf(command.runId);
       if (becameSettled) return becameSettled;
@@ -710,12 +722,15 @@ export class BotDurableAuthority<Snapshot> {
             }`,
           );
         }
-        return this.executeAcceptedRun(
+        const completion = await this.executeAcceptedRun(
           command,
           promoted.seed,
           promoted.settings,
           promoted.compositionGenerationId,
         );
+        // Parked for a person's message: it is owed the rest of its Turn,
+        // and waiting for that is what `run` does.
+        return completion ?? this.run(command);
       }
       throw new Error(`run "${command.runId}" could not start`);
     } finally {
@@ -776,11 +791,15 @@ export class BotDurableAuthority<Snapshot> {
         return "not-queued" as const;
       }
       if (lane === "agent") {
-        // A User Turn always has first claim on an idle Bot, and agent Turns
-        // retain FIFO order behind it. The run is still queued in either case;
-        // reporting `not-queued` here would strand its blocking caller even
-        // though the durable queue entry remains.
+        // A User Turn always has first claim on an idle Bot, then the run that
+        // parked for one, and agent Turns retain FIFO order behind both. The
+        // run is still queued in any case; reporting `not-queued` here would
+        // strand its blocking caller even though the durable queue entry
+        // remains.
         if (firstPendingUser !== undefined) return "blocked" as const;
+        if (await transaction.get<string>(PARKED_RUN_KEY)) {
+          return "blocked" as const;
+        }
         if (firstPendingAgentEntry?.[1] !== runId) {
           return firstPendingAgentEntry
             ? ("blocked" as const)
@@ -891,12 +910,13 @@ export class BotDurableAuthority<Snapshot> {
     return notification ? { ...result, notification } : result;
   }
 
+  /** Resolves `undefined` when the run parked rather than settling. */
   private async executeAcceptedRun(
     command: OwnedBotTurnCommand,
     seed: ReturnType<typeof turnContextSeedV1>,
     settings: Snapshot,
     compositionGenerationId: string,
-  ): Promise<BotTurnCompletion> {
+  ): Promise<BotTurnCompletion | undefined> {
     const activity = this.executeAdmittedRun(
       command,
       seed,
@@ -918,7 +938,7 @@ export class BotDurableAuthority<Snapshot> {
     seed: ReturnType<typeof turnContextSeedV1>,
     settings: Snapshot,
     compositionGenerationId: string,
-  ): Promise<BotTurnCompletion> {
+  ): Promise<BotTurnCompletion | undefined> {
     this.executingRunId = command.runId;
     try {
       let preparedInputs: unknown;
@@ -957,6 +977,10 @@ export class BotDurableAuthority<Snapshot> {
       await this.completeRun(command.runId, [], completed, settings);
       return completed;
     } catch (error) {
+      if (error instanceof BotTurnParkedError) {
+        await this.parkRun(command.runId);
+        return undefined;
+      }
       const durableRun = await this.readRun(command.runId);
       const events = eventsForFailedRun(durableRun, error);
       const message =
@@ -1036,7 +1060,7 @@ export class BotDurableAuthority<Snapshot> {
     identity: BotIdentity,
     run: StoredRunV1<Snapshot>,
     settings: Snapshot,
-  ): Promise<BotTurnCompletion> {
+  ): Promise<BotTurnCompletion | undefined> {
     this.executingRunId = run.runId;
     this.codec.require(run);
     const seed = turnContextSeedV1(
@@ -1092,6 +1116,10 @@ export class BotDurableAuthority<Snapshot> {
       await this.completeRun(run.runId, [], completed, settings);
       return completed;
     } catch (error) {
+      if (error instanceof BotTurnParkedError) {
+        await this.parkRun(run.runId);
+        return undefined;
+      }
       const durableRun = await this.readRun(run.runId);
       const events = durableRun?.events ?? run.events;
       const message =
@@ -1107,6 +1135,130 @@ export class BotDurableAuthority<Snapshot> {
     } finally {
       if (this.executingRunId === run.runId) this.executingRunId = undefined;
     }
+  }
+
+  /**
+   * Gives the active slot away from a run that stopped at a step boundary for
+   * a person's message. Its Turn stays open in its own Session's log, where
+   * nothing else writes, and it has no deadline while it waits: like a queued
+   * Turn it is owed its terminal state, and the repair index is armed again
+   * when it resumes.
+   */
+  private async parkRun(runId: string): Promise<void> {
+    await this.ctx.storage.transaction(async (transaction) => {
+      const run = await this.readRunFrom(transaction, runId);
+      if (!run || run.status !== "running") {
+        throw new Error(`run "${runId}" is not resumable`);
+      }
+      const parked = this.codec.require({
+        ...run,
+        phase: "parked",
+      } satisfies StoredRunV1<Snapshot>);
+      await this.clearRunRepair(transaction, runId);
+      await transaction.put({
+        [`${RUN_PREFIX}${runId}`]: storedRunRecordV2(parked),
+        [PARKED_RUN_KEY]: runId,
+      });
+      if ((await transaction.get<string>(ACTIVE_RUN_KEY)) === runId) {
+        await transaction.delete(ACTIVE_RUN_KEY);
+      }
+      // A chat drawing this Turn stops drawing it as the one at work.
+      await this.commitVisible(transaction, {
+        cause: "promotion",
+        run: parked,
+      });
+      await this.refreshRecoveryAlarm(transaction);
+    });
+    await this.drainPublication();
+  }
+
+  /**
+   * Makes the parked run the active one again, once no person's Turn is
+   * waiting. Recovery resumes it from its journal at the step boundary it
+   * parked on: nothing it did runs again, and its pin, admission and
+   * snapshot are the ones it was admitted under.
+   */
+  private async unparkRun(
+    runId: string,
+  ): Promise<"resumable" | "blocked" | "gone"> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      if ((await transaction.get<string>(PARKED_RUN_KEY)) !== runId) {
+        return "gone" as const;
+      }
+      if (await transaction.get<string>(ACTIVE_RUN_KEY)) {
+        return "blocked" as const;
+      }
+      const users = await this.livePendingHead(
+        transaction,
+        PENDING_USER_RUN_PREFIX,
+      );
+      if (users.head) {
+        if (users.pruned) await this.refreshRecoveryAlarm(transaction);
+        return "blocked" as const;
+      }
+      const run = await this.readRunFrom(transaction, runId);
+      await transaction.delete(PARKED_RUN_KEY);
+      if (!run || run.status !== "running" || run.phase !== "parked") {
+        await this.refreshRecoveryAlarm(transaction);
+        return "gone" as const;
+      }
+      const resumed = this.codec.require({
+        ...run,
+        phase: "admitted",
+      } satisfies StoredRunV1<Snapshot>);
+      await transaction.put({
+        [`${RUN_PREFIX}${runId}`]: storedRunRecordV2(resumed),
+        [ACTIVE_RUN_KEY]: runId,
+        ...runRepairRecordsV1(runId, Date.now()),
+      });
+      await this.commitVisible(transaction, {
+        cause: "promotion",
+        run: resumed,
+      });
+      await this.refreshRecoveryAlarm(transaction);
+      return "resumable" as const;
+    });
+  }
+
+  /**
+   * Settles a parked run the person stopped, now rather than when its turn to
+   * resume comes: it is not running, so there is nothing to signal, and a
+   * Stop that waited behind the person's own conversation would not be one.
+   */
+  async settleStoppedParkedRun(runId: string): Promise<void> {
+    const settled = await this.ctx.storage.transaction(async (transaction) => {
+      const run = await this.readRunFrom(transaction, runId);
+      if (
+        !run ||
+        run.status !== "running" ||
+        run.phase !== "parked" ||
+        !runWasDiscardedV1(run)
+      ) {
+        return false;
+      }
+      await failStoredRun(
+        this.codec,
+        transaction,
+        this.terminalKeys(runId),
+        runId,
+        [],
+        run.events,
+        DISCARDED_RUN_RECOVERY_FAILURE_V1,
+      );
+      const cancelled = await this.readRunFrom(transaction, runId);
+      if (cancelled) {
+        await this.commitVisible(transaction, {
+          cause: "terminal",
+          run: cancelled,
+        });
+      }
+      await this.clearRunRepair(transaction, runId);
+      await this.refreshRecoveryAlarm(transaction);
+      return true;
+    });
+    if (!settled) return;
+    await this.drainPublication();
+    await this.noteSettled(runId);
   }
 
   private async deferRunRecovery(runId: string): Promise<void> {
@@ -1331,14 +1483,17 @@ export class BotDurableAuthority<Snapshot> {
       });
       return;
     }
-    const [activeBeforeAlarm, pendingUser, pendingAgent] = await Promise.all([
-      this.ctx.storage.get<string>(ACTIVE_RUN_KEY),
-      firstPendingRunV1(this.ctx.storage, PENDING_USER_RUN_PREFIX),
-      firstPendingRunV1(this.ctx.storage, PENDING_AGENT_RUN_PREFIX),
-    ]);
-    // An admitted Turn is work already owed. It runs before a due Routine;
-    // otherwise a busy schedule can starve a Bot-to-Bot question indefinitely.
-    if (!activeBeforeAlarm && (pendingUser || pendingAgent)) {
+    const [activeBeforeAlarm, pendingUser, pendingAgent, parked] =
+      await Promise.all([
+        this.ctx.storage.get<string>(ACTIVE_RUN_KEY),
+        firstPendingRunV1(this.ctx.storage, PENDING_USER_RUN_PREFIX),
+        firstPendingRunV1(this.ctx.storage, PENDING_AGENT_RUN_PREFIX),
+        this.ctx.storage.get<string>(PARKED_RUN_KEY),
+      ]);
+    // An admitted Turn is work already owed, and so is the rest of a parked
+    // one. It runs before a due Routine; otherwise a busy schedule can starve
+    // a Bot-to-Bot question indefinitely.
+    if (!activeBeforeAlarm && (pendingUser || pendingAgent || parked)) {
       try {
         await this.recoverQueuedRun();
       } finally {
@@ -1383,34 +1538,54 @@ export class BotDurableAuthority<Snapshot> {
   }
 
   /**
-   * Whether the running Turn should end at this step boundary because a
-   * person's message is waiting for it.
+   * How the running Turn gives way, at this step boundary, to a person's
+   * message waiting for it — `undefined` while none is.
    *
-   * Only a Turn on the user lane yields: one answering another Bot, the voice
-   * session or a Routine finishes its own job, and the message runs next. The
-   * Turn that yields ends completed, and the waiting message becomes the next
-   * Turn with everything the Bot did so far in its context — so nothing in
-   * flight is abandoned or sent twice.
+   * Every Turn gives way; none makes the person wait for it to finish. A Turn
+   * in the Bot's conversation — the person's own, or one answering another
+   * Bot, the voice session, an input or a hand-off — `yield`s: it ends
+   * completed, and the message becomes the next Turn with everything the Bot
+   * did so far in its context. A Turn in a Session of its own — a Routine's —
+   * `park`s: its Turn stays open where it is, the message runs as a Turn of
+   * its own in the conversation, and this one resumes from the same boundary
+   * afterwards, ahead of any agent work. It cannot yield, because the message
+   * would land in a log that is not the one it is working in. Either way
+   * nothing in flight is abandoned or sent twice.
    */
-  async userMessageWaiting(runId: string): Promise<boolean> {
-    if ((await this.ctx.storage.get<string>(ACTIVE_RUN_KEY)) !== runId) {
-      return false;
+  async userMessageWaiting(
+    runId: string,
+  ): Promise<"yield" | "park" | undefined> {
+    const [active, stored, waiting, identity, parked] = await Promise.all([
+      this.ctx.storage.get<string>(ACTIVE_RUN_KEY),
+      this.ctx.storage.get<unknown>(`${RUN_PREFIX}${runId}`),
+      firstPendingRunV1(this.ctx.storage, PENDING_USER_RUN_PREFIX),
+      this.ctx.storage.get<BotIdentity>(IDENTITY_KEY),
+      this.ctx.storage.get<string>(PARKED_RUN_KEY),
+    ]);
+    if (active !== runId || !waiting) return undefined;
+    const run = this.codec.optional(stored);
+    if (!run || run.status !== "running") return undefined;
+    if (storedRunLaneV1(run) === "user") return "yield";
+    if (
+      identity &&
+      run.sessionId === botConversationBaseSessionIdV1(identity)
+    ) {
+      return "yield";
     }
-    const run = this.codec.optional(
-      await this.ctx.storage.get<unknown>(`${RUN_PREFIX}${runId}`),
-    );
-    if (!run || run.status !== "running" || storedRunLaneV1(run) !== "user") {
-      return false;
-    }
-    return (
-      (await firstPendingRunV1(this.ctx.storage, PENDING_USER_RUN_PREFIX)) !==
-      undefined
-    );
+    // One parked run at a time. A second never arises — the parked run
+    // resumes before anything else that could park — and if it did, finishing
+    // is safer than overwriting the first one's claim to resume.
+    return parked ? undefined : "park";
   }
 
   /** Active run id, for Package projections of durable run state. */
   async readActiveRunId(): Promise<string | undefined> {
     return this.ctx.storage.get<string>(ACTIVE_RUN_KEY);
+  }
+
+  /** The run waiting to resume after a person's message, if one is. */
+  async readParkedRunId(): Promise<string | undefined> {
+    return this.ctx.storage.get<string>(PARKED_RUN_KEY);
   }
 
   /** The one conversational Session owned by this Bot. */
@@ -1723,9 +1898,14 @@ export class BotDurableAuthority<Snapshot> {
       if (!Number.isFinite(dueAt) || dueAt > now) break;
       if (runId === this.executingRunId || runId === active) continue;
       const before = await this.readRunHeader(runId);
-      // A Turn still in the queue has not started, so it has no deadline to
-      // miss; its promotion arms the repair.
-      if (!before || before.status !== "running" || before.phase === "queued") {
+      // A Turn still in the queue, or parked, is not running, so it has no
+      // deadline to miss; its promotion arms the repair.
+      if (
+        !before ||
+        before.status !== "running" ||
+        before.phase === "queued" ||
+        before.phase === "parked"
+      ) {
         await this.ctx.storage.delete([key, repairRunKey(runId)]);
         continue;
       }
@@ -1798,12 +1978,13 @@ export class BotDurableAuthority<Snapshot> {
   async refreshRecoveryAlarm(
     transaction: DurableObjectTransaction,
   ): Promise<void> {
-    const [activeRunId, scheduled, pendingUser, pendingAgent] =
+    const [activeRunId, scheduled, pendingUser, pendingAgent, parked] =
       await Promise.all([
         transaction.get<string>(ACTIVE_RUN_KEY),
         this.hooks.scheduledDeadlines(transaction),
         firstPendingRunV1(transaction, PENDING_USER_RUN_PREFIX),
         firstPendingRunV1(transaction, PENDING_AGENT_RUN_PREFIX),
+        transaction.get<string>(PARKED_RUN_KEY),
       ]);
     const activeRun = activeRunId
       ? this.codec.optional(
@@ -1813,9 +1994,9 @@ export class BotDurableAuthority<Snapshot> {
     const deadlines = [...scheduled];
     if (activeRunId) {
       deadlines.push(Date.now() + RECOVERY_ALARM_DELAY_MS);
-    } else if (!activeRunId && (pendingUser || pendingAgent)) {
-      // A Turn admitted and waiting is work this object owes, so it keeps the
-      // recovery alarm even with nothing running.
+    } else if (!activeRunId && (pendingUser || pendingAgent || parked)) {
+      // A Turn admitted and waiting, or parked, is work this object owes, so
+      // it keeps the recovery alarm even with nothing running.
       deadlines.push(Date.now() + RECOVERY_ALARM_DELAY_MS);
     }
     const [repairs, publication] = await Promise.all([
@@ -1965,6 +2146,7 @@ export class BotDurableAuthority<Snapshot> {
         }
       }
       const activeRunId = await transaction.get<string>(ACTIVE_RUN_KEY);
+      const parkedRunId = await transaction.get<string>(PARKED_RUN_KEY);
       const lane = command.lane ?? defaultRunLaneV1(command.turnType ?? "chat");
       const [pendingUsers, pendingAgents] = await Promise.all([
         transaction.list<string>({ prefix: PENDING_USER_RUN_PREFIX }),
@@ -1974,21 +2156,23 @@ export class BotDurableAuthority<Snapshot> {
       const hasPendingAgent = pendingAgents.size > 0;
       if (
         lane === "background" &&
-        (activeRunId || hasPendingUser || hasPendingAgent)
+        (activeRunId || parkedRunId || hasPendingUser || hasPendingAgent)
       ) {
         throw new BotTurnRefusedError(
           "busy",
-          activeRunId
+          activeRunId || parkedRunId
             ? "bot already has an active run"
             : "bot has queued conversational work",
         );
       }
       // A person's message never replaces what is running. It waits, in
-      // order, and a chat Turn ends at its next step boundary to read it.
+      // order, and whatever runs gives way at its next step boundary. It does
+      // not wait for a parked run, which waits for it; agent work waits for
+      // both.
       const queued =
         Boolean(activeRunId) ||
         hasPendingUser ||
-        (lane === "agent" && hasPendingAgent);
+        (lane === "agent" && (hasPendingAgent || Boolean(parkedRunId)));
       if (
         lane === "user" &&
         queued &&
@@ -2162,6 +2346,7 @@ export class BotDurableAuthority<Snapshot> {
     if (this.executingRunId) return false;
     const appended = await this.ctx.storage.transaction(async (transaction) => {
       if (await transaction.get<string>(ACTIVE_RUN_KEY)) return false;
+      if (await transaction.get<string>(PARKED_RUN_KEY)) return false;
       if (await firstPendingRunV1(transaction, PENDING_USER_RUN_PREFIX)) {
         return false;
       }
@@ -2369,13 +2554,27 @@ export class BotDurableAuthority<Snapshot> {
     // that finds it, and the Turn behind it starts in the same pass.
     for (
       let attempt = 0;
-      attempt <= MAX_PENDING_USER_RUNS_V1 + MAX_PENDING_AGENT_RUNS_V1;
+      attempt <= MAX_PENDING_USER_RUNS_V1 + MAX_PENDING_AGENT_RUNS_V1 + 1;
       attempt += 1
     ) {
-      const pendingRunId = ((await firstPendingRunV1(
+      const pendingUser = await firstPendingRunV1(
         this.ctx.storage,
         PENDING_USER_RUN_PREFIX,
-      )) ??
+      );
+      // The person's Turns first, then the one that parked for them, then
+      // agent work.
+      const parkedRunId = pendingUser
+        ? undefined
+        : await this.ctx.storage.get<string>(PARKED_RUN_KEY);
+      if (parkedRunId) {
+        if (parkedRunId === this.executingRunId) return;
+        const unparked = await this.unparkRun(parkedRunId);
+        if (unparked === "gone") continue;
+        if (unparked === "blocked") return;
+        await this.drainPublication();
+        return this.recoverActiveRun();
+      }
+      const pendingRunId = (pendingUser ??
         (await firstPendingRunV1(
           this.ctx.storage,
           PENDING_AGENT_RUN_PREFIX,

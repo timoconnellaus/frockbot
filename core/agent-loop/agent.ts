@@ -66,13 +66,15 @@ export interface AgentOptions {
    */
   remainingEffectAdmissions?(): Promise<number>;
   /**
-   * Whether a person's message is waiting for this Turn. Asked at each step
-   * boundary that would otherwise continue: when it answers true the Turn ends
+   * How this Turn gives way to a person's message waiting for it, asked at
+   * each step boundary that would otherwise continue. `yield` ends the Turn
    * there, completed, and the message runs next with everything this Turn did
-   * already in its context. Nothing in flight is cut off or sent again.
-   * Absent ⇒ the Turn never yields.
+   * already in its context. `park` leaves the Turn open at that boundary for
+   * the host to resume later, so it carries on from exactly there. Nothing in
+   * flight is cut off or sent again either way. `undefined`, or absent, and
+   * the Turn goes on.
    */
-  userMessageWaiting?(): Promise<boolean>;
+  userMessageWaiting?(): Promise<"yield" | "park" | undefined>;
   /**
    * A window onto the model writing its tool calls, one dispatch at a time.
    *
@@ -119,6 +121,11 @@ export interface Agent extends LoopAgentRuntimeV1 {
   readonly botId: string;
   readonly session: Session;
   readonly status: AgentStatus;
+  /**
+   * Whether the last Turn this Agent ran parked at a step boundary rather
+   * than ending: open in the log, owed a resume.
+   */
+  readonly parked: boolean;
   send(input: string | AgentSendV1): string;
   resume(): void;
   cancel(reason?: "user" | "shutdown", detail?: string): void;

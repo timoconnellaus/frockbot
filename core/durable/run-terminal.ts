@@ -11,7 +11,11 @@ import type {
 } from "./run-records.js";
 import { storedRunLaneV1, storedRunRecordV2 } from "./run-records.js";
 import { storedRunEventFieldsV2 } from "./run-records.js";
-import { pendingAgentRunKey, pendingUserRunKey } from "./storage-keys.js";
+import {
+  PARKED_RUN_KEY,
+  pendingAgentRunKey,
+  pendingUserRunKey,
+} from "./storage-keys.js";
 import {
   SessionEventLog,
   type SessionEventLogStorage,
@@ -121,12 +125,19 @@ export interface RunTerminalStorage extends SessionEventLogStorage {}
 /**
  * A run settled while it waited leaves the queue with its settlement. The
  * queue's head is what every later Turn waits behind, and an entry left naming
- * a run that will never start would hold them all there.
+ * a run that will never start would hold them all there. A parked run gives
+ * up its claim to resume the same way.
  */
 async function leaveQueueV1(
   storage: RunTerminalStorage,
   run: StoredRunV1<unknown>,
 ): Promise<void> {
+  if (run.phase === "parked") {
+    if ((await storage.get<string>(PARKED_RUN_KEY)) === run.runId) {
+      await storage.delete(PARKED_RUN_KEY);
+    }
+    return;
+  }
   if (run.phase !== "queued") return;
   await storage.delete(
     storedRunLaneV1(run) === "agent"

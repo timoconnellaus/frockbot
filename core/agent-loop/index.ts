@@ -57,6 +57,15 @@ export {
 } from "./errors.js";
 export { estimateModelUsageV1 } from "./model-request.js";
 
+/** What a Turn does at the step boundary it just reached. */
+type StepBoundaryV1 = "continue" | "stop" | "park";
+
+function stepSettlementV1(next: "stop" | "park"): TurnSettlement {
+  return next === "park"
+    ? { kind: "parked" }
+    : { kind: "settled", outcome: "completed" };
+}
+
 /** What a step's review and its tool calls need of the model's response. */
 interface StepResponseV1 {
   requestId: string;
@@ -121,6 +130,7 @@ class LoopAgent implements Agent, LoopRuntime {
   #cancelDetail: string | undefined;
   #disposeRequested = false;
   #resumeRequested = false;
+  #parked = false;
   /**
    * The Turn's wall clock, rearmed for each Turn a wake runs.
    *
@@ -176,6 +186,10 @@ class LoopAgent implements Agent, LoopRuntime {
 
   get status(): AgentStatus {
     return this.#status;
+  }
+
+  get parked(): boolean {
+    return this.#parked;
   }
 
   send(request: string | AgentSendV1): string {
@@ -338,11 +352,14 @@ class LoopAgent implements Agent, LoopRuntime {
     let turnOutcome: StepOutcome = "interrupted";
     let turnReason: string | undefined;
     let settlementPending = false;
+    this.#parked = false;
     this.#armTurnDeadline();
     try {
       const settlement = await body(cursor);
       if (settlement.kind === "settlement-pending") {
         settlementPending = true;
+      } else if (settlement.kind === "parked") {
+        this.#parked = true;
       } else {
         turnOutcome = settlement.outcome;
         turnReason = settlement.reason;
@@ -374,7 +391,7 @@ class LoopAgent implements Agent, LoopRuntime {
       // re-issues it under the same request id. Everything else settles here,
       // including a lost provider call — that call is re-issued by its key,
       // not investigated.
-      if (!settlementPending) {
+      if (!settlementPending && !this.#parked) {
         // A deadline settles the same way a Stop does: an open tool
         // occurrence gets an `interrupted` result before the step closes,
         // so the journal never carries a `turn/end` over an open call.
@@ -402,7 +419,9 @@ class LoopAgent implements Agent, LoopRuntime {
         });
       }
       await this.session.flush();
-      await this.services.hooks.turnStopping(this, turn);
+      // A parked Turn has not stopped. It is still open, and its hooks run
+      // when the resume that carries it on ends it.
+      if (!this.#parked) await this.services.hooks.turnStopping(this, turn);
     }
   }
 
@@ -437,31 +456,25 @@ class LoopAgent implements Agent, LoopRuntime {
             signal,
             plan.pendingRequest,
           );
-          if (
-            await this.#completeStep(
-              openTurn,
-              latestStep,
-              stepResponseV1(response),
-              cursor,
-              signal,
-            )
-          ) {
-            return { kind: "settled", outcome: "completed" };
-          }
+          const next = await this.#completeStep(
+            openTurn,
+            latestStep,
+            stepResponseV1(response),
+            cursor,
+            signal,
+          );
+          if (next !== "continue") return stepSettlementV1(next);
           nextStep = latestStep + 1;
         } else if (latestStepStatus === "open" && latestAssistant) {
           cursor.openStep = latestStep;
-          if (
-            await this.#completeStep(
-              openTurn,
-              latestStep,
-              latestAssistant,
-              cursor,
-              signal,
-            )
-          ) {
-            return { kind: "settled", outcome: "completed" };
-          }
+          const next = await this.#completeStep(
+            openTurn,
+            latestStep,
+            latestAssistant,
+            cursor,
+            signal,
+          );
+          if (next !== "continue") return stepSettlementV1(next);
           nextStep = latestStep + 1;
         } else if (latestStepStatus === "ended") {
           const outcome = plan.latestStepOutcome ?? "interrupted";
@@ -469,21 +482,20 @@ class LoopAgent implements Agent, LoopRuntime {
             return { kind: "settled", outcome };
           }
           // A completed step may have been told to continue by application
-          // policy before eviction. Re-evaluate that decision from the durable
-          // journal instead of treating zero tool calls as a terminal Turn.
-          if (
-            await this.#stepShouldStop(
-              openTurn,
-              latestStep,
-              {
-                kind:
-                  latestAssistant.toolCalls.length === 0 ? "stop" : "continue",
-              },
-              signal,
-            )
-          ) {
-            return { kind: "settled", outcome };
-          }
+          // policy before eviction, or have parked there. Re-evaluate that
+          // decision from the durable journal instead of treating zero tool
+          // calls as a terminal Turn.
+          const next = await this.#stepShouldStop(
+            openTurn,
+            latestStep,
+            {
+              kind:
+                latestAssistant.toolCalls.length === 0 ? "stop" : "continue",
+            },
+            signal,
+          );
+          if (next === "stop") return { kind: "settled", outcome };
+          if (next === "park") return { kind: "parked" };
         } else if (latestStepStatus === "open") {
           nextStep = latestStep;
         }
@@ -494,17 +506,14 @@ class LoopAgent implements Agent, LoopRuntime {
             this.session.append({ type: "step/start", turn: openTurn, step });
           }
           const response = await this.#callModel(openTurn, step, signal);
-          if (
-            await this.#completeStep(
-              openTurn,
-              step,
-              stepResponseV1(response),
-              cursor,
-              signal,
-            )
-          ) {
-            return { kind: "settled", outcome: "completed" };
-          }
+          const next = await this.#completeStep(
+            openTurn,
+            step,
+            stepResponseV1(response),
+            cursor,
+            signal,
+          );
+          if (next !== "continue") return stepSettlementV1(next);
         }
         throw new StepLimitReachedError(this.maxSteps);
       },
@@ -572,17 +581,14 @@ class LoopAgent implements Agent, LoopRuntime {
           const response = await this.#callModel(turn, step, signal);
           // A tool result that ends the Turn closes it here unless declared
           // termination policy replaces that default for this step.
-          if (
-            await this.#completeStep(
-              turn,
-              step,
-              stepResponseV1(response),
-              cursor,
-              signal,
-            )
-          ) {
-            return { kind: "settled", outcome: "completed" };
-          }
+          const next = await this.#completeStep(
+            turn,
+            step,
+            stepResponseV1(response),
+            cursor,
+            signal,
+          );
+          if (next !== "continue") return stepSettlementV1(next);
           inputs = [];
         }
         throw new StepLimitReachedError(this.maxSteps);
@@ -628,7 +634,7 @@ class LoopAgent implements Agent, LoopRuntime {
 
   /**
    * Has the response reviewed, runs its tool calls, closes the step, and
-   * reports whether the Turn stops here.
+   * reports whether the Turn stops here, parks here, or goes on.
    *
    * The review comes before the first call is prepared, on a fresh step and a
    * resumed one alike, so nothing a response proposed runs unreviewed. A
@@ -641,7 +647,7 @@ class LoopAgent implements Agent, LoopRuntime {
     response: StepResponseV1,
     cursor: TurnCursor,
     signal: AbortSignal,
-  ): Promise<boolean> {
+  ): Promise<StepBoundaryV1> {
     const { toolCalls } = response;
     let proposed: LoopStepContinuationV1;
     if (toolCalls.length === 0) {
@@ -667,7 +673,7 @@ class LoopAgent implements Agent, LoopRuntime {
       signal.throwIfAborted();
       proposed = { kind: endsTurn ? "stop" : "continue" };
     }
-    const shouldStop = await this.#stepShouldStop(turn, step, proposed, signal);
+    const next = await this.#stepShouldStop(turn, step, proposed, signal);
     this.session.append({
       type: "step/end",
       turn,
@@ -675,7 +681,7 @@ class LoopAgent implements Agent, LoopRuntime {
       outcome: "completed",
     });
     cursor.openStep = undefined;
-    return shouldStop;
+    return next;
   }
 
   /**
@@ -724,7 +730,7 @@ class LoopAgent implements Agent, LoopRuntime {
     step: number,
     proposed: LoopStepContinuationV1,
     signal: AbortSignal,
-  ): Promise<boolean> {
+  ): Promise<StepBoundaryV1> {
     const decision = await this.services.hooks.stepContinuation(
       this,
       proposed,
@@ -733,11 +739,15 @@ class LoopAgent implements Agent, LoopRuntime {
       signal,
       () => Promise.resolve(proposed),
     );
-    if (decision.kind === "stop") return true;
+    if (decision.kind === "stop") return "stop";
     // Applied after every policy hook, so a hook that would keep the Turn
-    // going to deliver a reply still yields to the person who just spoke: the
-    // next Turn has this one's work in context and replies with it.
-    return (await this.options.userMessageWaiting?.()) === true;
+    // going to deliver a reply still gives way to the person who just spoke:
+    // a yield leaves the next Turn this one's work in context to reply with,
+    // and a park carries this one on from here once the person is answered.
+    const waiting = await this.options.userMessageWaiting?.();
+    if (waiting === "yield") return "stop";
+    if (waiting === "park") return "park";
+    return "continue";
   }
 
   /**

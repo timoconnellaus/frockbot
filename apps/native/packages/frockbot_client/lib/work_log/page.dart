@@ -165,8 +165,13 @@ class WorkLogController extends ChangeNotifier {
   bool loadingMore = false;
   String? error;
   String? moreError;
+
+  /// Turns a Stop was sent for and not yet read back.
+  final stopping = <String>{};
+  String? stopError;
   bool _closed = false;
   int _request = 0;
+  int _commands = 0;
 
   void _changed() {
     if (!_closed) notifyListeners();
@@ -216,6 +221,34 @@ class WorkLogController extends ChangeNotifier {
       moreError = 'Couldn’t load earlier Turns.';
     } finally {
       loadingMore = false;
+      _changed();
+    }
+  }
+
+  /// Stops a running Turn — the one way to stop a Routine that has not said
+  /// anything in the chat, where `/stop` reaches only what the thread shows.
+  /// The log is read again afterwards, and it is what says the Turn stopped.
+  Future<void> stop(String runId) async {
+    if (!stopping.add(runId)) return;
+    stopError = null;
+    _changed();
+    try {
+      await api.request(
+        '/api/bots/${Uri.encodeComponent(botId)}/turns/'
+        '${Uri.encodeComponent(runId)}/stop',
+        body: {
+          'schemaVersion': 1,
+          'action': 'stop',
+          'commandId':
+              'wl-${DateTime.now().microsecondsSinceEpoch}-${_commands++}',
+          'runId': runId,
+        },
+      );
+      await load();
+    } catch (_) {
+      stopError = 'Couldn’t stop that Turn. Try again.';
+    } finally {
+      stopping.remove(runId);
       _changed();
     }
   }
@@ -414,6 +447,16 @@ class _WorkLogPageState extends State<WorkLogPage> {
         children: [
           _toolbar(context),
           const SizedBox(height: 12),
+          if (controller.stopError case final String message)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                message,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.error,
+                ),
+              ),
+            ),
           if (turns.isEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(4, 24, 4, 0),
@@ -434,6 +477,8 @@ class _WorkLogPageState extends State<WorkLogPage> {
               filtered: search.text.isNotEmpty || filter.slug != 'all',
               selected: split ? selected : null,
               onSelect: (row) => _select(row, turn, split),
+              stopping: controller.stopping.contains(turn.runId),
+              onStop: () => controller.stop(turn.runId),
             ),
             const SizedBox(height: 10),
           ],
@@ -534,6 +579,8 @@ class _TurnCard extends StatelessWidget {
   final List<WorkLogRow> rows;
   final WorkLogRow? selected;
   final void Function(WorkLogRow row) onSelect;
+  final bool stopping;
+  final VoidCallback onStop;
   const _TurnCard({
     required this.turn,
     required this.open,
@@ -542,6 +589,8 @@ class _TurnCard extends StatelessWidget {
     required this.rows,
     required this.selected,
     required this.onSelect,
+    required this.stopping,
+    required this.onStop,
   });
 
   @override
@@ -607,6 +656,17 @@ class _TurnCard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 8),
+                      if (turn.status == 'running') ...[
+                        identified(
+                          WorkLogIds.stop(turn.runId),
+                          TextButton(
+                            style: frockCompactButton(context),
+                            onPressed: stopping ? null : onStop,
+                            child: Text(stopping ? 'Stopping…' : 'Stop'),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                      ],
                       _StatusPill(status: turn.status, outcome: turn.outcome),
                     ],
                   ),

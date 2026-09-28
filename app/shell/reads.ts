@@ -130,7 +130,8 @@ export async function chatWorkingV1(
   if (
     !header?.readable ||
     header.run.status !== "running" ||
-    header.run.phase === "queued"
+    header.run.phase === "queued" ||
+    header.run.phase === "parked"
   ) {
     return false;
   }

@@ -10,6 +10,7 @@ import {
 import type { ShellMountedComposition } from "./backend-composition.js";
 import {
   BotTurnExecutionError,
+  BotTurnParkedError,
   BotTurnRecoveryRequiredError,
 } from "@frockbot/core/durable";
 import type { BotTurnCommand, BotTurnCompletion } from "./backend-contracts.js";
@@ -19,7 +20,11 @@ import {
   whenCompactionSettledV1,
 } from "./compaction-scheduler.js";
 
-export { BotTurnExecutionError, BotTurnRecoveryRequiredError };
+export {
+  BotTurnExecutionError,
+  BotTurnParkedError,
+  BotTurnRecoveryRequiredError,
+};
 
 function journalSuffix(
   seededCount: number,
@@ -55,6 +60,9 @@ function settleBotTurn(
   startSeq?: number,
 ): BotTurnCompletion {
   const events = [...handle.agent.session.activeRunJournal];
+  if (handle.agent.parked) {
+    throw new BotTurnParkedError(journalSuffix(seededCount, events, startSeq));
+  }
   const turnStart = events.findLast((event) => event.type === "turn/start");
   const currentTurn =
     turnStart?.type === "turn/start" ? turnStart.turn : undefined;
@@ -113,7 +121,8 @@ function turnExecutionError(
 ): never {
   if (
     error instanceof BotTurnExecutionError ||
-    error instanceof BotTurnRecoveryRequiredError
+    error instanceof BotTurnRecoveryRequiredError ||
+    error instanceof BotTurnParkedError
   ) {
     throw error;
   }
