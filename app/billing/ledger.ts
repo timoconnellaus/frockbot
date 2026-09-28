@@ -650,7 +650,16 @@ export class BillingLedger {
         this.once(providerKey(receipt, "payment receipt"), evidence, () => {
           applying = true;
           try {
-            apply(effects);
+            const result: unknown = apply(effects);
+            // Awaited effects would land after the receipt committed, with
+            // nothing credited: the receipt must not be spent on them.
+            if (result instanceof Promise) {
+              result.catch(() => undefined);
+              throw new BillingError(
+                "Payment effects apply synchronously",
+                500,
+              );
+            }
           } finally {
             applying = false;
           }

@@ -123,6 +123,8 @@ export interface PaymentsLedgerPortV1 {
    * id for the event and `evidence` what it said; both are kept. The effects
    * run in one transaction with the receipt, so a retry after a failure
    * applies them whole or not at all, and one after a success applies nothing.
+   * They are synchronous: a callback that returns a promise is refused and
+   * nothing is applied.
    */
   apply(
     receipt: string,
@@ -201,7 +203,17 @@ export interface PaymentsPackageV1 {
   readonly providerName: string | null;
   /** What the Billing page offers this account. */
   actions(account: PaymentsAccountV1): readonly PaymentsActionV1[];
-  /** `/api/billing/provider/*`, or nothing for a path it does not serve. */
+  /**
+   * Addresses outside `/api/billing/provider/` its route also serves: ones a
+   * provider already delivers to, or an installed client already calls, from
+   * before a deployment chose this Package. Each is under `/api/billing/` and
+   * none is the app's own; the gateway refuses the build otherwise.
+   */
+  readonly paths?: readonly `/api/billing/${string}`[];
+  /**
+   * `/api/billing/provider/*` and its own `paths`, or nothing for a path it
+   * does not serve.
+   */
   route?(
     request: Request,
     url: URL,

@@ -47,6 +47,32 @@ export function paymentsPackageV1(env: BillingEnv): PaymentsPackageV1 {
   });
 }
 
+/** The billing routes that are the app's own, which no Package may serve. */
+const APP_BILLING_PATHS_V1 = new Set([
+  "/api/billing",
+  "/api/billing/spending",
+  "/api/billing/limits",
+  "/api/billing/reconcile",
+]);
+
+/**
+ * The addresses outside `/api/billing/provider/` a Package also serves, held
+ * to the contract: under `/api/billing/`, and none the app's own.
+ */
+export function paymentsPathsV1(payments: PaymentsPackageV1): Set<string> {
+  const paths = new Set<string>(payments.paths ?? []);
+  for (const path of paths)
+    if (
+      !/^\/api\/billing\/[a-z0-9/_-]+$/.test(path) ||
+      path.startsWith("/api/billing/provider/") ||
+      APP_BILLING_PATHS_V1.has(path)
+    )
+      throw new Error(
+        `The payments Package cannot serve ${path}: its own paths are under /api/billing/ and none is the app's`,
+      );
+  return paths;
+}
+
 /** The account as the payments Package reads it, from a ledger snapshot. */
 export function paymentsAccountV1(snapshot: {
   subscription: PaymentsAccountV1["subscription"];
@@ -183,6 +209,7 @@ export function billingRoutes(
   modelRates: () => Promise<HostedModelRatesV1>,
 ): BackendRouteContribution {
   const payments = paymentsPackageV1(env);
+  const providerPaths = paymentsPathsV1(payments);
   const page = () =>
     billingPageV1({
       productName: BRAND_V1.productName,
@@ -221,7 +248,11 @@ export function billingRoutes(
       // Everything under here is the payments Package's: provider events,
       // and the purchases the signed-in person starts, which ask the session
       // themselves.
-      if (!url.pathname.startsWith("/api/billing/provider/")) return;
+      if (
+        !url.pathname.startsWith("/api/billing/provider/") &&
+        !providerPaths.has(url.pathname)
+      )
+        return;
       const context: PaymentsRouteContextV1 = {
         sessionUserId: () =>
           routeContext.sessionUserId?.() ?? Promise.resolve(undefined),

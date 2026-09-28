@@ -13,6 +13,10 @@
  * - `portal` — the signed-in person opens the Customer Portal;
  * - `webhook` — Stripe's signed events, which the account they name applies
  *   through the ledger port, at most once by event id.
+ *
+ * It also answers at the addresses Stripe and installed clients already use
+ * (`EARLIER_PATHS_V1`), so moving behind the seam changed nothing a
+ * deployment had registered.
  */
 import type {
   PaymentsAccountV1,
@@ -73,6 +77,18 @@ export function stripeConfig(
 const CHECKOUT_PATH = "/api/billing/provider/checkout";
 const PORTAL_PATH = "/api/billing/provider/portal";
 const WEBHOOK_PATH = "/api/billing/provider/webhook";
+
+/**
+ * Where Stripe's webhook endpoint and installed clients reached this Package
+ * before it had routes of its own: the registered endpoint is configuration
+ * in Stripe, and an installed app is updated on its own schedule. Each is
+ * served exactly as its provider route.
+ */
+const EARLIER_PATHS_V1 = {
+  "/api/billing/checkout": CHECKOUT_PATH,
+  "/api/billing/portal": PORTAL_PATH,
+  "/api/billing/stripe/webhook": WEBHOOK_PATH,
+} as const;
 
 const SUBSCRIBE_V1: PaymentsActionV1 = {
   purpose: "subscribe",
@@ -136,6 +152,13 @@ const COMMAND_HEADERS_V1 = {
     "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'",
   "referrer-policy": "no-referrer",
 };
+
+/** The provider route a request is for, whichever address it came to. */
+function route(url: URL): string {
+  return (
+    (EARLIER_PATHS_V1 as Record<string, string>)[url.pathname] ?? url.pathname
+  );
+}
 
 function failure(error: unknown) {
   return Response.json(
@@ -216,7 +239,7 @@ async function command(
       throw new BillingError("Expected JSON", 415);
     const body = object(JSON.parse(await boundedText(request, 4096)));
     const account = context.account(userId, { signedIn: true });
-    if (url.pathname === CHECKOUT_PATH) {
+    if (route(url) === CHECKOUT_PATH) {
       if (
         typeof body.id !== "string" ||
         !["subscription", "topup"].includes(String(body.kind)) ||
@@ -259,10 +282,14 @@ export const STRIPE_PAYMENTS_PACKAGE_V1: PaymentsPackageBuildV1<StripeEnvironmen
         ),
         providerName: "Stripe",
         actions: stripeActionsV1,
+        paths: Object.keys(
+          EARLIER_PATHS_V1,
+        ) as (keyof typeof EARLIER_PATHS_V1)[],
         async route(request, url, context) {
-          if (url.pathname === WEBHOOK_PATH)
+          const path = route(url);
+          if (path === WEBHOOK_PATH)
             return webhook(env, productName, request, context);
-          if (url.pathname === CHECKOUT_PATH || url.pathname === PORTAL_PATH)
+          if (path === CHECKOUT_PATH || path === PORTAL_PATH)
             return command(env, request, url, context);
           return undefined;
         },

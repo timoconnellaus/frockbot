@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { PAYMENTS_PACKAGE_V1 } from "#payments";
 import {
   billingRoutes,
+  paymentsPathsV1,
   type BillingAccountRpc,
   type BillingEnv,
 } from "./billing";
@@ -429,6 +430,79 @@ describe("billing HTTP routes", () => {
       (await post("/api/billing/provider/elsewhere", {}, "user-one"))?.status,
     ).toBe(404);
     expect(seen).toHaveLength(2);
+  });
+
+  test("answers at the addresses Stripe and installed apps already use", async () => {
+    // The registered webhook endpoint and an installed app's checkout reach
+    // the same handlers as the provider routes, so nothing registered moved.
+    const seen: unknown[] = [];
+    const routes = billingRoutes(
+      env,
+      () =>
+        account({
+          async paymentsCommand(input) {
+            seen.push(input);
+            return { url: "https://checkout.stripe.com/c/test" };
+          },
+        }),
+      rates,
+    );
+    const webhook = new Request(
+      "https://app.frockbot.com/api/billing/stripe/webhook",
+      { method: "POST", body: "{}" },
+    );
+    expect(
+      (await routes.publicRoute!(webhook, new URL(webhook.url), {
+        client: "browser",
+      }))!.status,
+    ).toBe(400);
+    for (const [path, body] of [
+      [
+        "/api/billing/checkout",
+        { id: "0123456789abcdef", kind: "subscription" },
+      ],
+      ["/api/billing/portal", { id: "fedcba9876543210" }],
+    ] as const) {
+      const request = new Request(`https://app.frockbot.com${path}`, {
+        method: "POST",
+        headers: {
+          origin: "https://app.frockbot.com",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      expect(
+        (await routes.publicRoute!(request, new URL(request.url), {
+          client: "browser",
+          sessionUserId: async () => "user-one",
+        }))!.status,
+      ).toBe(200);
+    }
+    expect(seen).toMatchObject([
+      { command: "checkout", signedIn: true },
+      { command: "portal", signedIn: true },
+    ]);
+  });
+
+  test("a Package serves no path of the app's own, nor one outside billing", () => {
+    const serving = (paths: string[]) => () =>
+      paymentsPathsV1({
+        available: false,
+        providerName: null,
+        actions: () => [],
+        paths: paths as `/api/billing/${string}`[],
+      });
+    for (const path of [
+      "/api/billing/spending",
+      "/api/billing/reconcile",
+      "/api/billing/provider/x",
+      "/api/account/delete",
+      "/api/billing/../account",
+    ])
+      expect(serving([path])).toThrow("cannot serve");
+    expect(serving(["/api/billing/checkout"])()).toEqual(
+      new Set(["/api/billing/checkout"]),
+    );
   });
 
   test("webhook rejects missing signatures and oversized bodies before account dispatch", async () => {

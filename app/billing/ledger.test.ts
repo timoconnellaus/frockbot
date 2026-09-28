@@ -547,6 +547,15 @@ describe("the payments port", () => {
     );
   });
 
+  test("an asynchronous callback spends no receipt", async () => {
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
+    const port = ledger.paymentsPort();
+    expect(() =>
+      port.apply("evt_async", {}, (async () => undefined) as () => void),
+    ).toThrow("Payment effects apply synchronously");
+    expect(port.applied("evt_async", {})).toBe(false);
+  });
+
   test("keeps the ledger's own state and receipts out of a Package's reach", () => {
     const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
     const port = ledger.paymentsPort();
