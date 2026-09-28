@@ -13,6 +13,7 @@ for (const name of [
   "STRIPE_SECRET_KEY",
   "STRIPE_WEBHOOK_SECRET",
   "STRIPE_MONTHLY_PRICE_ID",
+  "STRIPE_PLUS_PRICE_ID",
 ]) {
   if (!process.env[name]?.trim()) issues.push(`${name} is required.`);
 }

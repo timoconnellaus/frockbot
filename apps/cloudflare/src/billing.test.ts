@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { BILLING_PLAN } from "@frockbot/app/billing/ledger";
+import { BILLING_PLANS } from "@frockbot/app/billing/ledger";
 import {
   billingRoutes,
   type BillingAccountRpc,
@@ -23,7 +23,8 @@ function account(
   return {
     async readBilling() {
       return {
-        plan: BILLING_PLAN,
+        plan: BILLING_PLANS.standard,
+        trial: null,
         subscription: null,
         paidAccess: null,
         canSpend: false,
@@ -43,6 +44,9 @@ function account(
     },
     async billingPortal() {
       return { url: "https://billing.stripe.com/p/test" };
+    },
+    async billingChangePlan(input) {
+      return { plan: input.command.plan };
     },
     async billingWebhook() {},
     async reconcileBilling() {},
@@ -90,7 +94,7 @@ describe("billing HTTP routes", () => {
     expect(() => new Function(billingScript)).not.toThrow();
     for (const text of [
       "US$20",
-      "US$15",
+      "Includes US$20 of usage",
       "US$10",
       "US$25",
       "US$50",
@@ -277,6 +281,58 @@ describe("billing HTTP routes", () => {
     expect(
       await read(() => Promise.reject(new Error("authority unreachable"))),
     ).toEqual({});
+  });
+
+  test("lists Plus only where its price is configured, and changes plan for the signed-in account", async () => {
+    const read = async (routes: ReturnType<typeof billingRoutes>) => {
+      const request = new Request("https://app.frockbot.com/api/billing");
+      return (await (await routes.route(
+        request,
+        new URL(request.url),
+        signedIn,
+      ))!.json()) as { plans: { id: string }[] };
+    };
+    expect(
+      (await read(billingRoutes(env, () => account(), rates))).plans.map(
+        (plan) => plan.id,
+      ),
+    ).toEqual(["standard"]);
+    const changes: unknown[] = [];
+    const routes = billingRoutes(
+      { ...env, STRIPE_PLUS_PRICE_ID: "price_plus" },
+      () =>
+        account({
+          async billingChangePlan(input) {
+            changes.push(input);
+            return { plan: input.command.plan };
+          },
+        }),
+      rates,
+    );
+    expect((await read(routes)).plans.map((plan) => plan.id)).toEqual([
+      "standard",
+      "plus",
+    ]);
+    const change = (plan: unknown) => {
+      const request = new Request("https://app.frockbot.com/api/billing/plan", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "https://app.frockbot.com",
+        },
+        body: JSON.stringify({ id: "plan-change-route", plan }),
+      });
+      return routes.route(request, new URL(request.url), signedIn);
+    };
+    expect((await change("gold"))?.status).toBe(400);
+    const answer = await change("plus");
+    expect(await answer!.json()).toEqual({ plan: "plus" });
+    expect(changes).toEqual([
+      {
+        userId: "user-one",
+        command: { id: "plan-change-route", plan: "plus" },
+      },
+    ]);
   });
 
   test("rejects cross-origin mutations before dispatch", async () => {

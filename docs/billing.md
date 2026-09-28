@@ -1,6 +1,16 @@
 # Billing
 
-FrockBot's account plan is US$20 per month, including US$15 of usage credit per paid billing period. The monthly allowance expires at period end and is consumed before purchased credit. Top-ups are US$10, US$25 or US$50, carry forward, and require a paid subscription to spend. Billing is ordinary app code, not a runtime Plugin.
+FrockBot has two account plans: **Standard**, US$20 per month including US$20 of usage credit, and **Plus**, US$50 per month including US$60. The markup is in the rates (see [Prices and money](#prices-and-money)), so a plan includes as much usage as it costs, and Plus more. The monthly allowance expires at period end and is consumed before purchased credit. An account's first subscription starts with a 7-day trial carrying US$3 of credit. Top-ups are US$10, US$25 or US$50, carry forward, and require a paid subscription to spend. Billing is ordinary app code, not a runtime Plugin.
+
+## Plans and the trial
+
+The plans are one table, `BILLING_PLANS` in `app/billing/ledger.ts`; `BILLING_PLAN` holds what they share. Each is sold at its own monthly Stripe price: `STRIPE_MONTHLY_PRICE_ID` for Standard and `STRIPE_PLUS_PRICE_ID` for Plus. A deployment without the Plus price offers Standard alone, and `GET /api/billing` lists only the plans it sells under `plans`, beside the account's own `plan`.
+
+**The trial.** Checkout takes the card up front and, for an account that has never subscribed or trialled, asks Stripe for a 7-day trial. Stripe opens a trial with an invoice marked paid for nothing. That invoice grants `trial:<subscriptionId>`, US$3 of complimentary credit expiring when the trial does, and never the plan's allowance or a paid period, so during the trial the account is not `subscribed`, can spend only that credit, and cannot buy top-ups. `GET /api/billing` answers `trial: { endsAt, creditMicros }` while it runs. The account is marked as having trialled when the trial credit is granted. On day 8 Stripe charges the first month, and that invoice grants the allowance as any renewal does.
+
+**Changing plan.** `POST /api/billing/plan` `{ id, plan }` moves a subscription. During a trial, either plan ends the trial now (`trial_end=now`) and charges that plan's first month, which is how someone whose trial credit ran out starts paying early; its invoice grants the allowance like any other. An upgrade replaces the subscription's price with `billing_cycle_anchor=now`, `proration_behavior=none` and `payment_behavior=error_if_incomplete`: the new plan is charged in full at once and the billing month restarts, so its invoice (`subscription_update`) grants the new allowance and a new paid period. Credit left from the old month keeps its own expiry. A downgrade replaces the price with no proration and no new anchor, so nothing is charged until renewal, which invoices the lower plan. Neither prorates, which the ledger does not model. The command's intent is recorded before Stripe is called and the request carries a stable idempotency key; past 23 hours an unresolved change goes to reconciliation rather than risk a second charge.
+
+An invoice grants the allowance of the plan whose price its subscription line names, and only when the line's amount is that plan's monthly price; tax sits outside the line.
 
 ## Implementation status
 
@@ -41,13 +51,13 @@ Every save is a new version and no version is ever rewritten. The version become
 
 Each Bot object reads the table at most once a minute and prices from that copy; a failed read keeps the copy it holds, and a Bot that has never read one refuses the hosted call without reserving anything. The Gateway holds each hosted request to its own route's `maximumInputTokens`/`maximumOutputTokens`, from the same copy — a request whose Gateway model no route names, such as a structured Auto request pinned to its own model, to the smallest. The public billing response lists each route's customer price, twice its rate, as the most a call to it can cost. Hosted image-containing chat requests are refused until their token bounds can be quoted safely; BYO models continue to support them through their provider.
 
-Computer customer rate: **US$2.75 per active hour**, drawn from the shared prepaid balance. It is a fixed tariff based on the maximum Sprite resource envelope, not measured CPU/RAM/storage consumption. The US$15 monthly allowance buys about 5 hours 27 minutes if spent entirely on Computer time. No fixed number of hours is promised because hosted model charges use the same balance.
+Computer customer rate: **US$2.75 per active hour**, drawn from the shared prepaid balance. It is a fixed tariff based on the maximum Sprite resource envelope, not measured CPU/RAM/storage consumption. The US$20 Standard allowance buys about 7 hours 16 minutes if spent entirely on Computer time. No fixed number of hours is promised because hosted model charges use the same balance.
 
 ## Durable account ledger
 
 The existing User Durable Object owns SQLite tables for grants, operations, Stripe receipts and account state. It validates its User identity before every billing RPC. A balance mutation and its receipt share one synchronous transaction. Distinct Bots reserve against this one authority.
 
-An administrator can grant an account **complimentary credit** by hand from the [admin portal](adr/0028-open-deployment.md). It is a third grant kind beside the monthly allowance and purchased top-ups: it never expires, it is spent after monthly credit and before purchased credit, and it is the one kind spendable **without** a paid subscription. Each grant carries the admin's own idempotency id, the admin's identity and a reason, so a repeated request grants once and a changed amount under the same id conflicts. A single grant is capped at US$1,000. Purchased top-ups still require a subscription to spend.
+An administrator can grant an account **complimentary credit** by hand from the [admin portal](adr/0028-open-deployment.md). It is a third grant kind beside the monthly allowance and purchased top-ups: an admin's grant never expires (the trial's credit, the same kind, ends with the trial), it is spent after monthly credit and before purchased credit, and it is the one kind spendable **without** a paid subscription. Each grant carries the admin's own idempotency id, the admin's identity and a reason, so a repeated request grants once and a changed amount under the same id conflicts. A single grant is capped at US$1,000. Purchased top-ups still require a subscription to spend.
 
 The account's spend rule, in order: a suspended account is refused; without a subscription, only complimentary credit counts, and none left is refused as "subscription required"; with less spendable credit than the reservation needs, the call is refused as "no usage credit left". Both refusals are written for the person and reach the conversation verbatim (see `app/shell/run-failure-copy.ts`), with an Open Billing action beside them; the Profile page shows the remaining credit at the top, the chat pane banners an account that cannot spend, and the failed-Turn notification carries the same sentence.
 
@@ -88,13 +98,13 @@ After a firing that finishes, the Routine asks for a **spike**: a day at least t
 The adapter pins Stripe API version `2025-02-24.acacia`. Configure the webhook destination to the same version. Secrets remain in the Worker environment and never enter the client, Bot context, Workspace or Sprite.
 
 - One Stripe customer per User, with `metadata.frockbot_user_id`.
-- One monthly recurring USD price of 2000 cents; interval `month`, quantity one.
+- Two monthly recurring USD prices, 2000 cents (Standard) and 5000 cents (Plus); interval `month`, quantity one.
 - Checkout creates subscriptions or one-off card top-ups using server-owned amounts.
 - Checkout/customer intents are stored before Stripe writes. Requests use stable idempotency keys. An unresolved write is not retried past Stripe's safe deduplication window; it requires reconciliation.
 - Webhook signatures use HMAC-SHA256 over the unmodified raw body, a five-minute timestamp tolerance, constant-time cryptographic verification, and a 1 MiB body limit.
 - The gateway resolves customer ownership through Stripe's customer metadata, then the User object checks that the customer matches its stored customer.
 - Webhooks retrieve canonical Stripe objects; receipt/state/grant writes are atomic. A changed account revision during an external read forces an event retry rather than a stale overwrite.
-- Only a paid recurring invoice grants the monthly allowance and advances paid access. Subscription `active` or a checkout redirect alone does not authorize spending.
+- Only a paid recurring invoice for a plan's full price grants its monthly allowance and advances paid access. A trial's free invoice grants the trial credit alone. Subscription `active` or `trialing`, or a checkout redirect, does not authorize spending by itself.
 - Top-up credit is granted once per paid Checkout Session, with currency/amount/customer/intent validation.
 - Failed renewal payment cannot grant credit. Cancellation preserves the already paid window and stops the next renewal. Refund/dispute events suspend further paid work pending review.
 - A repeat purchase command with different values conflicts rather than silently changing the amount.
@@ -109,7 +119,7 @@ Register `/api/billing/stripe/webhook` for:
 - `charge.refunded`
 - `charge.dispute.created`
 
-Configure Stripe Customer Portal for payment-method updates, invoices and cancellation at period end. Do not enable plan changes, quantities, prorations, trials or coupons until their ledger behavior is implemented and qualified. Auto-top-up is not implemented; purchases are explicit.
+Configure Stripe Customer Portal for payment-method updates, invoices and cancellation at period end. Plan changes go through `POST /api/billing/plan`, never the portal; do not enable plan switching, quantities, prorations or coupons there. Trials are set per Checkout session, not on the price. Auto-top-up is not implemented; purchases are explicit.
 
 ## Reconciliation
 
@@ -132,8 +142,8 @@ Start/stop times alone cannot give cumulative CPU time, integrated RAM use or st
 ## Morning launch sequence
 
 1. To point a hosted route at a different model, add the rate, then switch the route: save a table version whose `served` prices the new model, retarget the Gateway route, and check that the admin portal lists nothing unpriced. Keep hosted image generation visibly unavailable.
-2. Configure Stripe test-mode product, monthly price, webhook and portal. Supply `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, and `STRIPE_MONTHLY_PRICE_ID` to the local test deployment without committing values.
-3. Run Stripe test-mode end-to-end purchases, successful/failed renewals, cancellation, duplicate and reordered webhooks, refund/dispute suspension, concurrent spending, exhausted balance, Computer viewer cutoff, and eviction/reconciliation cases. No real payment was made during implementation.
+2. Configure Stripe test-mode product, monthly price, webhook and portal. Supply `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_MONTHLY_PRICE_ID` and `STRIPE_PLUS_PRICE_ID` to the test deployment without committing values.
+3. Run Stripe test-mode end-to-end purchases, a trial through to its first paid month and a trial cancelled before it, an upgrade to Plus and a downgrade at renewal, successful/failed renewals, cancellation, duplicate and reordered webhooks, refund/dispute suspension, concurrent spending, exhausted balance, Computer viewer cutoff, and eviction/reconciliation cases. No real payment was made during implementation.
 4. Obtain the release coordinator's slot, then run the required final tests with **Sol**, integrate and run CI. Do not tag or deploy from this task without that slot.
 5. Configure live Stripe values and run `bun scripts/check-billing-release.ts`. Deploy through the normal tagged release process, including marketing and the Computer host. Never remove a readiness check just because the keys are present.
 6. Android release classification: **PATCH** for billing. Its Android changes are Dart/Flutter UI and widget tests (`lib/settings/billing.dart`, `lib/shell/app_shell.dart`, `test/billing_test.dart`), with no billing-owned Android native code, manifest, resources, plugins or binary configuration changes. Use the established Shorebird patch path against a compatible installed baseline; validate on staging/a disposable emulator where supported, promote stable, and confirm the installed app receives and runs the patch. Report the baseline and patch number/version in release handoff. Do not replace the phone's APK for this UI change. If the combined release includes unrelated APK-level changes, the coordinator must classify that combined release separately with evidence; only a required new APK triggers wireless ADB installation and APK fallback. No patch promotion or deployment is authorized in this task before the morning release slot.

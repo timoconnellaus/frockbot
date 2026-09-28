@@ -46,9 +46,12 @@ function active(ledger: BillingLedger) {
   ledger.set("subscription", {
     customerId: "cus_owner",
     subscriptionId: "sub_owner",
+    itemId: "si_owner",
+    plan: "standard",
     status: "active",
     periodStart: NOW - 1,
     periodEnd: NOW + 1_000_000,
+    trialEnd: null,
     cancelAtPeriodEnd: false,
   });
   ledger.set("paidAccess", {
@@ -317,6 +320,7 @@ describe("Stripe payment boundaries", () => {
                   type: "subscription",
                   proration: false,
                   quantity: 1,
+                  amount: 2000,
                   price: { id: "price_monthly" },
                   period: { start: periodStart, end: periodEnd },
                 },
@@ -333,6 +337,7 @@ describe("Stripe payment boundaries", () => {
           items: {
             data: [
               {
+                id: "si_owner",
                 quantity: 1,
                 price: {
                   id: "price_monthly",
@@ -356,7 +361,7 @@ describe("Stripe payment boundaries", () => {
     await payments.webhook(event);
     await payments.webhook(event);
     expect(ledger.snapshot()).toMatchObject({
-      includedMicros: 15_000_000,
+      includedMicros: 20_000_000,
       subscription: {
         subscriptionId: "sub_owner",
         periodEnd: periodEnd * 1000,
@@ -390,6 +395,7 @@ describe("Stripe payment boundaries", () => {
                   type: "subscription",
                   proration: false,
                   quantity: 1,
+                  amount: 2000,
                   price: { id: "price_monthly" },
                   period: { start: oldStart, end: oldEnd },
                 },
@@ -406,6 +412,7 @@ describe("Stripe payment boundaries", () => {
           items: {
             data: [
               {
+                id: "si_owner",
                 quantity: 1,
                 price: {
                   id: "price_monthly",
@@ -518,6 +525,7 @@ describe("Stripe payment boundaries", () => {
                 items: {
                   data: [
                     {
+                      id: "si_owner",
                       quantity: 1,
                       price: {
                         id: "price_monthly",
@@ -632,5 +640,327 @@ describe("deleting an account's customers", () => {
     );
     await deleteAccountCustomersV1(stripe, "a' OR 'b", "cus_recorded");
     expect(urls).toEqual(["https://api.stripe.com/v1/customers/cus_recorded"]);
+  });
+});
+
+describe("plans and the trial", () => {
+  const plusConfig = { ...config, plusPriceId: "price_plus" };
+  const DAY = 86_400;
+  const unix = Math.floor(NOW / 1000);
+
+  function subscriptionObject(options: {
+    price: "price_monthly" | "price_plus";
+    status: string;
+    start: number;
+    end: number;
+    trialEnd?: number;
+  }) {
+    return {
+      id: "sub_owner",
+      customer: "cus_owner",
+      status: options.status,
+      current_period_start: options.start,
+      current_period_end: options.end,
+      trial_end: options.trialEnd ?? null,
+      cancel_at_period_end: false,
+      items: {
+        data: [
+          {
+            id: "si_owner",
+            quantity: 1,
+            price: {
+              id: options.price,
+              currency: "usd",
+              unit_amount: options.price === "price_plus" ? 5000 : 2000,
+              recurring: { interval: "month" },
+            },
+          },
+        ],
+      },
+    };
+  }
+  function invoiceObject(options: {
+    reason: string;
+    price: "price_monthly" | "price_plus";
+    amount: number;
+    start: number;
+    end: number;
+  }) {
+    return {
+      id: "in_one",
+      customer: "cus_owner",
+      subscription: "sub_owner",
+      status: "paid",
+      currency: "usd",
+      billing_reason: options.reason,
+      lines: {
+        has_more: false,
+        data: [
+          {
+            type: "subscription",
+            proration: false,
+            quantity: 1,
+            amount: options.amount,
+            price: { id: options.price },
+            period: { start: options.start, end: options.end },
+          },
+        ],
+      },
+    };
+  }
+  function paymentsWith(
+    ledger: BillingLedger,
+    answer: (path: string, body?: URLSearchParams) => unknown,
+    seen: { path: string; body?: URLSearchParams; key?: string }[] = [],
+  ) {
+    const stripe = new StripeClient(
+      plusConfig,
+      fakeFetch(async (url, init) => {
+        const path = String(url).split("/v1/")[1]!;
+        const body = init?.body as URLSearchParams | undefined;
+        const key = (init?.headers as Record<string, string>)[
+          "Idempotency-Key"
+        ];
+        seen.push({ path, body, ...(key ? { key } : {}) });
+        return Response.json(answer(path, body));
+      }),
+    );
+    return new AccountPayments(ledger, stripe, "user_one", () => NOW);
+  }
+  const invoicePaid = (id: string) => ({
+    id,
+    type: "invoice.paid",
+    created: unix,
+    data: { object: { id: "in_one", customer: "cus_owner" } },
+  });
+
+  test("a first subscription starts with a seven-day trial, a later one does not", async () => {
+    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    ledger.set("customer", "cus_owner");
+    const seen: { path: string; body?: URLSearchParams }[] = [];
+    const payments = paymentsWith(
+      ledger,
+      () => ({ id: "cs_one", url: "https://checkout.stripe.com/c/one" }),
+      seen,
+    );
+    await payments.checkout({
+      id: "subscription-trial-one",
+      kind: "subscription",
+      plan: "plus",
+    });
+    const first = seen.at(-1)!.body!;
+    expect(first.get("line_items[0][price]")).toBe("price_plus");
+    expect(first.get("subscription_data[trial_period_days]")).toBe("7");
+
+    ledger.set("pendingSubscription", null);
+    ledger.set("trialUsed", true);
+    await payments.checkout({
+      id: "subscription-trial-two",
+      kind: "subscription",
+    });
+    const second = seen.at(-1)!.body!;
+    expect(second.get("line_items[0][price]")).toBe("price_monthly");
+    expect(second.has("subscription_data[trial_period_days]")).toBe(false);
+  });
+
+  test("Plus is refused where its price is not configured", async () => {
+    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    const payments = new AccountPayments(
+      ledger,
+      new StripeClient(
+        config,
+        fakeFetch(async () => Response.json({})),
+      ),
+      "user_one",
+      () => NOW,
+    );
+    await expect(
+      payments.checkout({
+        id: "subscription-plus-off",
+        kind: "subscription",
+        plan: "plus",
+      }),
+    ).rejects.toThrow("That plan is not available yet");
+  });
+
+  test("the trial's free invoice grants trial credit, never the allowance or a paid period", async () => {
+    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    ledger.set("customer", "cus_owner");
+    const trialEnd = unix + 7 * DAY;
+    const payments = paymentsWith(ledger, (path) =>
+      path.startsWith("invoices/")
+        ? invoiceObject({
+            reason: "subscription_create",
+            price: "price_monthly",
+            amount: 0,
+            start: unix,
+            end: trialEnd,
+          })
+        : subscriptionObject({
+            price: "price_monthly",
+            status: "trialing",
+            start: unix,
+            end: trialEnd,
+            trialEnd,
+          }),
+    );
+    await payments.webhook(invoicePaid("evt_trial"));
+    const snapshot = ledger.snapshot();
+    expect(snapshot).toMatchObject({
+      includedMicros: 0,
+      complimentaryMicros: 3_000_000,
+      subscribed: false,
+      canSpend: true,
+      paidAccess: null,
+      trial: { endsAt: trialEnd * 1000, creditMicros: 3_000_000 },
+      plan: { id: "standard", includedMicros: 20_000_000 },
+    });
+    expect(ledger.get("trialUsed")).toBe(true);
+    // The trial credit ends with the trial.
+    const later = new BillingLedger(
+      storage(),
+      "FrockBot",
+      () => trialEnd * 1000 + 1,
+    );
+    later.grant("trial:sub_owner", "complimentary", 3_000_000, trialEnd * 1000);
+    expect(later.balance().complimentaryMicros).toBe(0);
+  });
+
+  test("a paid month grants its own plan's allowance, and a mismatched amount is refused", async () => {
+    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    ledger.set("customer", "cus_owner");
+    const start = unix - 60;
+    const end = unix + 30 * DAY;
+    let amount = 5000;
+    const payments = paymentsWith(ledger, (path) =>
+      path.startsWith("invoices/")
+        ? invoiceObject({
+            reason: "subscription_cycle",
+            price: "price_plus",
+            amount,
+            start,
+            end,
+          })
+        : subscriptionObject({
+            price: "price_plus",
+            status: "active",
+            start,
+            end,
+          }),
+    );
+    await payments.webhook(invoicePaid("evt_plus"));
+    expect(ledger.snapshot()).toMatchObject({
+      includedMicros: 60_000_000,
+      subscribed: true,
+      plan: { id: "plus" },
+      trial: null,
+    });
+    amount = 2000;
+    await expect(payments.webhook(invoicePaid("evt_short"))).rejects.toThrow(
+      "Invoice amount does not match the plan",
+    );
+  });
+
+  test("an upgrade charges now and restarts the month; a downgrade waits for renewal", async () => {
+    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    ledger.set("customer", "cus_owner");
+    active(ledger);
+    const seen: { path: string; body?: URLSearchParams; key?: string }[] = [];
+    const payments = paymentsWith(ledger, () => ({ id: "sub_owner" }), seen);
+    await expect(
+      payments.changePlan({ id: "plan-change-upgrade", plan: "plus" }),
+    ).resolves.toEqual({ plan: "plus" });
+    const upgrade = seen.at(-1)!;
+    expect(upgrade.path).toBe("subscriptions/sub_owner");
+    expect(upgrade.key).toBe("frockbot:plan:user_one:plan-change-upgrade");
+    expect(Object.fromEntries(upgrade.body!)).toEqual({
+      "items[0][id]": "si_owner",
+      "items[0][price]": "price_plus",
+      proration_behavior: "none",
+      billing_cycle_anchor: "now",
+      payment_behavior: "error_if_incomplete",
+    });
+    // The same command again replays the same Stripe request.
+    await payments.changePlan({ id: "plan-change-upgrade", plan: "plus" });
+    expect(seen.at(-1)!.key).toBe(upgrade.key);
+    await expect(
+      payments.changePlan({ id: "plan-change-upgrade", plan: "standard" }),
+    ).rejects.toThrow("Plan change key was reused");
+
+    ledger.set("subscription", {
+      ...ledger.subscription()!,
+      plan: "plus",
+    });
+    await payments.changePlan({
+      id: "plan-change-downgrade",
+      plan: "standard",
+    });
+    expect(Object.fromEntries(seen.at(-1)!.body!)).toEqual({
+      "items[0][id]": "si_owner",
+      "items[0][price]": "price_monthly",
+      proration_behavior: "none",
+    });
+  });
+
+  test("the upgrade's invoice grants the new allowance for the restarted month", async () => {
+    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    ledger.set("customer", "cus_owner");
+    const end = unix + 30 * DAY;
+    const payments = paymentsWith(ledger, (path) =>
+      path.startsWith("invoices/")
+        ? invoiceObject({
+            reason: "subscription_update",
+            price: "price_plus",
+            amount: 5000,
+            start: unix,
+            end,
+          })
+        : subscriptionObject({
+            price: "price_plus",
+            status: "active",
+            start: unix,
+            end,
+          }),
+    );
+    await payments.webhook(invoicePaid("evt_upgrade"));
+    expect(ledger.snapshot()).toMatchObject({
+      includedMicros: 60_000_000,
+      paidAccess: { periodStart: NOW, periodEnd: end * 1000 },
+    });
+  });
+
+  test("during a trial, choosing a plan ends the trial and charges its first month now", async () => {
+    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    ledger.set("subscription", {
+      customerId: "cus_owner",
+      subscriptionId: "sub_owner",
+      itemId: "si_owner",
+      plan: "standard",
+      status: "trialing",
+      periodStart: NOW,
+      periodEnd: NOW + 7 * DAY * 1000,
+      trialEnd: NOW + 7 * DAY * 1000,
+      cancelAtPeriodEnd: false,
+    });
+    const seen: { path: string; body?: URLSearchParams; key?: string }[] = [];
+    const payments = paymentsWith(ledger, () => ({ id: "sub_owner" }), seen);
+    await expect(
+      payments.changePlan({ id: "plan-change-in-trial", plan: "standard" }),
+    ).resolves.toEqual({ plan: "standard" });
+    expect(Object.fromEntries(seen.at(-1)!.body!)).toEqual({
+      "items[0][id]": "si_owner",
+      "items[0][price]": "price_monthly",
+      proration_behavior: "none",
+      trial_end: "now",
+      payment_behavior: "error_if_incomplete",
+    });
+  });
+
+  test("an account without a subscription cannot change plan", async () => {
+    const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+    const payments = paymentsWith(ledger, () => ({}));
+    await expect(
+      payments.changePlan({ id: "plan-change-nobody", plan: "plus" }),
+    ).rejects.toThrow("Subscribe before changing plan");
   });
 });

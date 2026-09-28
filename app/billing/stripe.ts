@@ -1,8 +1,10 @@
 import {
   BILLING_PLAN,
+  BILLING_PLANS,
   BillingError,
   BillingLedger,
   stable,
+  type BillingPlanIdV1,
   type SubscriptionState,
 } from "./ledger.js";
 import { withDeadlineV1 } from "@frockbot/core/deadline";
@@ -13,7 +15,28 @@ export interface StripeConfig {
   secretKey: string;
   webhookSecret: string;
   monthlyPriceId: string;
+  /** Absent, Plus is not offered. */
+  plusPriceId?: string;
   origin: string;
+}
+
+/** The Stripe price a plan is sold at, if this deployment sells it. */
+export function planPriceIdV1(
+  config: StripeConfig,
+  plan: BillingPlanIdV1,
+): string | undefined {
+  return plan === "standard" ? config.monthlyPriceId : config.plusPriceId;
+}
+function planForPrice(
+  config: StripeConfig,
+  priceId: string,
+): BillingPlanIdV1 | undefined {
+  if (priceId === config.monthlyPriceId) return "standard";
+  if (config.plusPriceId && priceId === config.plusPriceId) return "plus";
+  return undefined;
+}
+function isPlan(value: unknown): value is BillingPlanIdV1 {
+  return value === "standard" || value === "plus";
 }
 type StripeObject = Record<string, unknown>;
 export function object(value: unknown): StripeObject {
@@ -217,6 +240,9 @@ interface PaymentIntentRecord {
   id: string;
   kind: "subscription" | "topup";
   cents: number;
+  plan?: BillingPlanIdV1;
+  /** Whether the subscription starts with the account's one trial. */
+  trial?: boolean;
   created: number;
   sessionId?: string;
   url?: string;
@@ -253,15 +279,23 @@ export class AccountPayments {
     id: string;
     kind: "subscription" | "topup";
     cents?: number;
+    plan?: BillingPlanIdV1;
   }) {
     if (!/^[a-zA-Z0-9_-]{16,100}$/.test(command.id))
       throw new BillingError("Invalid checkout request", 400);
     if (!["subscription", "topup"].includes(command.kind))
       throw new BillingError("Invalid purchase", 400);
-    const cents =
+    const plan =
       command.kind === "subscription"
-        ? BILLING_PLAN.monthlyCents
-        : command.cents;
+        ? (command.plan ?? "standard")
+        : undefined;
+    if (plan !== undefined) {
+      if (!isPlan(plan)) throw new BillingError("Invalid plan", 400);
+      if (!planPriceIdV1(this.stripe.config, plan))
+        throw new BillingError("That plan is not available yet", 409);
+    }
+    const cents =
+      plan !== undefined ? BILLING_PLANS[plan].monthlyCents : command.cents;
     if (
       command.kind === "topup" &&
       !(BILLING_PLAN.topUpCents as readonly number[]).includes(cents ?? 0)
@@ -269,7 +303,12 @@ export class AccountPayments {
       throw new BillingError("Choose a $10, $25 or $50 top-up", 400);
     const key = `checkout:${command.id}`;
     let intent = this.ledger.get<PaymentIntentRecord>(key);
-    if (intent && (intent.kind !== command.kind || intent.cents !== cents))
+    if (
+      intent &&
+      (intent.kind !== command.kind ||
+        intent.cents !== cents ||
+        (intent.plan ?? undefined) !== plan)
+    )
       throw new BillingError("Checkout key was reused", 409);
     if (intent?.url) return { url: intent.url };
     if (!intent) {
@@ -321,6 +360,15 @@ export class AccountPayments {
         id: command.id,
         kind: command.kind,
         cents: cents!,
+        ...(plan === undefined
+          ? {}
+          : {
+              plan,
+              // One trial per account, and never after a subscription.
+              trial:
+                !this.ledger.get<boolean>("trialUsed") &&
+                !this.ledger.subscription(),
+            }),
         created: this.now(),
       };
       // No await between claiming the single subscription slot and its intent.
@@ -350,8 +398,17 @@ export class AccountPayments {
       expires_at: String(Math.floor(intent.created / 1000) + 3600),
     };
     if (intent.kind === "subscription") {
-      fields["line_items[0][price]"] = this.stripe.config.monthlyPriceId;
+      const price = planPriceIdV1(
+        this.stripe.config,
+        intent.plan ?? "standard",
+      );
+      if (!price) throw new BillingError("That plan is not available yet", 409);
+      fields["line_items[0][price]"] = price;
       fields["subscription_data[metadata][frockbot_user_id]"] = this.userId;
+      if (intent.trial)
+        fields["subscription_data[trial_period_days]"] = String(
+          BILLING_PLAN.trialDays,
+        );
     } else {
       fields["line_items[0][price_data][currency]"] = "usd";
       fields["line_items[0][price_data][unit_amount]"] = String(intent.cents);
@@ -396,6 +453,82 @@ export class AccountPayments {
       throw new BillingError("Invalid billing portal link", 502);
     return { url: session.url };
   }
+  /**
+   * Moves a subscription to a plan. An upgrade charges the new plan in full
+   * now and restarts the billing month, so its allowance is granted at once;
+   * a downgrade takes the lower price from the next renewal. During a trial,
+   * either plan ends the trial now and charges its first month: how a person
+   * whose trial credit ran out starts paying early. Nothing prorates, which
+   * the ledger does not model.
+   */
+  async changePlan(command: { id: string; plan: BillingPlanIdV1 }) {
+    if (!/^[a-zA-Z0-9_-]{16,100}$/.test(command.id))
+      throw new BillingError("Invalid plan change", 400);
+    if (!isPlan(command.plan)) throw new BillingError("Invalid plan", 400);
+    const price = planPriceIdV1(this.stripe.config, command.plan);
+    if (!price) throw new BillingError("That plan is not available yet", 409);
+    const key = `planChange:${command.id}`;
+    let intent = this.ledger.get<{
+      id: string;
+      plan: BillingPlanIdV1;
+      subscriptionId: string;
+      itemId: string;
+      mode: "upgrade" | "downgrade" | "endTrial";
+      created: number;
+    }>(key);
+    if (intent && intent.plan !== command.plan)
+      throw new BillingError("Plan change key was reused", 409);
+    if (!intent) {
+      const subscription = this.ledger.subscription();
+      const trialing =
+        subscription?.status === "trialing" &&
+        subscription.trialEnd !== null &&
+        subscription.trialEnd > this.now();
+      if (!subscription || (!trialing && !this.ledger.subscribed()))
+        throw new BillingError("Subscribe before changing plan", 409);
+      if (!trialing && subscription.plan === command.plan)
+        return { plan: command.plan };
+      intent = {
+        id: command.id,
+        plan: command.plan,
+        subscriptionId: subscription.subscriptionId,
+        itemId: subscription.itemId,
+        mode: trialing
+          ? "endTrial"
+          : BILLING_PLANS[command.plan].monthlyCents >
+              BILLING_PLANS[subscription.plan].monthlyCents
+            ? "upgrade"
+            : "downgrade",
+        created: this.now(),
+      };
+      this.ledger.set(key, intent);
+    }
+    // Stripe forgets an idempotency key after a day; past that, a retry could
+    // charge twice.
+    if (this.now() - intent.created > 23 * 3600_000)
+      throw new BillingError(
+        "Plan change needs reconciliation. Please contact support.",
+        409,
+      );
+    await this.stripe.call(
+      `subscriptions/${intent.subscriptionId}`,
+      {
+        "items[0][id]": intent.itemId,
+        "items[0][price]": price,
+        proration_behavior: "none",
+        ...(intent.mode === "upgrade"
+          ? {
+              billing_cycle_anchor: "now",
+              payment_behavior: "error_if_incomplete",
+            }
+          : intent.mode === "endTrial"
+            ? { trial_end: "now", payment_behavior: "error_if_incomplete" }
+            : {}),
+      },
+      `frockbot:plan:${this.userId}:${intent.id}`,
+    );
+    return { plan: command.plan };
+  }
   private async subscription(id: string): Promise<SubscriptionState> {
     const subscription = await this.stripe.call(`subscriptions/${id}`);
     if (stripeId(subscription.customer) !== this.ledger.get<string>("customer"))
@@ -405,10 +538,11 @@ export class AccountPayments {
       throw new BillingError("Unexpected subscription items", 409);
     const item = object(items[0]);
     const price = object(item.price);
+    const plan = planForPrice(this.stripe.config, stripeId(price.id));
     if (
-      stripeId(price.id) !== this.stripe.config.monthlyPriceId ||
+      !plan ||
       price.currency !== "usd" ||
-      price.unit_amount !== BILLING_PLAN.monthlyCents ||
+      price.unit_amount !== BILLING_PLANS[plan].monthlyCents ||
       item.quantity !== 1 ||
       object(price.recurring).interval !== "month"
     )
@@ -418,19 +552,27 @@ export class AccountPayments {
       );
     const start = Number(subscription.current_period_start) * 1000;
     const end = Number(subscription.current_period_end) * 1000;
+    const trialEnd =
+      subscription.trial_end === null || subscription.trial_end === undefined
+        ? null
+        : Number(subscription.trial_end) * 1000;
     if (
       !Number.isSafeInteger(start) ||
       !Number.isSafeInteger(end) ||
       end <= start ||
+      (trialEnd !== null && !Number.isSafeInteger(trialEnd)) ||
       typeof subscription.status !== "string"
     )
       throw new BillingError("Invalid subscription period", 502);
     return {
       customerId: stripeId(subscription.customer),
       subscriptionId: id,
+      itemId: stripeId(item.id),
+      plan,
       status: subscription.status,
       periodStart: start,
       periodEnd: end,
+      trialEnd,
       cancelAtPeriodEnd: subscription.cancel_at_period_end === true,
     };
   }
@@ -449,7 +591,7 @@ export class AccountPayments {
     let grant:
       | {
           id: string;
-          kind: "included" | "purchased";
+          kind: "included" | "purchased" | "complimentary";
           micros: number;
           expires: number | null;
         }
@@ -458,6 +600,7 @@ export class AccountPayments {
       | { subscriptionId: string; periodStart: number; periodEnd: number }
       | undefined;
     let completedSubscriptionIntentId: string | undefined;
+    let trialGranted = false;
     if (type === "invoice.paid") {
       const invoice = await this.stripe.call(`invoices/${stripeId(data.id)}`);
       if (
@@ -468,42 +611,77 @@ export class AccountPayments {
         throw new BillingError("Invoice is not paid", 409);
       const subscriptionId = stripeId(invoice.subscription);
       subscription = await this.subscription(subscriptionId);
+      const reason = String(invoice.billing_reason);
+      // An upgrade restarts the billing month and invoices the new plan in
+      // full; any other plan change invoices nothing until renewal.
       if (
-        ["subscription_create", "subscription_cycle"].includes(
-          String(invoice.billing_reason),
-        )
+        [
+          "subscription_create",
+          "subscription_cycle",
+          "subscription_update",
+        ].includes(reason)
       ) {
         const lines = object(invoice.lines);
         if (lines.has_more === true || !Array.isArray(lines.data))
           throw new BillingError("Invoice needs reconciliation", 409);
-        const matching = lines.data
-          .map(object)
-          .filter(
-            (line) =>
-              line.type === "subscription" &&
-              !line.proration &&
-              stripeId(object(line.price).id) ===
-                this.stripe.config.monthlyPriceId,
+        const matching = lines.data.map(object).flatMap((line) => {
+          if (line.type !== "subscription" || line.proration) return [];
+          const plan = planForPrice(
+            this.stripe.config,
+            stripeId(object(line.price).id),
           );
-        if (matching.length !== 1 || matching[0]!.quantity !== 1)
-          throw new BillingError("Invoice allowance is ambiguous", 409);
-        const period = object(matching[0]!.period);
-        const start = Number(period.start) * 1000;
-        const end = Number(period.end) * 1000;
+          return plan ? [{ line, plan }] : [];
+        });
         if (
-          !Number.isSafeInteger(start) ||
-          !Number.isSafeInteger(end) ||
-          end <= start ||
-          start > this.now()
+          (matching.length !== 1 && reason !== "subscription_update") ||
+          matching.length > 1 ||
+          (matching[0] && matching[0].line.quantity !== 1)
         )
-          throw new BillingError("Invalid invoice period", 409);
-        grant = {
-          id: `monthly:${subscriptionId}:${period.start}`,
-          kind: "included",
-          micros: BILLING_PLAN.includedMicros,
-          expires: end,
-        };
-        paidPeriod = { subscriptionId, periodStart: start, periodEnd: end };
+          throw new BillingError("Invoice allowance is ambiguous", 409);
+        const paid = matching[0];
+        if (paid) {
+          const period = object(paid.line.period);
+          const start = Number(period.start) * 1000;
+          const end = Number(period.end) * 1000;
+          if (
+            !Number.isSafeInteger(start) ||
+            !Number.isSafeInteger(end) ||
+            end <= start ||
+            start > this.now()
+          )
+            throw new BillingError("Invalid invoice period", 409);
+          // The line's own amount: tax, where charged, sits outside it.
+          if (paid.line.amount === 0) {
+            // A trial's opening invoice is marked paid for nothing. It grants
+            // the trial credit, never the plan's allowance or a paid period.
+            if (
+              reason === "subscription_create" &&
+              subscription.trialEnd === end
+            ) {
+              grant = {
+                id: `trial:${subscriptionId}`,
+                kind: "complimentary",
+                micros: BILLING_PLAN.trialMicros,
+                expires: end,
+              };
+              trialGranted = true;
+            }
+          } else if (
+            paid.line.amount === BILLING_PLANS[paid.plan].monthlyCents
+          ) {
+            grant = {
+              id: `monthly:${subscriptionId}:${period.start}`,
+              kind: "included",
+              micros: BILLING_PLANS[paid.plan].includedMicros,
+              expires: end,
+            };
+            paidPeriod = { subscriptionId, periodStart: start, periodEnd: end };
+          } else
+            throw new BillingError(
+              "Invoice amount does not match the plan",
+              409,
+            );
+        }
       }
     } else if (type.startsWith("customer.subscription.")) {
       subscription = await this.subscription(stripeId(data.id));
@@ -579,6 +757,7 @@ export class AccountPayments {
       }
       if (grant)
         this.ledger.grant(grant.id, grant.kind, grant.micros, grant.expires);
+      if (trialGranted) this.ledger.set("trialUsed", true);
       if (
         completedSubscriptionIntentId &&
         this.ledger.get<PaymentIntentRecord>("pendingSubscription")?.id ===

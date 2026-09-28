@@ -7,7 +7,9 @@ import { COMPUTER_TARIFF } from "@frockbot/app/billing/computer";
 import type { HostedModelRatesV1 } from "@frockbot/app/billing/rates";
 import { normalizeFrockModelIdV1 } from "@frockbot/providers/frock-ai/catalog";
 import {
+  BILLING_PLANS,
   BillingError,
+  type BillingPlanIdV1,
   type UsageReservation,
   type UsageSettlement,
 } from "@frockbot/app/billing/ledger";
@@ -39,6 +41,7 @@ export interface BillingEnv {
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
   STRIPE_MONTHLY_PRICE_ID?: string;
+  STRIPE_PLUS_PRICE_ID?: string;
   BETTER_AUTH_URL?: string;
 }
 export function stripeConfig(env: BillingEnv): StripeConfig {
@@ -53,15 +56,22 @@ export function stripeConfig(env: BillingEnv): StripeConfig {
       503,
     );
   const origin = new URL(env.BETTER_AUTH_URL).origin;
-  if (!/^price_[a-zA-Z0-9]+$/.test(env.STRIPE_MONTHLY_PRICE_ID))
-    throw new BillingError("Payment plan is not configured", 503);
+  for (const price of [env.STRIPE_MONTHLY_PRICE_ID, env.STRIPE_PLUS_PRICE_ID])
+    if (price !== undefined && !/^price_[a-zA-Z0-9]+$/.test(price))
+      throw new BillingError("Payment plan is not configured", 503);
   return {
     productName: BRAND_V1.productName,
     secretKey: env.STRIPE_SECRET_KEY,
     webhookSecret: env.STRIPE_WEBHOOK_SECRET,
     monthlyPriceId: env.STRIPE_MONTHLY_PRICE_ID,
+    ...(env.STRIPE_PLUS_PRICE_ID
+      ? { plusPriceId: env.STRIPE_PLUS_PRICE_ID }
+      : {}),
     origin,
   };
+}
+function isPlanId(value: unknown): value is BillingPlanIdV1 {
+  return typeof value === "string" && Object.hasOwn(BILLING_PLANS, value);
 }
 export function accountPayments(
   ledger: BillingLedger,
@@ -85,8 +95,17 @@ export interface BillingAccountRpc {
   }): Promise<ReturnType<BillingLedger["snapshot"]>>;
   billingCheckout(input: {
     userId: string;
-    command: { id: string; kind: "subscription" | "topup"; cents?: number };
+    command: {
+      id: string;
+      kind: "subscription" | "topup";
+      cents?: number;
+      plan?: BillingPlanIdV1;
+    };
   }): Promise<{ url: string }>;
+  billingChangePlan(input: {
+    userId: string;
+    command: { id: string; plan: BillingPlanIdV1 };
+  }): Promise<{ plan: BillingPlanIdV1 }>;
   billingPortal(input: {
     userId: string;
     commandId: string;
@@ -343,6 +362,11 @@ export function billingRoutes(
                 viewerOpenSeconds: COMPUTER_TARIFF.viewerOpenSeconds,
                 viewerRenewSeconds: COMPUTER_TARIFF.viewerRenewSeconds,
               },
+              // Plus is offered only where its Stripe price is configured.
+              plans: [
+                BILLING_PLANS.standard,
+                ...(env.STRIPE_PLUS_PRICE_ID ? [BILLING_PLANS.plus] : []),
+              ],
               launchBlockers: BILLING_LAUNCH_BLOCKERS,
               // Whether this deployment meters at all. Off, and credit is
               // meaningless: nothing is charged and nothing is refused.
@@ -427,7 +451,8 @@ export function billingRoutes(
           if (
             typeof body.id !== "string" ||
             !["subscription", "topup"].includes(String(body.kind)) ||
-            (body.cents !== undefined && typeof body.cents !== "number")
+            (body.cents !== undefined && typeof body.cents !== "number") ||
+            (body.plan !== undefined && !isPlanId(body.plan))
           )
             throw new BillingError("Invalid checkout", 400);
           return Response.json(
@@ -439,7 +464,26 @@ export function billingRoutes(
                 ...(body.cents === undefined
                   ? {}
                   : { cents: body.cents as number }),
+                ...(body.plan === undefined
+                  ? {}
+                  : { plan: body.plan as BillingPlanIdV1 }),
               },
+            }),
+            { headers },
+          );
+        }
+        if (url.pathname === "/api/billing/plan") {
+          if (BILLING_LAUNCH_BLOCKERS.length)
+            throw new BillingError(
+              "Payments are not open yet. Launch qualification is still in progress.",
+              503,
+            );
+          if (typeof body.id !== "string" || !isPlanId(body.plan))
+            throw new BillingError("Invalid plan change", 400);
+          return Response.json(
+            await account(userId).billingChangePlan({
+              userId,
+              command: { id: body.id, plan: body.plan },
             }),
             { headers },
           );

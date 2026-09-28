@@ -216,6 +216,11 @@ export const OPTIONAL_PRODUCTION_SECRETS_V1: readonly OptionalProductionSecretV1
       degraded: "subscription checkout answers that the plan is not configured",
     },
     {
+      name: "STRIPE_PLUS_PRICE_ID",
+      why: "Pins the US$50 monthly Plus Stripe price.",
+      degraded: "only the US$20 plan is offered",
+    },
+    {
       name: "FROCKBOT_ADMIN_EMAILS",
       why: "The identities allowed to open Admin.",
       degraded:

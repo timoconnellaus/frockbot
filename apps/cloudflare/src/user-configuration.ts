@@ -2,6 +2,7 @@ import {
   BillingError,
   BillingLedger,
   type BillingBalance,
+  type BillingPlanIdV1,
   type ComplimentaryGrant,
   type PaidAccessState,
   type UsageReservation,
@@ -715,11 +716,26 @@ export class UserConfiguration
   }
   async billingCheckout(input: {
     userId: string;
-    command: { id: string; kind: "subscription" | "topup"; cents?: number };
+    command: {
+      id: string;
+      kind: "subscription" | "topup";
+      cents?: number;
+      plan?: BillingPlanIdV1;
+    };
   }) {
     await this.assertUserIdentity(input.userId);
     await this.assertAccountOpen();
     return accountPayments(this.billing(), this.env, input.userId).checkout(
+      input.command,
+    );
+  }
+  async billingChangePlan(input: {
+    userId: string;
+    command: { id: string; plan: BillingPlanIdV1 };
+  }) {
+    await this.assertUserIdentity(input.userId);
+    await this.assertAccountOpen();
+    return accountPayments(this.billing(), this.env, input.userId).changePlan(
       input.command,
     );
   }

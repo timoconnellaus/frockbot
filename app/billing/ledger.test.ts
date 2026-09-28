@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import {
   BILLING_PLAN,
+  BILLING_PLANS,
   BillingError,
   BillingLedger,
   type BillingStorage,
@@ -56,10 +57,18 @@ describe("the billing ledger", () => {
   test("declares the paid plan, included credit, and exact top-up menu", () => {
     expect(BILLING_PLAN).toEqual({
       currency: "usd",
-      monthlyCents: 2_000,
-      includedMicros: 15_000_000,
       topUpCents: [1_000, 2_500, 5_000],
-      pricingVersion: "2026-09-09",
+      pricingVersion: "2026-09-28",
+      trialDays: 7,
+      trialMicros: 3_000_000,
+    });
+    expect(BILLING_PLANS.standard).toMatchObject({
+      monthlyCents: 2_000,
+      includedMicros: 20_000_000,
+    });
+    expect(BILLING_PLANS.plus).toMatchObject({
+      monthlyCents: 5_000,
+      includedMicros: 60_000_000,
     });
   });
 

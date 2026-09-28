@@ -6,13 +6,40 @@ import {
   spentSinceV1,
 } from "./spending.js";
 
+/** What every plan shares. The markup is in the rates, so a plan includes as much usage as it costs, or more. */
 export const BILLING_PLAN = {
   currency: "usd",
-  monthlyCents: 2000,
-  includedMicros: 15_000_000,
   topUpCents: [1000, 2500, 5000],
-  pricingVersion: "2026-09-09",
+  pricingVersion: "2026-09-28",
+  /** A first subscription starts with a trial: card taken, nothing charged. */
+  trialDays: 7,
+  trialMicros: 3_000_000,
 } as const;
+
+export type BillingPlanIdV1 = "standard" | "plus";
+export interface BillingPlanV1 {
+  id: BillingPlanIdV1;
+  monthlyCents: number;
+  includedMicros: number;
+  topUpCents: readonly number[];
+  pricingVersion: string;
+}
+export const BILLING_PLANS: Readonly<Record<BillingPlanIdV1, BillingPlanV1>> = {
+  standard: {
+    id: "standard",
+    monthlyCents: 2000,
+    includedMicros: 20_000_000,
+    topUpCents: BILLING_PLAN.topUpCents,
+    pricingVersion: BILLING_PLAN.pricingVersion,
+  },
+  plus: {
+    id: "plus",
+    monthlyCents: 5000,
+    includedMicros: 60_000_000,
+    topUpCents: BILLING_PLAN.topUpCents,
+    pricingVersion: BILLING_PLAN.pricingVersion,
+  },
+};
 
 /**
  * The two refusals a person is told in the conversation, so they are written
@@ -181,9 +208,14 @@ interface Operation extends SqlRow {
 export interface SubscriptionState {
   customerId: string;
   subscriptionId: string;
+  /** The subscription's one item, which a plan change replaces the price of. */
+  itemId: string;
+  plan: BillingPlanIdV1;
   status: string;
   periodStart: number;
   periodEnd: number;
+  /** When a trial ends, while the subscription has one. */
+  trialEnd: number | null;
   cancelAtPeriodEnd: boolean;
 }
 export interface PaidAccessState {
@@ -590,8 +622,31 @@ export class BillingLedger {
       suspended,
     };
   }
+  /**
+   * The trial a first subscription starts with, while it runs: its credit is
+   * the complimentary grant the trial invoice made, spendable without a paid
+   * period and gone when the trial ends.
+   */
+  trial(): { endsAt: number; creditMicros: number } | null {
+    const subscription = this.subscription();
+    if (
+      subscription?.status !== "trialing" ||
+      subscription.trialEnd === null ||
+      subscription.trialEnd <= this.now()
+    )
+      return null;
+    const grant = this.rows<{ original: number }>(
+      "SELECT original FROM billing_grants WHERE id = ?",
+      `trial:${subscription.subscriptionId}`,
+    )[0];
+    return {
+      endsAt: subscription.trialEnd,
+      creditMicros: grant?.original ?? BILLING_PLAN.trialMicros,
+    };
+  }
   snapshot(before?: number) {
     const now = this.now();
+    const subscription = this.subscription();
     const usage = this.rows<SqlRow>(
       "SELECT rowid AS cursor, id, status, kind, bot_id AS botId, session_id AS sessionId, description, pricing_version AS pricingVersion, fingerprint, created, maximum AS reservedMicros, settlement FROM billing_operations WHERE rowid < ? ORDER BY rowid DESC LIMIT 100",
       before ?? Number.MAX_SAFE_INTEGER,
@@ -614,8 +669,9 @@ export class BillingLedger {
       payments: this.rows<SqlRow>(
         "SELECT id, kind, original AS creditMicros, expires, created FROM billing_grants ORDER BY created DESC LIMIT 100",
       ),
-      plan: BILLING_PLAN,
-      subscription: this.subscription() ?? null,
+      plan: BILLING_PLANS[subscription?.plan ?? "standard"],
+      trial: this.trial(),
+      subscription: subscription ?? null,
       usage,
     };
   }
