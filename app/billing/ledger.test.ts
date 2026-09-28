@@ -574,7 +574,7 @@ describe("the payments port", () => {
       ),
     ).toThrow("Invalid credit");
     port.remember("customer", "cus_kept");
-    expect(port.record("customer")).toBe("cus_kept");
+    expect(port.record<string>("customer")).toBe("cus_kept");
     expect(ledger.balance().purchasedMicros).toBe(0);
   });
 
