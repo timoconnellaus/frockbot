@@ -33,6 +33,7 @@ function account(
         subscribed: false,
         suspended: false,
         includedMicros: 0,
+        includedGrantedMicros: 0,
         purchasedMicros: 0,
         complimentaryMicros: 0,
         reservedMicros: 0,
@@ -42,7 +43,7 @@ function account(
       };
     },
     async paymentsCommand() {
-      return { url: "https://checkout.stripe.com/c/test" };
+      return { value: { url: "https://checkout.stripe.com/c/test" } };
     },
     async reconcileBilling() {},
     async reserveUsage() {
@@ -325,7 +326,7 @@ describe("billing HTTP routes", () => {
         account({
           async paymentsCommand() {
             calls += 1;
-            return { url: "https://checkout.stripe.com/c/test" };
+            return { value: { url: "https://checkout.stripe.com/c/test" } };
           },
         }),
       rates,
@@ -349,6 +350,40 @@ describe("billing HTTP routes", () => {
     expect(calls).toBe(0);
   });
 
+  test("a Package refusal keeps its status across the account's RPC", async () => {
+    const routes = billingRoutes(
+      env,
+      () =>
+        account({
+          async paymentsCommand() {
+            return {
+              refused: { message: "Plan change key was reused", status: 409 },
+            };
+          },
+        }),
+      rates,
+    );
+    const request = new Request(
+      "https://app.frockbot.com/api/billing/provider/checkout",
+      {
+        method: "POST",
+        headers: {
+          origin: "https://app.frockbot.com",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ id: "0123456789abcdef", kind: "subscription" }),
+      },
+    );
+    const response = await routes.publicRoute!(request, new URL(request.url), {
+      client: "browser",
+      sessionUserId: async () => "user-one",
+    });
+    expect(response?.status).toBe(409);
+    expect((await response!.json()) as unknown).toEqual({
+      error: "Plan change key was reused",
+    });
+  });
+
   test("hands a signed-in purchase to that account, as the person's", async () => {
     const seen: unknown[] = [];
     const routes = billingRoutes(
@@ -357,7 +392,7 @@ describe("billing HTTP routes", () => {
         account({
           async paymentsCommand(input) {
             seen.push({ userId, input });
-            return { url: "https://checkout.stripe.com/c/test" };
+            return { value: { url: "https://checkout.stripe.com/c/test" } };
           },
         }),
       rates,
@@ -450,7 +485,7 @@ describe("billing HTTP routes", () => {
         account({
           async paymentsCommand(input) {
             seen.push(input);
-            return { url: "https://checkout.stripe.com/c/test" };
+            return { value: { url: "https://checkout.stripe.com/c/test" } };
           },
         }),
       rates,

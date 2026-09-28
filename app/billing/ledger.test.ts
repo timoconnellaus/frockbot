@@ -609,6 +609,94 @@ describe("the payments port", () => {
     ).toThrow("This deployment sells no such plan");
   });
 
+  test("a trial ended early by its first paid month takes its credit with it", () => {
+    const plan: PaymentsPlanV1 = {
+      ...PLAN,
+      trial: { days: 7, creditMicros: 3_000_000 },
+    };
+    let now = NOW;
+    const ledger = new BillingLedger(storage(), "FrockBot", plan, () => now);
+    const port = ledger.paymentsPort();
+    port.apply("evt_trial", 1, (effects) => {
+      effects.recordSubscription({
+        ...subscription("sub_t", NOW, "trialing"),
+        trialEnd: NOW + 7 * DAY,
+      });
+      effects.grantTrial({ subscriptionId: "sub_t", expires: NOW + 7 * DAY });
+    });
+    // "Start now" on day 2: Stripe ends the trial and bills the first month.
+    now = NOW + 2 * DAY;
+    const paid = {
+      subscriptionId: "sub_t",
+      planId: "standard",
+      periodStart: now,
+      periodEnd: now + 30 * DAY,
+    };
+    port.apply("evt_start_now", 2, (effects) => {
+      effects.recordSubscription(subscription("sub_t", now));
+      effects.recordPaidPeriod(paid);
+    });
+    expect(ledger.balance()).toMatchObject({
+      complimentaryMicros: 0,
+      includedMicros: 15_000_000,
+      subscribed: true,
+    });
+    // The same trial event again changes nothing.
+    port.apply("evt_trial_again", 3, (effects) =>
+      effects.grantTrial({ subscriptionId: "sub_t", expires: NOW + 7 * DAY }),
+    );
+    expect(ledger.balance().complimentaryMicros).toBe(0);
+  });
+
+  test("the included gauge's full mark counts every live allowance, not just the plan's", () => {
+    const plan: PaymentsPlanV1 = {
+      ...PLAN,
+      subscriptions: [
+        ...PLAN.subscriptions,
+        {
+          id: "plus",
+          name: "Plus",
+          monthlyCents: 5_000,
+          includedMicros: 60_000_000,
+        },
+      ],
+    };
+    let now = NOW;
+    const ledger = new BillingLedger(storage(), "FrockBot", plan, () => now);
+    const port = ledger.paymentsPort();
+    port.apply("evt_standard", 1, (effects) => {
+      effects.recordSubscription(subscription("sub_p", NOW));
+      effects.recordPaidPeriod({
+        subscriptionId: "sub_p",
+        planId: "standard",
+        periodStart: NOW,
+        periodEnd: NOW + 30 * DAY,
+      });
+    });
+    expect(ledger.snapshot().includedGrantedMicros).toBe(15_000_000);
+    // An upgrade on day 10 restarts the month; the old allowance runs on.
+    now = NOW + 10 * DAY;
+    port.apply("evt_upgrade", 2, (effects) => {
+      effects.recordSubscription({
+        ...subscription("sub_p", now),
+        planId: "plus",
+      });
+      effects.recordPaidPeriod({
+        subscriptionId: "sub_p",
+        planId: "plus",
+        periodStart: now,
+        periodEnd: now + 30 * DAY,
+      });
+    });
+    expect(ledger.snapshot()).toMatchObject({
+      includedMicros: 75_000_000,
+      includedGrantedMicros: 75_000_000,
+    });
+    // Once the old month ends, only the Plus allowance is left.
+    now = NOW + 31 * DAY;
+    expect(ledger.snapshot().includedGrantedMicros).toBe(60_000_000);
+  });
+
   test("an event about an older subscription cannot replace a newer one", () => {
     const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
     const port = ledger.paymentsPort();

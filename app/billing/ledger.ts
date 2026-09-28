@@ -778,6 +778,14 @@ export class BillingLedger {
       plan.includedMicros,
       period.periodEnd,
     );
+    // A paid month ends the trial before it, early ("Start now") or on time,
+    // and the trial's credit ends with it.
+    this.storage.sql.exec(
+      "UPDATE billing_grants SET expires = ? WHERE id = ? AND expires > ?",
+      period.periodStart,
+      `trial:${period.subscriptionId}`,
+      period.periodStart,
+    );
   }
   /** What the account can spend right now. Cheap: three small reads. */
   balance(): BillingBalance {
@@ -849,6 +857,14 @@ export class BillingLedger {
     }));
     return {
       ...this.balance(),
+      // The full mark for `includedMicros`: every live monthly allowance as
+      // granted. A plan change leaves the old month's allowance running
+      // beside the new one, so the current plan's figure alone is not it.
+      includedGrantedMicros:
+        this.rows<{ micros: number }>(
+          "SELECT COALESCE(SUM(original), 0) AS micros FROM billing_grants WHERE kind = 'included' AND expires > ?",
+          now,
+        )[0]?.micros ?? 0,
       paidAccess: this.get<PaidAccessState>("paidAccess") ?? null,
       spentLast30DaysMicros: spentSinceV1(
         this.storage.sql,

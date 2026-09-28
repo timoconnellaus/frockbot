@@ -89,6 +89,10 @@ export function paymentsAccountV1(snapshot: {
     trialUsed: snapshot.trialUsed,
   };
 }
+/** A payments command's answer across RPC, where a thrown error loses its status. */
+export type PaymentsCommandResultV1 =
+  | { readonly value: unknown }
+  | { readonly refused: { readonly message: string; readonly status: number } };
 export interface BillingAccountRpc {
   reconcileBilling(input: {
     userId: string;
@@ -104,7 +108,7 @@ export interface BillingAccountRpc {
     command: string;
     input: unknown;
     signedIn: boolean;
-  }): Promise<unknown>;
+  }): Promise<PaymentsCommandResultV1>;
   reserveUsage(input: {
     userId: string;
     reservation: UsageReservation;
@@ -265,12 +269,18 @@ export function billingRoutes(
                 "Payments are not open yet. Launch qualification is still in progress.",
                 503,
               );
-            return account(userId).paymentsCommand({
+            const result = await account(userId).paymentsCommand({
               userId,
               command,
               input,
               signedIn,
             });
+            if ("refused" in result)
+              throw new BillingError(
+                result.refused.message,
+                result.refused.status,
+              );
+            return result.value;
           },
         }),
       };
