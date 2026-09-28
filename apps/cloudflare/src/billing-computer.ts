@@ -1,6 +1,6 @@
 import {
   BillingError,
-  BILLING_PLAN,
+  USAGE_PRICING_VERSION_V1,
   type UsageAttributionV1,
 } from "@frockbot/app/billing/ledger";
 import {
@@ -211,7 +211,7 @@ export function prepaidComputerHost(
               maximumMicros: computerChargeMicros(maximumDuration(operation)),
               botId: tenant.botId,
               description: COMPUTER_RATE_DESCRIPTION,
-              pricingVersion: BILLING_PLAN.pricingVersion,
+              pricingVersion: USAGE_PRICING_VERSION_V1,
               unitRates: {
                 activeMicrosPerHour: COMPUTER_ACTIVE_MICROS_PER_HOUR,
               },

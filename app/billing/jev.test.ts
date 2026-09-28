@@ -5,6 +5,7 @@ import {
   CREDIT_EXHAUSTED_REASON_V1,
   type BillingStorage,
 } from "./ledger";
+import type { PaymentsPlanV1 } from "@frockbot/core/contracts";
 import type { AccountUsage } from "./model";
 import {
   createJevMeterV1,
@@ -12,6 +13,13 @@ import {
   JEV_PRICING_VERSION,
   JEV_TARIFF,
 } from "./jev";
+
+/** Complimentary credit is what these draw on; the plan only has to exist. */
+const PLAN: PaymentsPlanV1 = {
+  subscription: { monthlyCents: 2_000, includedMicros: 15_000_000 },
+  topUpCents: [1_000],
+  purchasedCreditNeedsSubscription: true,
+};
 
 function storage(database = new Database(":memory:")): BillingStorage {
   return {
@@ -40,7 +48,7 @@ const REQUEST = {
 
 /** An account with complimentary credit, spendable without a subscription. */
 function account(micros = 1_000_000) {
-  const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
+  const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
   if (micros > 0) {
     ledger.grantComplimentary({
       id: "gift",

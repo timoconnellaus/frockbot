@@ -16,10 +16,6 @@ import type {
   AccountDeletionStepOutcomeV1,
   AccountDeletionStepV1,
 } from "@frockbot/app/account/deletion";
-import {
-  StripeClient,
-  deleteAccountCustomersV1,
-} from "@frockbot/app/billing/stripe";
 import { ComposioClient } from "@frockbot/app/connect/composio";
 import type { MemoryVectorIndex } from "@frockbot/app/memory/types";
 import { uploadUserPrefixV1 } from "@frockbot/app/uploads/shared";
@@ -27,7 +23,7 @@ import {
   WORKSPACE_OBJECT_PREFIX,
   workspaceObjectPrefixV1,
 } from "@frockbot/core/workspace-store";
-import { stripeConfig, type BillingEnv } from "./billing.js";
+import { paymentsPackageV1, type BillingEnv } from "./billing.js";
 import {
   computerHostBindingV1,
   createComputerHostV1,
@@ -54,8 +50,8 @@ export interface AccountDeletionUserSeamsV1 {
   ): Promise<AccountDeletionStepOutcomeV1>;
   /** Deletes every Bot through the Bot delete saga. */
   deleteBots(): Promise<AccountDeletionStepOutcomeV1>;
-  /** The payment customer the ledger recorded, if it recorded one. */
-  recordedPaymentCustomer(): string | undefined;
+  /** What the payments Package remembered for the account, by its key. */
+  paymentRecord<T>(key: string): T | undefined;
   /** User and Group Chat Memory vector ids, a page at a time. */
   vectorIdsAfter(cursor: string | undefined, limit: number): string[];
   /** Forgets the sign-in identity, its sessions and linked accounts. */
@@ -160,33 +156,6 @@ async function deleteConnectedApps(
   return { status: "pending", cursor: "verify" };
 }
 
-/**
- * The payment customer, which ends the subscription with it. With no
- * payments configured there is nothing to reach — unless the ledger recorded
- * a customer, which means payments were on once and a live subscription may
- * still be charging. That is refused, and retried, until someone restores
- * the configuration: finishing the deletion around it would leave the person
- * paying for an account that no longer exists.
- */
-async function deletePayments(
-  env: AccountDeletionEnvV1,
-  userId: string,
-  recorded: string | undefined,
-): Promise<AccountDeletionStepOutcomeV1> {
-  let config: ReturnType<typeof stripeConfig>;
-  try {
-    config = stripeConfig(env);
-  } catch (error) {
-    if (recorded === undefined) return COMPLETE;
-    throw new Error(
-      `payments are not configured, so customer ${recorded} cannot be deleted`,
-      { cause: error },
-    );
-  }
-  await deleteAccountCustomersV1(new StripeClient(config), userId, recorded);
-  return COMPLETE;
-}
-
 /** One page of Memory vectors, deleted from the index by id. */
 async function deleteMemoryVectors(
   index: MemoryVectorIndex,
@@ -251,7 +220,12 @@ export async function runAccountDeletionStepV1(
       return COMPLETE;
     }
     case "payments":
-      return deletePayments(env, userId, seams.recordedPaymentCustomer());
+      // Whatever the provider holds, so nothing keeps charging a person who
+      // no longer has an account: the payments Package's to reach.
+      await paymentsPackageV1(env).deleteAccount?.(userId, <T>(key: string) =>
+        seams.paymentRecord<T>(key),
+      );
+      return COMPLETE;
     case "files":
       return env.MEMORY_FILES
         ? deleteAccountObjects(env.MEMORY_FILES, userId)

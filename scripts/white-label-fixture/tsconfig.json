@@ -1,7 +1,7 @@
 {
   // The consumer's own typecheck, run by `scripts/white-label-fixture.ts` once
-  // the tarballs are installed: its chooser and brand against the published
-  // contract, with no shim. In this repository nothing resolves
+  // the tarballs are installed: its choosers and brand against the published
+  // contract, with no shim. `payments/prove.ts` is run by Bun, not compiled. In this repository nothing resolves
   // `@frockbot/core` from here, so nothing else reads this file.
   "compilerOptions": {
     "target": "ES2023",
@@ -14,5 +14,5 @@
     "lib": ["ES2023", "WebWorker"],
     "types": ["@cloudflare/workers-types"]
   },
-  "include": ["auth/chooser.ts", "brand/brand.ts"]
+  "include": ["auth/chooser.ts", "payments/chooser.ts", "brand/brand.ts"]
 }

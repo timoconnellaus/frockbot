@@ -22,10 +22,13 @@ import {
   DEPLOYABLE_WORKERS_V1,
   generateProfileConfigsV1 as generateProfileConfigsInV1,
   generateWorkerConfigV1 as generateWorkerConfigInV1,
+  PAYMENTS_CHOOSERS_V1,
+  profilePaymentsPackageV1,
   profileWorkersV1,
   PUBLISHED_IMAGE_REGISTRY_V1,
   validateProfileAuthPackageV1,
   validateProfileBrandV1,
+  validateProfilePaymentsPackageV1,
   type DeployableWorkerV1,
   type GenerateOptionsV1,
 } from "../apps/cloudflare/deployment-config/generate.ts";
@@ -608,6 +611,121 @@ describe("the generator", () => {
           "a profile",
         ),
       ).toThrow(/authPackage/);
+    });
+  });
+
+  describe("the payments Package", () => {
+    const fixtures = join(import.meta.dirname, "deployment-config", "fixtures");
+    const hosted = () => loadProfileV1("hosted");
+    const external = () => ({
+      ...hosted(),
+      name: "white-label",
+      payments: "./white-label/payments.ts" as const,
+      paymentsEnvironment: {
+        secrets: [
+          { name: "STUB_PAYMENTS_SECRET", why: "Verifies payment events." },
+        ],
+        vars: { STUB_PAYMENTS_ACCOUNT: "acct-123" },
+      },
+    });
+
+    test("is Stripe when a profile names it or names none, with no alias", () => {
+      const { payments: _stripe, ...unnamed } = hosted();
+      validateProfileV1(unnamed, "a profile");
+      for (const profile of [hosted(), unnamed]) {
+        const app = generateWorkerConfigV1("app", { profile });
+        expect(app.config.alias).toBeUndefined();
+      }
+    });
+
+    test("aliases the build that does not bill", () => {
+      const app = generateWorkerConfigV1("app", {
+        profile: { ...hosted(), payments: "none" as const },
+      });
+      const alias = app.config.alias as Config;
+      expect(resolve(dirname(app.file), String(alias["#payments"]))).toBe(
+        join(REPO_ROOT_V1, "apps", "cloudflare", "src", "payments.none.ts"),
+      );
+      for (const chooser of Object.values(PAYMENTS_CHOOSERS_V1))
+        expect(
+          existsSync(join(REPO_ROOT_V1, "apps", "cloudflare", chooser)),
+        ).toBe(true);
+    });
+
+    test("a white-label's own is aliased by path and gets its vars, never its secrets", async () => {
+      const profile = external();
+      validateProfileV1(profile, "a profile");
+      await validateProfilePaymentsPackageV1(profile, fixtures);
+      const app = generateWorkerConfigV1("app", {
+        profile,
+        profileDirectory: fixtures,
+      });
+      const alias = app.config.alias as Config;
+      expect(String(alias["#payments"])).toStartWith("../");
+      expect(resolve(dirname(app.file), String(alias["#payments"]))).toBe(
+        join(fixtures, "white-label", "payments.ts"),
+      );
+      const vars = app.config.vars as Config;
+      expect(vars.STUB_PAYMENTS_ACCOUNT).toBe("acct-123");
+      expect(vars).not.toHaveProperty("STUB_PAYMENTS_SECRET");
+      expect(await profilePaymentsPackageV1(profile, fixtures)).toEqual({
+        id: "stub-payments",
+        required: [
+          { name: "STUB_PAYMENTS_SECRET", why: "Verifies payment events." },
+        ],
+      });
+      expect(
+        await profilePaymentsPackageV1(hosted(), fixtures),
+      ).toBeUndefined();
+    });
+
+    test("a white-label's own must be told where every setting comes from, and name itself", async () => {
+      const profile = external();
+      await expect(
+        validateProfilePaymentsPackageV1(
+          {
+            ...profile,
+            paymentsEnvironment: { vars: { STUB_PAYMENTS_ACCOUNT: "a" } },
+          },
+          fixtures,
+        ),
+      ).rejects.toThrow(/Required and not named: STUB_PAYMENTS_SECRET/);
+      await expect(
+        validateProfilePaymentsPackageV1(
+          { ...profile, payments: "./absent.ts" },
+          fixtures,
+        ),
+      ).rejects.toThrow(/no .*absent\.ts/);
+      const directory = mkdtempSync(join(tmpdir(), "frockbot-payments-"));
+      writeFileSync(
+        join(directory, "chooser.ts"),
+        "export const PAYMENTS_PACKAGE_V1 = { id: 'stripe', required: [], plan: {} };\n",
+      );
+      await expect(
+        validateProfilePaymentsPackageV1(
+          { ...profile, payments: "./chooser.ts", paymentsEnvironment: {} },
+          directory,
+        ),
+      ).rejects.toThrow(/names itself "stripe"/);
+    });
+
+    test("the schema requires paymentsEnvironment for a path and refuses it otherwise", () => {
+      const { paymentsEnvironment: _unnamed, ...bare } = external();
+      expect(() => validateProfileV1(bare, "a profile")).toThrow(
+        /paymentsEnvironment/,
+      );
+      expect(() =>
+        validateProfileV1(
+          { ...hosted(), paymentsEnvironment: {} },
+          "a profile",
+        ),
+      ).toThrow(/paymentsEnvironment/);
+      expect(() =>
+        validateProfileV1(
+          { ...hosted(), payments: "my-payments" },
+          "a profile",
+        ),
+      ).toThrow(/payments/);
     });
   });
 

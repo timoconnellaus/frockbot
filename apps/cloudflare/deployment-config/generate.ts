@@ -4,8 +4,11 @@ import { parseJsoncV1 } from "./jsonc.ts";
 import {
   decodeBrandV1,
   isBuiltInAuthPackageIdV1,
+  isBuiltInPaymentsPackageIdV1,
   type AuthPackageSettingV1,
   type BuiltInAuthPackageIdV1,
+  type BuiltInPaymentsPackageIdV1,
+  type PaymentsPackageSettingV1,
 } from "@frockbot/core/contracts";
 import {
   PACKAGE_ROOT_V1,
@@ -87,6 +90,30 @@ export const AUTH_PACKAGE_CHOOSERS_V1: Record<BuiltInAuthPackageIdV1, string> =
   };
 
 /**
+ * The specifier the Worker imports its payments Package through, chosen the
+ * way `#auth-package` is: `apps/cloudflare/package.json` maps it to the Stripe
+ * chooser, and a profile that names `none` or a chooser of its own by path
+ * gets an alias to that file. No alias is written for `stripe`, so the hosted
+ * and staging configs are unchanged by the seam.
+ */
+const PAYMENTS_ALIAS_V1 = "#payments";
+
+/** The build the tracked source already resolves to, so no alias is written. */
+const TRACKED_PAYMENTS_V1 = "stripe";
+
+/** The chooser each built-in payments Package's build resolves to. */
+export const PAYMENTS_CHOOSERS_V1: Record<BuiltInPaymentsPackageIdV1, string> =
+  {
+    stripe: "./src/payments.ts",
+    none: "./src/payments.none.ts",
+  };
+
+/** The payments Package a profile builds; absent is Stripe. */
+export function profilePaymentsV1(profile: DeploymentProfileV1): string {
+  return profile.payments ?? TRACKED_PAYMENTS_V1;
+}
+
+/**
  * The specifier the Worker imports its brand through
  * ([ADR 0038](../../../docs/adr/0038-white-label-deployments.md)).
  *
@@ -109,6 +136,7 @@ const PATH_FIELDS_V1 = [
   // Written below as the app template's own relative path, then rewritten with
   // every other path so wrangler resolves it from `.deployment/` too.
   ["alias", AUTH_PACKAGE_ALIAS_V1],
+  ["alias", PAYMENTS_ALIAS_V1],
   ["alias", BRAND_ALIAS_V1],
 ] as const;
 
@@ -426,7 +454,30 @@ export async function validateProfileAuthPackageV1(
       `${chooser} names itself "${build.id}", which is one of the Packages @frockbot/cloudflare ships; an external Package names itself`,
     );
   }
-  const environment = profile.authEnvironment ?? {};
+  checkEnvironmentNamesV1(
+    profile,
+    "authEnvironment",
+    chooser,
+    profile.authEnvironment ?? {},
+    build.required,
+  );
+}
+
+/**
+ * An external chooser's settings must be exactly the ones its profile says
+ * where to find — as secrets the release checks and deploys, or as vars the
+ * config carries. A setting in neither would reach production unset.
+ */
+function checkEnvironmentNamesV1(
+  profile: DeploymentProfileV1,
+  field: "authEnvironment" | "paymentsEnvironment",
+  chooser: string,
+  environment: {
+    secrets?: readonly { name: string }[];
+    vars?: Record<string, string>;
+  },
+  requiredSettings: readonly { name: string }[],
+): void {
   const secrets = (environment.secrets ?? []).map((secret) => secret.name);
   const vars = Object.keys(environment.vars ?? {});
   const both = secrets.filter((name) => vars.includes(name));
@@ -436,13 +487,13 @@ export async function validateProfileAuthPackageV1(
     );
   }
   const named = new Set([...secrets, ...vars]);
-  const required = new Set(build.required.map((setting) => setting.name));
+  const required = new Set(requiredSettings.map((setting) => setting.name));
   const unnamed = [...required].filter((name) => !named.has(name));
   const unread = [...named].filter((name) => !required.has(name));
   if (unnamed.length > 0 || unread.length > 0) {
     throw new Error(
       [
-        `Profile "${profile.name}"'s authEnvironment must name exactly what ${chooser} requires.`,
+        `Profile "${profile.name}"'s ${field} must name exactly what ${chooser} requires.`,
         ...(unnamed.length > 0
           ? [`Required and not named: ${unnamed.join(", ")}.`]
           : []),
@@ -452,6 +503,97 @@ export async function validateProfileAuthPackageV1(
       ].join(" "),
     );
   }
+}
+
+/**
+ * The payments chooser a profile names by path, as an absolute path, or
+ * undefined for a built-in Package.
+ */
+export function profilePaymentsChooserV1(
+  profile: DeploymentProfileV1,
+  profileDirectory: string,
+): string | undefined {
+  const payments = profilePaymentsV1(profile);
+  return isBuiltInPaymentsPackageIdV1(payments)
+    ? undefined
+    : resolve(profileDirectory, payments);
+}
+
+/** The shape of a payments chooser module, as far as the generator reads one. */
+interface LoadedPaymentsChooserV1 {
+  PAYMENTS_PACKAGE_V1?: {
+    id?: unknown;
+    required?: readonly PaymentsPackageSettingV1[];
+    plan?: unknown;
+  };
+}
+
+async function loadPaymentsChooserV1(
+  profile: DeploymentProfileV1,
+  chooser: string,
+): Promise<{ id: string; required: readonly PaymentsPackageSettingV1[] }> {
+  if (!existsSync(chooser)) {
+    throw new Error(
+      `Profile "${profile.name}" names the payments Package ${profile.payments}, and there is no ${chooser}`,
+    );
+  }
+  const build = ((await import(chooser)) as LoadedPaymentsChooserV1)
+    .PAYMENTS_PACKAGE_V1;
+  if (
+    typeof build !== "object" ||
+    build === null ||
+    typeof build.id !== "string" ||
+    !Array.isArray(build.required) ||
+    typeof build.plan !== "object" ||
+    build.plan === null
+  ) {
+    throw new Error(
+      `${chooser} exports no PAYMENTS_PACKAGE_V1 with an id, a plan and its required settings; a payments chooser exports what apps/cloudflare/src/payments.ts does`,
+    );
+  }
+  return { id: build.id, required: build.required };
+}
+
+/**
+ * What the production-secrets check requires of a deploy's payments Package,
+ * for a profile whose Package is not one this package ships. Undefined for a
+ * built-in Package, whose settings the manifest already knows.
+ */
+export async function profilePaymentsPackageV1(
+  profile: DeploymentProfileV1,
+  profileDirectory: string,
+): Promise<
+  { id: string; required: readonly PaymentsPackageSettingV1[] } | undefined
+> {
+  const chooser = profilePaymentsChooserV1(profile, profileDirectory);
+  if (chooser === undefined) return undefined;
+  const id = (await loadPaymentsChooserV1(profile, chooser)).id;
+  return { id, required: profile.paymentsEnvironment?.secrets ?? [] };
+}
+
+/**
+ * Load the payments chooser a profile names by path and hold it to its
+ * profile, as `validateProfileAuthPackageV1` does the auth chooser's.
+ */
+export async function validateProfilePaymentsPackageV1(
+  profile: DeploymentProfileV1,
+  profileDirectory: string,
+): Promise<void> {
+  const chooser = profilePaymentsChooserV1(profile, profileDirectory);
+  if (chooser === undefined) return;
+  const build = await loadPaymentsChooserV1(profile, chooser);
+  if (isBuiltInPaymentsPackageIdV1(build.id)) {
+    throw new Error(
+      `${chooser} names itself "${build.id}", which is one of the payments Packages @frockbot/cloudflare ships; an external Package names itself`,
+    );
+  }
+  checkEnvironmentNamesV1(
+    profile,
+    "paymentsEnvironment",
+    chooser,
+    profile.paymentsEnvironment ?? {},
+    build.required,
+  );
 }
 
 function identityVarsV1(
@@ -474,6 +616,7 @@ function identityVarsV1(
   }
   if (profile.email) vars.EMAIL_DOMAIN = profile.email.domain;
   Object.assign(vars, profile.authEnvironment?.vars ?? {});
+  Object.assign(vars, profile.paymentsEnvironment?.vars ?? {});
   // A string rather than a JSON var, so it is read and decoded exactly like
   // every other setting the Worker takes (`native-auth.ts`).
   if (profile.nativeApps) vars.NATIVE_APPS = JSON.stringify(profile.nativeApps);
@@ -601,6 +744,23 @@ export function generateWorkerConfigV1(
           ? AUTH_PACKAGE_CHOOSERS_V1[
               profile.authPackage as BuiltInAuthPackageIdV1
             ]
+          : relative(template.directory, external),
+    };
+  }
+
+  if (worker === "app" && profilePaymentsV1(profile) !== TRACKED_PAYMENTS_V1) {
+    // As with the auth Package: only a profile that builds another payments
+    // Package gets an alias, so the hosted config is unchanged.
+    const payments = profilePaymentsV1(profile);
+    const external = profilePaymentsChooserV1(
+      profile,
+      options.profileDirectory,
+    );
+    config.alias = {
+      ...((config.alias as Record<string, unknown>) ?? {}),
+      [PAYMENTS_ALIAS_V1]:
+        external === undefined
+          ? PAYMENTS_CHOOSERS_V1[payments as BuiltInPaymentsPackageIdV1]
           : relative(template.directory, external),
     };
   }

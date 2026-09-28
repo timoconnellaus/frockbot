@@ -1,13 +1,14 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import {
-  BILLING_PLAN,
+  USAGE_PRICING_VERSION_V1,
   BillingLedger,
   DAILY_LIMIT_REASON_V1,
   type BillingStorage,
   type UsageAttributionV1,
   type UsageReservation,
 } from "./ledger";
+import type { PaymentsPlanV1 } from "@frockbot/core/contracts";
 import {
   dailySpendV1,
   isSpendLimitScopeV1,
@@ -21,6 +22,13 @@ import {
   spendWindowV1,
   type SpendingQueryV1,
 } from "./spending";
+
+/** Complimentary credit is what these draw on; the plan only has to exist. */
+const PLAN: PaymentsPlanV1 = {
+  subscription: { monthlyCents: 2_000, includedMicros: 15_000_000 },
+  topUpCents: [1_000],
+  purchasedCreditNeedsSubscription: true,
+};
 
 function storage(database = new Database(":memory:")): BillingStorage {
   return {
@@ -57,7 +65,7 @@ function setup() {
 function setupOn(database: Database) {
   const db = storage(database);
   let now = NOW;
-  const ledger = new BillingLedger(db, "FrockBot", () => now);
+  const ledger = new BillingLedger(db, "FrockBot", PLAN, () => now);
   ledger.grant("comp:1", "complimentary", 100_000_000, null);
   const charge = (
     id: string,
@@ -79,7 +87,7 @@ function setupOn(database: Database) {
       botId: options.botId ?? "bot-1",
       sessionId: options.sessionId ?? "user-1:bot-1",
       description: "work",
-      pricingVersion: BILLING_PLAN.pricingVersion,
+      pricingVersion: USAGE_PRICING_VERSION_V1,
       ...(attribution ? { attribution } : {}),
     });
     ledger.settle({
@@ -251,7 +259,7 @@ describe("the Spending rollups", () => {
       maximumMicros: 100,
       botId: "bot-1",
       description: "work",
-      pricingVersion: BILLING_PLAN.pricingVersion,
+      pricingVersion: USAGE_PRICING_VERSION_V1,
     };
     ledger.reserve({
       ...reservation,
@@ -345,7 +353,7 @@ describe("the Spending rollups", () => {
       kind: "model",
       maximumMicros: 100,
       description: "work",
-      pricingVersion: BILLING_PLAN.pricingVersion,
+      pricingVersion: USAGE_PRICING_VERSION_V1,
     });
     database.run("DROP TABLE billing_spend_hourly");
     ledger.settle({
@@ -488,7 +496,7 @@ describe("the Spending rollups", () => {
           maximumMicros: 500,
           botId,
           description: "work",
-          pricingVersion: BILLING_PLAN.pricingVersion,
+          pricingVersion: USAGE_PRICING_VERSION_V1,
           attribution,
         },
         dayStart,
@@ -568,7 +576,7 @@ describe("the Spending rollups", () => {
         maximumMicros: 50,
         botId: "bot-2",
         description: "work",
-        pricingVersion: BILLING_PLAN.pricingVersion,
+        pricingVersion: USAGE_PRICING_VERSION_V1,
         attribution: { runId: "m2", cause: { kind: "email", botId: "bot-2" } },
       }),
     ).toMatchObject({ created: true });
