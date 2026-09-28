@@ -7,6 +7,8 @@ export 'brand.dart'
     show
         CharacterDefinition,
         CharacterInk,
-        ClientAccent,
         ClientBrand,
+        ClientLooks,
         ClientReleaseChannel;
+export 'theme/document.dart'
+    show BotBubble, MeBubble, ThemeSurfaces, ThemeTokens, ThemeTypeface;

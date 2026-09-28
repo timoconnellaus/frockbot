@@ -21,7 +21,8 @@ import 'package:http/testing.dart';
 import 'widget_test.dart' show MemoryStore;
 
 /// A white-label's brand: another name, one still-only character of its own,
-/// its own scheme and accent, no sign-in provider and no release channel. Its
+/// its own scheme and looks, no sign-in provider and no release channel. Its
+/// looks are DexBot's navy with an accent only dark type reads on. Its
 /// character borrows a still this application bundles, under an id FrockBot
 /// does not have.
 const coinfolk = ClientBrand(
@@ -29,12 +30,37 @@ const coinfolk = ClientBrand(
   builtInModelName: 'Coin AI',
   defaultCharacterId: 'coin',
   nativeScheme: 'coinfolk',
-  accent: ClientAccent(
-    ink: Color(0xff2f6fdb),
-    paper: Color(0xff2a62c4),
-    soft: Color(0xff9dc0ff),
-    deep: Color(0xff123a80),
+  looks: ClientLooks(
+    ink: ThemeTokens(
+      surfaces: ThemeSurfaces(
+        window: Color(0xff111d28),
+        surface: Color(0xff152231),
+        raised: Color(0xff1c2d41),
+        text: Color(0xffffffff),
+        muted: Color(0xff91a2af),
+        line: Color(0xff25394f),
+        accent: Color(0xff4d9edc),
+        onAccent: Color(0xff111d28),
+      ),
+      type: ThemeTypeface.manrope,
+      botBubble: BotBubble.raised,
+      meBubble: MeBubble.accent,
+    ),
+    paper: ThemeTokens(
+      surfaces: _coinfolkPaper,
+      type: ThemeTypeface.manrope,
+      botBubble: BotBubble.raised,
+      meBubble: MeBubble.tint,
+    ),
+    studio: ThemeTokens(
+      surfaces: _coinfolkPaper,
+      type: ThemeTypeface.manrope,
+      botBubble: BotBubble.plain,
+      meBubble: MeBubble.tint,
+    ),
   ),
+  accentSoft: Color(0xff9dc0ff),
+  accentDeep: Color(0xff123a80),
   characters: [
     CharacterDefinition(
       'coin',
@@ -55,6 +81,29 @@ const coinfolk = ClientBrand(
     ),
   ],
 );
+
+const _coinfolkPaper = ThemeSurfaces(
+  window: Color(0xfff4f7fa),
+  surface: Color(0xffffffff),
+  raised: Color(0xffe8eef3),
+  text: Color(0xff111d28),
+  muted: Color(0xff52616d),
+  line: Color(0xffd8e1e8),
+  accent: Color(0xff2a6fb0),
+  onAccent: Color(0xffffffff),
+);
+
+ClientBrand coinfolkWith({String? nativeScheme, ClientLooks? looks}) =>
+    ClientBrand(
+      productName: coinfolk.productName,
+      builtInModelName: coinfolk.builtInModelName,
+      characters: coinfolk.characters,
+      defaultCharacterId: coinfolk.defaultCharacterId,
+      nativeScheme: nativeScheme ?? coinfolk.nativeScheme,
+      looks: looks ?? coinfolk.looks,
+      accentSoft: coinfolk.accentSoft,
+      accentDeep: coinfolk.accentDeep,
+    );
 
 void wearing(ClientBrand brand) {
   installClientBrand(brand);
@@ -170,23 +219,96 @@ void main() {
   test('the looks and the accent are the brand’s', () {
     wearing(coinfolk);
 
-    expect(inkTokens.surfaces.accent, coinfolk.accent.ink);
-    expect(paperTokens.surfaces.accent, coinfolk.accent.paper);
-    expect(studioTokens.surfaces.accent, coinfolk.accent.paper);
+    expect(ThemeDocument.ink.tokens, same(coinfolk.looks.ink));
+    expect(ThemeDocument.paper.tokens, same(coinfolk.looks.paper));
+    expect(ThemeDocument.studio.tokens, same(coinfolk.looks.studio));
     expect(
-      FrockTheme.theme(Brightness.dark).colorScheme.primary,
-      coinfolk.accent.ink,
+      namedLookDocument(
+        resolveAccountNamedLook(AccountLook.system, Brightness.dark),
+      ).tokens,
+      same(coinfolk.looks.ink),
     );
-    expect(FrockTheme.accentSoft, coinfolk.accent.soft);
-    expect(FrockTheme.accentDeep, coinfolk.accent.deep);
-    for (final tokens in [inkTokens, paperTokens, studioTokens]) {
-      expect(tokensMeetContrastFloor(tokens), isTrue);
-    }
+    final dark = FrockTheme.theme(Brightness.dark);
+    expect(dark.scaffoldBackgroundColor, const Color(0xff111d28));
+    expect(dark.colorScheme.surface, const Color(0xff152231));
+    expect(dark.colorScheme.primary, const Color(0xff4d9edc));
+    expect(dark.colorScheme.onPrimary, const Color(0xff111d28));
+    expect(
+      FrockTheme.theme(Brightness.light).scaffoldBackgroundColor,
+      const Color(0xfff4f7fa),
+    );
+    expect(FrockTheme.accent, const Color(0xff4d9edc));
+    expect(FrockTheme.accentSoft, coinfolk.accentSoft);
+    expect(FrockTheme.accentDeep, coinfolk.accentDeep);
   });
 
-  test('FrockBot’s accent is unchanged', () {
-    expect(inkTokens.surfaces.accent, const Color(0xffd92d71));
-    expect(paperTokens.surfaces.accent, const Color(0xffd3266d));
+  test('a brand’s looks meet the contrast floor', () {
+    final white = coinfolk.looks.ink.copyWith(
+      surfaces: coinfolk.looks.ink.surfaces.copyWith(
+        onAccent: const Color(0xffffffff),
+      ),
+    );
+    final faint = coinfolk.looks.paper.copyWith(
+      surfaces: coinfolk.looks.paper.surfaces.copyWith(
+        muted: const Color(0xffc8d0d6),
+      ),
+    );
+    for (final looks in [
+      ClientLooks(
+        ink: white,
+        paper: coinfolk.looks.paper,
+        studio: coinfolk.looks.studio,
+      ),
+      ClientLooks(
+        ink: coinfolk.looks.ink,
+        paper: coinfolk.looks.paper,
+        studio: faint,
+      ),
+    ]) {
+      expect(
+        () => installClientBrand(coinfolkWith(looks: looks)),
+        throwsArgumentError,
+      );
+    }
+    expect(clientBrand.productName, 'FrockBot');
+  });
+
+  test('FrockBot’s looks and accent are unchanged', () {
+    const paper = {
+      'window': '#f5f6f9',
+      'surface': '#ffffff',
+      'raised': '#eceef3',
+      'text': '#15151e',
+      'muted': '#5c5f70',
+      'line': '#dfe1e8',
+      'accent': '#d3266d',
+      'onAccent': '#ffffff',
+    };
+    expect(encodeThemeTokens(ThemeDocument.ink.tokens), {
+      'surfaces': {
+        'window': '#15151e',
+        'surface': '#181824',
+        'raised': '#1f202e',
+        'text': '#f1f1f6',
+        'muted': '#a0a2b6',
+        'line': '#2c2d3d',
+        'accent': '#d92d71',
+        'onAccent': '#ffffff',
+      },
+      'type': 'inter',
+      'bubbles': {'bot': 'raised', 'me': 'tint'},
+    });
+    expect(encodeThemeTokens(ThemeDocument.paper.tokens), {
+      'surfaces': paper,
+      'type': 'inter',
+      'bubbles': {'bot': 'raised', 'me': 'tint'},
+    });
+    expect(encodeThemeTokens(ThemeDocument.studio.tokens), {
+      'surfaces': paper,
+      'type': 'inter',
+      'bubbles': {'bot': 'plain', 'me': 'tint'},
+    });
+    expect(FrockTheme.accent, const Color(0xffd92d71));
     expect(FrockTheme.accentSoft, const Color(0xfffc85ae));
     expect(FrockTheme.accentDeep, const Color(0xff9a124c));
   });
@@ -246,16 +368,7 @@ void main() {
   test('a brand names a scheme of its own', () {
     for (final scheme in ['https', 'Coin', '1coin', 'coin folk', '']) {
       expect(
-        () => installClientBrand(
-          ClientBrand(
-            productName: coinfolk.productName,
-            builtInModelName: coinfolk.builtInModelName,
-            characters: coinfolk.characters,
-            defaultCharacterId: coinfolk.defaultCharacterId,
-            nativeScheme: scheme,
-            accent: coinfolk.accent,
-          ),
-        ),
+        () => installClientBrand(coinfolkWith(nativeScheme: scheme)),
         throwsArgumentError,
         reason: scheme,
       );

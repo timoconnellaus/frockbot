@@ -10,6 +10,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/widgets.dart';
 
+import 'theme/document.dart';
+
 /// Opaque pixels of a still, in the still's own canvas. The conversation
 /// companion sizes itself to this silhouette so the empty frame around a
 /// drawing is not part of the height from the top of the thread.
@@ -89,28 +91,19 @@ enum ClientReleaseChannel {
   shorebird,
 }
 
-/// The brand's accent: the one warm note on either ground, and the two tints
-/// the voice footer and secondary actions are written in. White type sits on
-/// [ink] and [paper], so each clears 4.5:1 against white.
+/// The palettes behind the three named looks, the same tokens the server
+/// brand's `looks` carry. The account chrome paints ink or paper, and a Bot
+/// on Studio paints studio, so these are the whole of the app's ground, type
+/// and accent. Each meets the contrast floor a stored theme document must.
 @immutable
-class ClientAccent {
-  /// The accent on the dark look.
-  final Color ink;
-
-  /// The accent on the light looks, where it may need to be a touch deeper.
-  final Color paper;
-
-  /// A pale tint of the accent, for secondary actions on a dark ground.
-  final Color soft;
-
-  /// A deep shade of the accent, for type on an accent-filled slab.
-  final Color deep;
-
-  const ClientAccent({
+class ClientLooks {
+  final ThemeTokens ink;
+  final ThemeTokens paper;
+  final ThemeTokens studio;
+  const ClientLooks({
     required this.ink,
     required this.paper,
-    required this.soft,
-    required this.deep,
+    required this.studio,
   });
 }
 
@@ -137,7 +130,13 @@ class ClientBrand {
   /// apps on `<nativeScheme>-dev`.
   final String nativeScheme;
 
-  final ClientAccent accent;
+  final ClientLooks looks;
+
+  /// A pale tint of ink's accent, for secondary actions on a dark ground.
+  final Color accentSoft;
+
+  /// A deep shade of ink's accent, for type on an accent-filled slab.
+  final Color accentDeep;
 
   /// Every character a Bot may wear, in the order the pickers show them.
   final List<CharacterDefinition> characters;
@@ -159,7 +158,9 @@ class ClientBrand {
     required this.characters,
     required this.defaultCharacterId,
     required this.nativeScheme,
-    required this.accent,
+    required this.looks,
+    required this.accentSoft,
+    required this.accentDeep,
     this.signInIcon,
     this.signInProvider,
     this.fontFamilies = const [],
@@ -202,6 +203,19 @@ void installClientBrand(ClientBrand brand) {
       'nativeScheme',
       'must be the application\'s own lowercase URL scheme',
     );
+  }
+  for (final (name, tokens) in [
+    ('ink', brand.looks.ink),
+    ('paper', brand.looks.paper),
+    ('studio', brand.looks.studio),
+  ]) {
+    if (!tokensMeetContrastFloor(tokens)) {
+      throw ArgumentError.value(
+        tokens,
+        'looks.$name',
+        'fails the contrast floor',
+      );
+    }
   }
   _installed = brand;
   _catalog = null;
