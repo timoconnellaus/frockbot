@@ -232,6 +232,8 @@ export interface PriorToolResultV1 {
   callId: string;
   /** The tool as the model named it. */
   tool: string;
+  /** What the call was given, so a result can be read with its call. */
+  arguments?: unknown;
   content: string;
   isError: boolean;
 }

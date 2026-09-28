@@ -70,6 +70,7 @@ test("the fake's call answers let a harness Turn's calls run", () => {
       answers: answers as Parameters<
         typeof composeCallDecisionV1
       >[0]["answers"],
+      personAsked: true,
     }).decision,
   ).toBe("allow");
 });

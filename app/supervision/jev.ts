@@ -35,6 +35,7 @@ import {
 } from "./question-route.js";
 import {
   callReviewEvidenceV1,
+  callReviewPersonAskedV1,
   composeCallDecisionV1,
   reviewCallV1,
 } from "./call-review.js";
@@ -278,13 +279,15 @@ export function createJevTurnSupervisorV1(
     async reviewCall(evidence, signal) {
       signal?.throwIfAborted();
       try {
-        const review = await reviewCallV1(
-          options.client,
-          callReviewEvidenceV1(evidence),
-          { signal, budget },
-        );
+        const judged = callReviewEvidenceV1(evidence);
+        const review = await reviewCallV1(options.client, judged, {
+          signal,
+          budget,
+        });
         return composeCallDecisionV1({
           answers: review.answers,
+          personAsked: callReviewPersonAskedV1(judged.conversation),
+          tool: evidence.call.tool,
           model: review.model,
         });
       } catch (error) {

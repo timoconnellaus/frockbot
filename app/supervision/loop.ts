@@ -364,20 +364,27 @@ function priorResults(events: readonly SessionEvent[], turn: number) {
   const inputs = new Map<string, unknown>();
   return turnEvents(events, turn).flatMap((event) => {
     if (event.type === "tool/call") inputs.set(event.occurrenceId, event.input);
-    return event.type === "tool/result"
-      ? [
-          {
-            callId: event.occurrenceId,
-            tool: resolveDynamicToolNameV1(
-              event.name,
-              inputs.get(event.occurrenceId),
-            ),
-            content: event.content,
-            isError: event.isError,
-          },
-        ]
-      : [];
+    if (event.type !== "tool/result") return [];
+    const input = inputs.get(event.occurrenceId);
+    return [
+      {
+        callId: event.occurrenceId,
+        tool: resolveDynamicToolNameV1(event.name, input),
+        arguments: dynamicArgumentsV1(event.name, input),
+        content: event.content,
+        isError: event.isError,
+      },
+    ];
   });
+}
+
+/** What a call was given: a dynamic call's inner arguments, else its input. */
+function dynamicArgumentsV1(name: string, input: unknown): unknown {
+  return name === "call_dynamic_tool" &&
+    isRecord(input) &&
+    isRecord(input.arguments)
+    ? input.arguments
+    : input;
 }
 
 /** The Turn's settled calls, oldest first, each with what it was given. */
@@ -706,7 +713,14 @@ function withheldResult(
   return `${SUPERVISION_WITHHELD_SEND_PREFIX_V1} ${why}${next}`;
 }
 
-function refusedCallResult(reason: string): string {
+function refusedCallResult(reason: string, origin: TurnInputOriginV1): string {
+  // Nobody can be asked during a Routine, a subagent's task or a hand-off:
+  // telling that Turn to ask the person sends it round again instead.
+  if (origin === "schedule" || origin === "subagent" || origin === "agent") {
+    return reason === "arguments_changed"
+      ? `${SUPERVISION_ARGUMENTS_CHANGED_PREFIX_V1} Nobody can be asked during this work. Match what was asked, or leave the call out and say in your hand-off what it would have done.`
+      : `${SUPERVISION_NOT_AUTHORIZED_PREFIX_V1} Nobody can be asked during this work. Leave it out, carry on with the rest, and say in your hand-off what it would have done.`;
+  }
   return reason === "arguments_changed"
     ? `${SUPERVISION_ARGUMENTS_CHANGED_PREFIX_V1} A recipient, destination or the substance is not what they asked for. Match what they asked, or check with them in conversation first, saying exactly what the call will do.`
     : `${SUPERVISION_NOT_AUTHORIZED_PREFIX_V1} If it is needed, ask them in conversation first, saying exactly what it will do, and make the call once they agree.`;
@@ -996,7 +1010,7 @@ export function createSupervisionRuntimeFeatureV1(
                 kind: "denied",
                 call,
                 result: {
-                  content: refusedCallResult(verdict.reasonCode),
+                  content: refusedCallResult(verdict.reasonCode, host.origin),
                   isError: true,
                 },
               };
