@@ -171,7 +171,7 @@ describe("the Stripe payments Package", () => {
     };
     expect((await change("gold"))?.status).toBe(400);
     const answer = await change("plus");
-    expect(await answer!.json()).toEqual({
+    expect((await answer!.json()) as object).toEqual({
       plan: "plus",
       url: "https://app.frockbot.com/billing",
     });

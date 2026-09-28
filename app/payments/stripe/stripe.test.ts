@@ -465,6 +465,7 @@ describe("Stripe payment boundaries", () => {
     expect(
       ledger.get<{
         subscriptionId: string;
+        planId: string;
         periodStart: number;
         periodEnd: number;
       }>("paidAccess"),
