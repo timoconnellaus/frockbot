@@ -289,8 +289,8 @@ describe("what a Turn that yielded leaves for the next one", () => {
   });
 
   test("a conversation Turn off the person's own lane yields the same way", async () => {
-    // An input or a hand-off, and a Turn answering another Bot: each gives
-    // way to the person in the conversation it shares with them.
+    // An input or a hand-off: each gives way to the person in the
+    // conversation it shares with them.
     expect(
       await yieldedInputs({
         events: journal(false),
@@ -300,9 +300,20 @@ describe("what a Turn that yielded leaves for the next one", () => {
     expect(
       await yieldedInputs({
         events: journal(false, "agent"),
-        admission: { turnType: "agent", origin: { kind: "bot" } },
+        admission: { turnType: "agent", origin: { kind: "handoff" } },
       }),
     ).toHaveLength(1);
+  });
+
+  test("a Turn a caller waits on never yielded", async () => {
+    for (const kind of ["bot", "voice"]) {
+      expect(
+        await yieldedInputs({
+          events: journal(false, "agent"),
+          admission: { turnType: "agent", origin: { kind } },
+        }),
+      ).toEqual([]);
+    }
   });
 
   test("a Routine parks rather than yields, and a group Turn yields to its group", async () => {

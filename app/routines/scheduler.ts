@@ -50,6 +50,7 @@ import {
 } from "./records.js";
 import {
   appendRoutineRunEntryV1,
+  type RoutineStorageReadsV1,
   type RoutineStorageV1,
   type RoutineStorageWritesV1,
 } from "./store.js";
@@ -109,6 +110,16 @@ export interface RoutineSchedulerOptionsV1 {
   fireTimeoutMs?: number;
   /** How long an unsettled firing holds its lock. Overridden only by tests. */
   fireLeaseMs?: number;
+  /**
+   * What became of the Turn a firing admitted, read from its own run: its
+   * outcome once it has settled, `running` while it is still owed one — at
+   * work, or parked for the person's message — and `undefined` when the
+   * firing admitted none. Absent ⇒ the firing's clock is all there is.
+   */
+  firingRun?(
+    fire: RoutineFireV1,
+    reads: RoutineStorageReadsV1,
+  ): Promise<RoutineFireOutcomeV1 | "running" | undefined>;
 }
 
 /**
@@ -257,6 +268,7 @@ export class RoutineScheduler {
   readonly #fireTimeoutMs: number;
   readonly #fireLeaseMs: number;
   readonly #productName: string;
+  readonly #firingRun: RoutineSchedulerOptionsV1["firingRun"];
 
   constructor(storage: RoutineStorageV1, options: RoutineSchedulerOptionsV1) {
     this.#storage = storage;
@@ -265,6 +277,7 @@ export class RoutineScheduler {
     this.#onSettled = options.onSettled;
     this.#fireTimeoutMs = options.fireTimeoutMs ?? ROUTINE_FIRE_TIMEOUT_MS;
     this.#fireLeaseMs = options.fireLeaseMs ?? ROUTINE_FIRE_LEASE_MS;
+    this.#firingRun = options.firingRun;
   }
 
   /**
@@ -283,6 +296,13 @@ export class RoutineScheduler {
         routineFireKeyV1(record.routineId),
       );
       if (locked) {
+        // A firing whose Turn has settled is owed its own settlement now, not
+        // when its lease runs out: the Turn outlived the firing's clock.
+        const settled = await this.#settledRun(locked, reads);
+        if (settled) {
+          deadlines.push(this.#now().getTime());
+          continue;
+        }
         // A Routine with an unsettled firing is being dealt with — but only
         // until its lease runs out. Skipping it outright is what let a firing
         // killed mid-flight take the object's whole alarm down with it: the
@@ -336,34 +356,44 @@ export class RoutineScheduler {
       const claimed = await this.#claim(timezone);
       if (!claimed) return;
       const outcome = await this.#execute(execute, claimed.fire);
+      // Its Turn is still owed an outcome and will settle on its own; the
+      // firing keeps its lock until it does, and is settled from it then.
+      if (outcome === "running") continue;
       await this.#settleFiring(claimed.fire, outcome);
       await this.#onSettled?.(claimed.fire, outcome);
     }
   }
 
   /**
-   * Run one firing under a hard time bound.
+   * Run one firing under a time bound on waiting for it.
    *
-   * Nothing else bounds it: `maxSteps` bounds the loop and not the wall clock,
-   * a Turn parked for the person's message waits as long as they talk, and a
-   * person's Stop may never come. A firing that never comes back must still
-   * settle, or its lock outlives the isolate.
+   * Nothing else bounds the wait: `maxSteps` bounds the loop and not the wall
+   * clock, a Turn parked for the person's message waits as long as they talk,
+   * and a person's Stop may never come. So the scheduler stops waiting when
+   * the time is up — and settles the firing as failed only when there is no
+   * Turn to settle it from. A Turn still running, or parked, is `running`: it
+   * is not a failure, and its own settlement is what the firing records.
    */
   async #execute(
     execute: RoutineFireExecutorV1,
     fire: RoutineFireV1,
-  ): Promise<RoutineFireOutcomeV1> {
+  ): Promise<RoutineFireOutcomeV1 | "running"> {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const expiry = new Promise<RoutineFireOutcomeV1>((resolve) => {
+    const expiry = new Promise<RoutineFireOutcomeV1 | "running">((resolve) => {
       timer = setTimeout(() => {
-        controller.abort();
-        resolve({
-          status: "failed",
-          summary: `The Routine ran for longer than ${Math.round(
-            this.#fireTimeoutMs / 1000,
-          )} seconds and was stopped.`,
-        });
+        void Promise.resolve(this.#firingRun?.(fire, this.#storage))
+          .catch(() => undefined)
+          .then((run) => {
+            if (run) return resolve(run);
+            controller.abort();
+            resolve({
+              status: "failed",
+              summary: `The Routine ran for longer than ${Math.round(
+                this.#fireTimeoutMs / 1000,
+              )} seconds and was stopped.`,
+            });
+          });
       }, this.#fireTimeoutMs);
     });
     try {
@@ -385,12 +415,15 @@ export class RoutineScheduler {
   }
 
   /**
-   * Settle for dead every firing whose lease has run out.
+   * Settle every unsettled firing whose Turn has settled, from that Turn, and
+   * settle for dead every other one whose lease has run out.
    *
    * The other half of the lease: `deadlines()` makes an abandoned firing wake
-   * the object, and this is what the object then does about it. An undecodable
-   * lock is released too — it names a firing nothing can run, and leaving it
-   * wedges the Routine exactly as an abandoned one does.
+   * the object, and this is what the object then does about it. A firing whose
+   * Turn is still running or parked is not abandoned, whatever its lease says:
+   * it keeps its lock until the Turn settles. An undecodable lock is released
+   * too — it names a firing nothing can run, and leaving it wedges the Routine
+   * exactly as an abandoned one does.
    */
   async reapExpiredFirings(): Promise<void> {
     const now = this.#now().getTime();
@@ -405,6 +438,13 @@ export class RoutineScheduler {
         await this.#storage.delete(key);
         continue;
       }
+      const run = await this.#firingRun?.(fire, this.#storage);
+      if (run === "running") continue;
+      if (run) {
+        await this.#settleFiring(fire, run);
+        await this.#onSettled?.(fire, run);
+        continue;
+      }
       if (this.#leaseExpiry(value) > now) continue;
       await this.#settleFiring(fire, {
         status: "failed",
@@ -412,6 +452,22 @@ export class RoutineScheduler {
           "The Routine stopped without reporting an outcome and its firing was settled as failed.",
       });
     }
+  }
+
+  /** The outcome of a locked firing's Turn, once it has one. */
+  async #settledRun(
+    stored: unknown,
+    reads: RoutineStorageReadsV1,
+  ): Promise<RoutineFireOutcomeV1 | undefined> {
+    if (!this.#firingRun) return undefined;
+    let fire: RoutineFireV1;
+    try {
+      fire = decodeRoutineFireV1(stored);
+    } catch {
+      return undefined;
+    }
+    const run = await this.#firingRun(fire, reads);
+    return run === "running" ? undefined : run;
   }
 
   #leaseExpiry(stored: unknown): number {

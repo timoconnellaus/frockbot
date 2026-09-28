@@ -42,12 +42,17 @@ function harness(options: {
   schedule?: string;
   fireTimeoutMs?: number;
   fireLeaseMs?: number;
+  firingRun?: () => RoutineFireOutcomeV1 | "running" | undefined;
 }) {
   const storage = createMemoryRoutineStorageV1();
   const time = clock(options.start);
+  const firingRun = options.firingRun;
   const scheduler = new RoutineScheduler(storage, {
     productName: "FrockBot",
     now: time.now,
+    ...(firingRun === undefined
+      ? {}
+      : { firingRun: () => Promise.resolve(firingRun()) }),
     ...(options.fireTimeoutMs === undefined
       ? {}
       : { fireTimeoutMs: options.fireTimeoutMs }),
@@ -811,6 +816,93 @@ describe("a firing that never comes back", () => {
     );
     expect(entries[0]).toMatchObject({ status: "failed" });
     expect(entries[0]?.summary).toContain("longer than");
+  });
+});
+
+describe("a firing whose Turn outlives the wait", () => {
+  test("is settled from its Turn, not failed by the timeout, and never counts toward the pause", async () => {
+    let run: RoutineFireOutcomeV1 | "running" = "running";
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T08:59:00.000Z",
+      schedule: "0 9 * * *",
+      fireTimeoutMs: 5,
+      firingRun: () => run,
+    });
+    await store.execute(create, USER, "UTC");
+    // One failure short of the pause: a timeout counted here would turn the
+    // Routine off.
+    await scheduler.defer(storage, "UTC");
+    await storage.put(routineScheduleKeyV1("brief"), {
+      ...(await state(storage)),
+      consecutiveFailures: ROUTINE_FAILURE_PAUSE_AFTER - 1,
+    });
+
+    time.set("2026-01-01T09:00:00.000Z");
+    let aborted = false;
+    // The Turn is parked for the person's message: the wait for it ends at
+    // the timeout, and the Turn does not.
+    await scheduler.settle(
+      (_fire, signal) =>
+        new Promise(() => {
+          signal.addEventListener("abort", () => {
+            aborted = true;
+          });
+        }),
+      "UTC",
+    );
+    expect(aborted).toBe(false);
+    expect(await storage.get(routineFireKeyV1("brief"))).toBeDefined();
+    const entries = async () =>
+      [
+        ...(
+          await storage.list<unknown>({ prefix: ROUTINE_RUN_PREFIX })
+        ).values(),
+      ].map((value) => decodeRoutineRunEntryV1(value));
+    expect((await entries()).map((entry) => entry.status)).toEqual(["running"]);
+    expect((await state(storage)).consecutiveFailures).toBe(
+      ROUTINE_FAILURE_PAUSE_AFTER - 1,
+    );
+
+    // Past its lease, still parked: not abandoned, so not reaped.
+    time.advance(ROUTINE_FIRE_LEASE_MS * 3);
+    await scheduler.reapExpiredFirings();
+    expect(await storage.get(routineFireKeyV1("brief"))).toBeDefined();
+    expect((await entries()).map((entry) => entry.status)).toEqual(["running"]);
+
+    // The Turn settles; the next pass records what it did.
+    run = { status: "ok", summary: "Two emails need you." };
+    expect(await scheduler.deadlines(storage, "UTC")).toContain(
+      time.now().getTime(),
+    );
+    await scheduler.reapExpiredFirings();
+    expect(await storage.get(routineFireKeyV1("brief"))).toBeUndefined();
+    expect(await entries()).toEqual([
+      expect.objectContaining({
+        status: "ok",
+        summary: "Two emails need you.",
+      }),
+    ]);
+    expect((await state(storage)).consecutiveFailures).toBeUndefined();
+    const listed = await store.list(
+      "scout",
+      await scheduler.nextRuns("UTC"),
+      "UTC",
+    );
+    expect(listed.routines[0]!.enabled).toBe(true);
+  });
+
+  test("with no Turn behind it, still fails at its timeout", async () => {
+    const { storage, time, scheduler, store, create } = harness({
+      start: "2026-01-01T08:59:00.000Z",
+      schedule: "0 9 * * *",
+      fireTimeoutMs: 5,
+      firingRun: () => undefined,
+    });
+    await store.execute(create, USER, "UTC");
+    time.set("2026-01-01T09:00:00.000Z");
+    await scheduler.settle(() => new Promise(() => undefined), "UTC");
+    expect(await storage.get(routineFireKeyV1("brief"))).toBeUndefined();
+    expect((await state(storage)).consecutiveFailures).toBe(1);
   });
 });
 

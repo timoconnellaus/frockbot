@@ -112,6 +112,7 @@ import {
 } from "@frockbot/app/subagents/storage-keys";
 import {
   commitPublicationsV1,
+  RUN_PREFIX,
   runEntityIdV1,
   type BotIdentity,
 } from "@frockbot/core/durable";
@@ -235,7 +236,10 @@ export function createBotRoutines(
   store: RoutineStore;
   scheduler: RoutineScheduler;
 } {
-  const scheduler = new RoutineScheduler(storage, { productName });
+  const scheduler = new RoutineScheduler(storage, {
+    productName,
+    firingRun: routineFiringRunV1,
+  });
   return {
     scheduler,
     store: new RoutineStore(storage, {
@@ -350,6 +354,31 @@ export function routineFireOutcomeV1(
     status: "failed",
     summary: run.failure ?? `the firing's run is ${run.status}`,
   };
+}
+
+/**
+ * What became of a firing's Turn, read off its run record — the fire id is
+ * the run id. A Turn still `running`, at work or parked for the person's
+ * message, settles the firing itself when it ends.
+ */
+async function routineFiringRunV1(
+  fire: RoutineFireV1,
+  reads: { get<T>(key: string): Promise<T | undefined> },
+): Promise<RoutineFireOutcomeV1 | "running" | undefined> {
+  const run = await reads.get<{
+    status?: unknown;
+    failure?: unknown;
+    responseText?: unknown;
+  }>(`${RUN_PREFIX}${fire.fireId}`);
+  if (!run || typeof run.status !== "string") return undefined;
+  if (run.status === "running") return "running";
+  return routineFireOutcomeV1({
+    status: run.status,
+    ...(typeof run.failure === "string" ? { failure: run.failure } : {}),
+    ...(typeof run.responseText === "string"
+      ? { responseText: run.responseText }
+      : {}),
+  });
 }
 
 /**

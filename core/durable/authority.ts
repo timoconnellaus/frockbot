@@ -1541,16 +1541,19 @@ export class BotDurableAuthority<Snapshot> {
    * How the running Turn gives way, at this step boundary, to a person's
    * message waiting for it — `undefined` while none is.
    *
-   * Every Turn gives way; none makes the person wait for it to finish. A Turn
-   * in the Bot's conversation — the person's own, or one answering another
-   * Bot, the voice session, an input or a hand-off — `yield`s: it ends
-   * completed, and the message becomes the next Turn with everything the Bot
-   * did so far in its context. A Turn in a Session of its own — a Routine's —
-   * `park`s: its Turn stays open where it is, the message runs as a Turn of
-   * its own in the conversation, and this one resumes from the same boundary
-   * afterwards, ahead of any agent work. It cannot yield, because the message
-   * would land in a log that is not the one it is working in. Either way
-   * nothing in flight is abandoned or sent twice.
+   * A Turn in the Bot's conversation — the person's own, an input or a
+   * hand-off — `yield`s: it ends completed, and the message becomes the next
+   * Turn with everything the Bot did so far in its context. A Turn in a
+   * Session of its own — a Routine's — `park`s: its Turn stays open where it
+   * is, the message runs as a Turn of its own in the conversation, and this
+   * one resumes from the same boundary afterwards, ahead of any agent work. It
+   * cannot yield, because the message would land in a log that is not the one
+   * it is working in. Either way nothing in flight is abandoned or sent twice.
+   *
+   * The one Turn that finishes first is one a caller is waiting on for its
+   * answer — another Bot's question, the voice session's delegation. Yielding
+   * would hand that caller whatever the Turn had said so far, and such Turns
+   * are short.
    */
   async userMessageWaiting(
     runId: string,
@@ -1565,6 +1568,8 @@ export class BotDurableAuthority<Snapshot> {
     if (active !== runId || !waiting) return undefined;
     const run = this.codec.optional(stored);
     if (!run || run.status !== "running") return undefined;
+    const origin = run.admission?.origin?.kind;
+    if (origin === "bot" || origin === "voice") return undefined;
     if (storedRunLaneV1(run) === "user") return "yield";
     if (
       identity &&
