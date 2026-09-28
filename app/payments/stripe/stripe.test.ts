@@ -66,6 +66,29 @@ function active(ledger: BillingLedger) {
 }
 
 describe("Stripe payment boundaries", () => {
+  test("the default request calls the global fetch without rebinding it", async () => {
+    // workerd throws "Illegal invocation" when fetch is called as a method
+    // of anything but the global scope.
+    const original = globalThis.fetch;
+    const methods: string[] = [];
+    globalThis.fetch = function (this: unknown, _url, init) {
+      if (this !== undefined && this !== globalThis)
+        throw new TypeError("Illegal invocation");
+      methods.push(init?.method ?? "GET");
+      return Promise.resolve(Response.json({ id: "cus_one", deleted: true }));
+    } as typeof fetch;
+    try {
+      const stripe = new StripeClient(config);
+      expect(await stripe.call("customers/cus_one")).toMatchObject({
+        id: "cus_one",
+      });
+      expect(await stripe.remove("customers/cus_one")).toBe("deleted");
+      expect(methods).toEqual(["GET", "DELETE"]);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
   test("accepts a current HMAC and rejects a valid signature outside the replay window", async () => {
     const raw = JSON.stringify({
       id: "evt_one",

@@ -80,7 +80,8 @@ export function stripeId(value: unknown): string {
 export class StripeClient {
   constructor(
     readonly config: StripeConfig,
-    private readonly request: typeof fetch = fetch,
+    private readonly request: typeof fetch = (input, init) =>
+      fetch(input, init),
   ) {}
   async call(
     path: string,
