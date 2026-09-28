@@ -15,7 +15,8 @@ export const NO_PAYMENTS_PACKAGE_V1: PaymentsPackageBuildV1<NoPaymentsEnvironmen
     id: "none",
     required: [],
     plan: {
-      subscription: null,
+      subscriptions: [],
+      trial: null,
       topUpCents: [],
       purchasedCreditNeedsSubscription: false,
     },

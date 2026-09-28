@@ -17,6 +17,7 @@ function account(
     paidPeriod: null,
     subscribed: false,
     suspended: false,
+    trialUsed: false,
     ...overrides,
   };
 }
@@ -24,16 +25,32 @@ function account(
 const subscription = (status: string) => ({
   customerId: "cus_1",
   subscriptionId: "sub_1",
+  planId: "standard",
   status,
   periodStart: 1,
   periodEnd: 2,
+  trialEnd: null,
   cancelAtPeriodEnd: false,
 });
 
 describe("the Stripe payments Package", () => {
-  test("sells the US$20 plan with US$15 included, and three top-ups tied to it", () => {
+  test("sells Standard and Plus with a 7-day trial, and three top-ups tied to them", () => {
     expect(STRIPE_PAYMENTS_PACKAGE_V1.plan).toEqual({
-      subscription: { monthlyCents: 2_000, includedMicros: 15_000_000 },
+      subscriptions: [
+        {
+          id: "standard",
+          name: "Standard",
+          monthlyCents: 2_000,
+          includedMicros: 20_000_000,
+        },
+        {
+          id: "plus",
+          name: "Plus",
+          monthlyCents: 5_000,
+          includedMicros: 60_000_000,
+        },
+      ],
+      trial: { days: 7, creditMicros: 3_000_000 },
       topUpCents: [1_000, 2_500, 5_000],
       purchasedCreditNeedsSubscription: true,
     });
@@ -82,6 +99,90 @@ describe("the Stripe payments Package", () => {
       target: { kind: "command", path: "/api/billing/provider/portal" },
       hosts: ["billing.stripe.com"],
     });
+  });
+
+  test("offers Plus only where its price is set, a move between plans to a subscriber, and starting now in a trial", () => {
+    const actions = (plans: ("standard" | "plus")[], overrides = {}) =>
+      stripeActionsV1(account(overrides), plans).map(
+        (action) => `${action.purpose}:${action.plan ?? ""}:${action.label}`,
+      );
+    expect(actions(["standard", "plus"])).toEqual([
+      "subscribe:standard:Start Standard",
+      "subscribe:plus:Start Plus",
+    ]);
+    expect(
+      actions(["standard", "plus"], {
+        subscribed: true,
+        subscription: subscription("active"),
+      }),
+    ).toEqual([
+      "change-plan:plus:Move to Plus",
+      "top-up::Add",
+      "manage::Plan, invoices & card",
+    ]);
+    expect(
+      actions(["standard", "plus"], {
+        subscription: { ...subscription("trialing"), trialEnd: 3 },
+      }),
+    ).toEqual([
+      "change-plan:standard:Start now",
+      "change-plan:plus:Start Plus now",
+      "manage::Plan, invoices & card",
+    ]);
+    const create = (env: object) =>
+      STRIPE_PAYMENTS_PACKAGE_V1.create(env, { productName: "FrockBot" });
+    const offered = (env: object) =>
+      create(env)
+        .actions(account())
+        .map((action) => action.plan);
+    expect(offered(CONFIGURED)).toEqual(["standard"]);
+    expect(
+      offered({ ...CONFIGURED, STRIPE_PLUS_PRICE_ID: "price_plus" }),
+    ).toEqual(["standard", "plus"]);
+  });
+
+  test("a plan change runs in the signed-in account and answers the Billing page", async () => {
+    const payments = STRIPE_PAYMENTS_PACKAGE_V1.create(
+      { ...CONFIGURED, STRIPE_PLUS_PRICE_ID: "price_plus" },
+      { productName: "FrockBot" },
+    );
+    const sent: unknown[] = [];
+    const change = (plan: unknown) => {
+      const request = new Request(
+        "https://app.frockbot.com/api/billing/provider/plan",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            origin: "https://app.frockbot.com",
+          },
+          body: JSON.stringify({ id: "plan-change-route", plan }),
+        },
+      );
+      return payments.route!(request, new URL(request.url), {
+        sessionUserId: async () => "user-one",
+        account: (userId, options) => ({
+          async command(name, input) {
+            sent.push({ userId, options, name, input });
+            return { plan: (input as { plan: string }).plan };
+          },
+        }),
+      });
+    };
+    expect((await change("gold"))?.status).toBe(400);
+    const answer = await change("plus");
+    expect((await answer!.json()) as object).toEqual({
+      plan: "plus",
+      url: "https://app.frockbot.com/billing",
+    });
+    expect(sent).toEqual([
+      {
+        userId: "user-one",
+        options: { signedIn: true },
+        name: "plan",
+        input: { id: "plan-change-route", plan: "plus" },
+      },
+    ]);
   });
 
   test("serves only its own paths, and its account half only its own commands", async () => {

@@ -11,6 +11,8 @@
  * - `checkout` — the signed-in person starts a subscription or a top-up
  *   Checkout Session, and is answered its URL;
  * - `portal` — the signed-in person opens the Customer Portal;
+ * - `plan` — the signed-in person moves their subscription to a plan, or
+ *   ends their trial and starts paying;
  * - `webhook` — Stripe's signed events, which the account they name applies
  *   through the ledger port, at most once by event id.
  *
@@ -29,8 +31,11 @@ import {
   AccountPayments,
   STRIPE_PLAN_V1,
   StripeClient,
+  stripePlanV1,
+  type StripePlanIdV1,
   boundedText,
   deleteAccountCustomersV1,
+  isStripePlanV1,
   object,
   stripeId,
   verifyStripeEvent,
@@ -44,6 +49,8 @@ export interface StripeEnvironmentV1 {
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
   STRIPE_MONTHLY_PRICE_ID?: string;
+  /** Absent, Plus is not sold. */
+  STRIPE_PLUS_PRICE_ID?: string;
   /** The deployment's own origin, which Checkout and the portal return to. */
   BETTER_AUTH_URL?: string;
 }
@@ -63,19 +70,24 @@ export function stripeConfig(
       503,
     );
   const origin = new URL(env.BETTER_AUTH_URL).origin;
-  if (!/^price_[a-zA-Z0-9]+$/.test(env.STRIPE_MONTHLY_PRICE_ID))
-    throw new BillingError("Payment plan is not configured", 503);
+  for (const price of [env.STRIPE_MONTHLY_PRICE_ID, env.STRIPE_PLUS_PRICE_ID])
+    if (price !== undefined && !/^price_[a-zA-Z0-9]+$/.test(price))
+      throw new BillingError("Payment plan is not configured", 503);
   return {
     productName,
     secretKey: env.STRIPE_SECRET_KEY,
     webhookSecret: env.STRIPE_WEBHOOK_SECRET,
     monthlyPriceId: env.STRIPE_MONTHLY_PRICE_ID,
+    ...(env.STRIPE_PLUS_PRICE_ID
+      ? { plusPriceId: env.STRIPE_PLUS_PRICE_ID }
+      : {}),
     origin,
   };
 }
 
 const CHECKOUT_PATH = "/api/billing/provider/checkout";
 const PORTAL_PATH = "/api/billing/provider/portal";
+const PLAN_PATH = "/api/billing/provider/plan";
 const WEBHOOK_PATH = "/api/billing/provider/webhook";
 
 /**
@@ -90,17 +102,34 @@ const EARLIER_PATHS_V1 = {
   "/api/billing/stripe/webhook": WEBHOOK_PATH,
 } as const;
 
-const SUBSCRIBE_V1: PaymentsActionV1 = {
-  purpose: "subscribe",
-  label: "Subscribe",
-  target: {
-    kind: "command",
-    path: CHECKOUT_PATH,
-    body: { kind: "subscription" },
-  },
-  opens: "browser",
-  hosts: ["checkout.stripe.com"],
-};
+function subscribe(plan: StripePlanIdV1): PaymentsActionV1 {
+  return {
+    purpose: "subscribe",
+    plan,
+    label: `Start ${stripePlanV1(plan).name}`,
+    target: {
+      kind: "command",
+      path: CHECKOUT_PATH,
+      body: { kind: "subscription", plan },
+    },
+    opens: "browser",
+    hosts: ["checkout.stripe.com"],
+  };
+}
+/**
+ * A plan change answers the plan it moved to rather than a page, so its
+ * `url` is Billing itself, which then shows the new plan.
+ */
+function changePlan(plan: StripePlanIdV1, label: string): PaymentsActionV1 {
+  return {
+    purpose: "change-plan",
+    plan,
+    label,
+    target: { kind: "command", path: PLAN_PATH, body: { plan } },
+    opens: "in-app",
+    hosts: [],
+  };
+}
 const TOP_UP_V1: PaymentsActionV1 = {
   purpose: "top-up",
   label: "Add",
@@ -117,19 +146,40 @@ const MANAGE_V1: PaymentsActionV1 = {
 };
 
 /**
- * What the Billing page offers. A subscription that lapsed or is past due is
- * mended in the portal, not bought again; top-ups are for a paid account.
+ * What the Billing page offers, for the plans this deployment sells. A
+ * subscription that lapsed or is past due is mended in the portal, not bought
+ * again; top-ups are for a paid account. A paid account may move to another
+ * plan, and a trialling one may start paying now on either.
  */
 export function stripeActionsV1(
   account: PaymentsAccountV1,
+  plans: readonly StripePlanIdV1[] = ["standard"],
 ): PaymentsActionV1[] {
+  const subscription = account.subscription;
   const canSubscribe =
-    !account.subscription ||
-    ["canceled", "incomplete_expired"].includes(account.subscription.status);
+    !subscription ||
+    ["canceled", "incomplete_expired"].includes(subscription.status);
+  const trialing = subscription?.status === "trialing";
   return [
-    ...(canSubscribe ? [SUBSCRIBE_V1] : []),
+    ...(canSubscribe ? plans.map(subscribe) : []),
+    ...(trialing
+      ? plans.map((plan) =>
+          changePlan(
+            plan,
+            plan === subscription.planId
+              ? "Start now"
+              : `Start ${stripePlanV1(plan).name} now`,
+          ),
+        )
+      : account.subscribed
+        ? plans
+            .filter((plan) => plan !== subscription?.planId)
+            .map((plan) =>
+              changePlan(plan, `Move to ${stripePlanV1(plan).name}`),
+            )
+        : []),
     ...(account.subscribed ? [TOP_UP_V1] : []),
-    ...(account.subscription ? [MANAGE_V1] : []),
+    ...(subscription ? [MANAGE_V1] : []),
   ];
 }
 
@@ -243,7 +293,8 @@ async function command(
       if (
         typeof body.id !== "string" ||
         !["subscription", "topup"].includes(String(body.kind)) ||
-        (body.cents !== undefined && typeof body.cents !== "number")
+        (body.cents !== undefined && typeof body.cents !== "number") ||
+        (body.plan !== undefined && !isStripePlanV1(body.plan))
       )
         throw new BillingError("Invalid checkout", 400);
       return Response.json(
@@ -251,7 +302,24 @@ async function command(
           id: body.id,
           kind: body.kind as "subscription" | "topup",
           ...(body.cents === undefined ? {} : { cents: body.cents as number }),
+          ...(body.plan === undefined ? {} : { plan: body.plan }),
         }),
+        { headers: COMMAND_HEADERS_V1 },
+      );
+    }
+    if (route(url) === PLAN_PATH) {
+      if (typeof body.id !== "string" || !isStripePlanV1(body.plan))
+        throw new BillingError("Invalid plan change", 400);
+      const changed = (await account.command("plan", {
+        id: body.id,
+        plan: body.plan,
+      })) as { plan: StripePlanIdV1 };
+      // An action opens the page its command answers: Billing, on the new plan.
+      return Response.json(
+        {
+          ...changed,
+          url: `${new URL(env.BETTER_AUTH_URL ?? request.url).origin}/billing`,
+        },
         { headers: COMMAND_HEADERS_V1 },
       );
     }
@@ -281,7 +349,11 @@ export const STRIPE_PAYMENTS_PACKAGE_V1: PaymentsPackageBuildV1<StripeEnvironmen
           env.STRIPE_MONTHLY_PRICE_ID
         ),
         providerName: "Stripe",
-        actions: stripeActionsV1,
+        actions: (account) =>
+          stripeActionsV1(
+            account,
+            env.STRIPE_PLUS_PRICE_ID ? ["standard", "plus"] : ["standard"],
+          ),
         paths: Object.keys(
           EARLIER_PATHS_V1,
         ) as (keyof typeof EARLIER_PATHS_V1)[],
@@ -289,7 +361,11 @@ export const STRIPE_PAYMENTS_PACKAGE_V1: PaymentsPackageBuildV1<StripeEnvironmen
           const path = route(url);
           if (path === WEBHOOK_PATH)
             return webhook(env, productName, request, context);
-          if (path === CHECKOUT_PATH || path === PORTAL_PATH)
+          if (
+            path === CHECKOUT_PATH ||
+            path === PORTAL_PATH ||
+            path === PLAN_PATH
+          )
             return command(env, request, url, context);
           return undefined;
         },
@@ -308,7 +384,12 @@ export const STRIPE_PAYMENTS_PACKAGE_V1: PaymentsPackageBuildV1<StripeEnvironmen
                     id: string;
                     kind: "subscription" | "topup";
                     cents?: number;
+                    plan?: StripePlanIdV1;
                   },
+                );
+              if (name === "plan")
+                return payments.changePlan(
+                  given as { id: string; plan: StripePlanIdV1 },
                 );
               if (name === "portal")
                 return payments.portal(String(given.commandId));

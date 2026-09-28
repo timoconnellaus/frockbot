@@ -11,7 +11,15 @@ import {
 
 /** A plan like the hosted one: a monthly subscription, top-ups tied to it. */
 const PLAN: PaymentsPlanV1 = {
-  subscription: { monthlyCents: 2_000, includedMicros: 15_000_000 },
+  subscriptions: [
+    {
+      id: "standard",
+      name: "Standard",
+      monthlyCents: 2_000,
+      includedMicros: 15_000_000,
+    },
+  ],
+  trial: null,
   topUpCents: [1_000, 2_500, 5_000],
   purchasedCreditNeedsSubscription: true,
 };
@@ -39,13 +47,16 @@ function active(ledger: BillingLedger, end = NOW + 30 * 86_400_000) {
   ledger.set("subscription", {
     customerId: "cus_test",
     subscriptionId: "sub_test",
+    planId: "standard",
     status: "active",
     periodStart: NOW,
     periodEnd: end,
+    trialEnd: null,
     cancelAtPeriodEnd: false,
   });
   ledger.set("paidAccess", {
     subscriptionId: "sub_test",
+    planId: "standard",
     periodStart: NOW,
     periodEnd: end,
   });
@@ -309,6 +320,7 @@ describe("the billing ledger", () => {
         ledger.set("subscription", { ...subscription, periodStart: NOW + 1 });
         ledger.set("paidAccess", {
           subscriptionId: "sub_test",
+          planId: "standard",
           periodStart: NOW + 1,
           periodEnd: subscription.periodEnd,
         });
@@ -418,9 +430,11 @@ describe("the payments port", () => {
   const subscription = (id: string, start: number, status = "active") => ({
     customerId: "cus_port",
     subscriptionId: id,
+    planId: "standard",
     status,
     periodStart: start,
     periodEnd: start + 30 * DAY,
+    trialEnd: null,
     cancelAtPeriodEnd: false,
   });
 
@@ -478,11 +492,13 @@ describe("the payments port", () => {
     const port = ledger.paymentsPort();
     const later = {
       subscriptionId: "sub_p",
+      planId: "standard",
       periodStart: NOW + 30 * DAY,
       periodEnd: NOW + 60 * DAY,
     };
     const earlier = {
       subscriptionId: "sub_p",
+      planId: "standard",
       periodStart: NOW,
       periodEnd: NOW + 30 * DAY,
     };
@@ -509,6 +525,176 @@ describe("the payments port", () => {
     ]);
     // The earlier period's allowance expired with it.
     expect(ledger.balance().includedMicros).toBe(15_000_000);
+  });
+
+  test("a trial's credit is complimentary, ends with the trial, and comes once per account", () => {
+    const plan: PaymentsPlanV1 = {
+      ...PLAN,
+      trial: { days: 7, creditMicros: 3_000_000 },
+    };
+    let now = NOW;
+    const ledger = new BillingLedger(storage(), "FrockBot", plan, () => now);
+    const port = ledger.paymentsPort();
+    const ends = NOW + 7 * DAY;
+    port.apply("evt_trial", 1, (effects) => {
+      effects.recordSubscription({
+        ...subscription("sub_t", NOW, "trialing"),
+        trialEnd: ends,
+      });
+      effects.grantTrial({ subscriptionId: "sub_t", expires: ends });
+    });
+    expect(port.account()).toMatchObject({
+      subscribed: false,
+      trialUsed: true,
+    });
+    expect(ledger.balance()).toMatchObject({
+      complimentaryMicros: 3_000_000,
+      canSpend: true,
+    });
+    expect(ledger.snapshot().trial).toEqual({
+      endsAt: ends,
+      creditMicros: 3_000_000,
+    });
+    // The same trial again is nothing; a second trial is refused.
+    port.apply("evt_trial_again", 2, (effects) =>
+      effects.grantTrial({ subscriptionId: "sub_t", expires: ends }),
+    );
+    expect(() =>
+      port.apply("evt_second", 3, (effects) =>
+        effects.grantTrial({ subscriptionId: "sub_u", expires: ends }),
+      ),
+    ).toThrow("This account has had its trial");
+    now = ends + 1;
+    expect(ledger.balance().complimentaryMicros).toBe(0);
+    expect(ledger.snapshot().trial).toBeNull();
+  });
+
+  test("a paid period grants the allowance of the plan it names", () => {
+    const plan: PaymentsPlanV1 = {
+      ...PLAN,
+      subscriptions: [
+        ...PLAN.subscriptions,
+        {
+          id: "plus",
+          name: "Plus",
+          monthlyCents: 5_000,
+          includedMicros: 60_000_000,
+        },
+      ],
+    };
+    const ledger = new BillingLedger(storage(), "FrockBot", plan, () => NOW);
+    const port = ledger.paymentsPort();
+    port.apply("evt_plus", 1, (effects) => {
+      effects.recordSubscription({
+        ...subscription("sub_p", NOW),
+        planId: "plus",
+      });
+      effects.recordPaidPeriod({
+        subscriptionId: "sub_p",
+        planId: "plus",
+        periodStart: NOW,
+        periodEnd: NOW + 30 * DAY,
+      });
+    });
+    expect(ledger.balance().includedMicros).toBe(60_000_000);
+    expect(() =>
+      port.apply("evt_gold", 2, (effects) =>
+        effects.recordPaidPeriod({
+          subscriptionId: "sub_p",
+          planId: "gold",
+          periodStart: NOW + 30 * DAY,
+          periodEnd: NOW + 60 * DAY,
+        }),
+      ),
+    ).toThrow("This deployment sells no such plan");
+  });
+
+  test("a trial ended early by its first paid month takes its credit with it", () => {
+    const plan: PaymentsPlanV1 = {
+      ...PLAN,
+      trial: { days: 7, creditMicros: 3_000_000 },
+    };
+    let now = NOW;
+    const ledger = new BillingLedger(storage(), "FrockBot", plan, () => now);
+    const port = ledger.paymentsPort();
+    port.apply("evt_trial", 1, (effects) => {
+      effects.recordSubscription({
+        ...subscription("sub_t", NOW, "trialing"),
+        trialEnd: NOW + 7 * DAY,
+      });
+      effects.grantTrial({ subscriptionId: "sub_t", expires: NOW + 7 * DAY });
+    });
+    // "Start now" on day 2: Stripe ends the trial and bills the first month.
+    now = NOW + 2 * DAY;
+    const paid = {
+      subscriptionId: "sub_t",
+      planId: "standard",
+      periodStart: now,
+      periodEnd: now + 30 * DAY,
+    };
+    port.apply("evt_start_now", 2, (effects) => {
+      effects.recordSubscription(subscription("sub_t", now));
+      effects.recordPaidPeriod(paid);
+    });
+    expect(ledger.balance()).toMatchObject({
+      complimentaryMicros: 0,
+      includedMicros: 15_000_000,
+      subscribed: true,
+    });
+    // The same trial event again changes nothing.
+    port.apply("evt_trial_again", 3, (effects) =>
+      effects.grantTrial({ subscriptionId: "sub_t", expires: NOW + 7 * DAY }),
+    );
+    expect(ledger.balance().complimentaryMicros).toBe(0);
+  });
+
+  test("the included gauge's full mark counts every live allowance, not just the plan's", () => {
+    const plan: PaymentsPlanV1 = {
+      ...PLAN,
+      subscriptions: [
+        ...PLAN.subscriptions,
+        {
+          id: "plus",
+          name: "Plus",
+          monthlyCents: 5_000,
+          includedMicros: 60_000_000,
+        },
+      ],
+    };
+    let now = NOW;
+    const ledger = new BillingLedger(storage(), "FrockBot", plan, () => now);
+    const port = ledger.paymentsPort();
+    port.apply("evt_standard", 1, (effects) => {
+      effects.recordSubscription(subscription("sub_p", NOW));
+      effects.recordPaidPeriod({
+        subscriptionId: "sub_p",
+        planId: "standard",
+        periodStart: NOW,
+        periodEnd: NOW + 30 * DAY,
+      });
+    });
+    expect(ledger.snapshot().includedGrantedMicros).toBe(15_000_000);
+    // An upgrade on day 10 restarts the month; the old allowance runs on.
+    now = NOW + 10 * DAY;
+    port.apply("evt_upgrade", 2, (effects) => {
+      effects.recordSubscription({
+        ...subscription("sub_p", now),
+        planId: "plus",
+      });
+      effects.recordPaidPeriod({
+        subscriptionId: "sub_p",
+        planId: "plus",
+        periodStart: now,
+        periodEnd: now + 30 * DAY,
+      });
+    });
+    expect(ledger.snapshot()).toMatchObject({
+      includedMicros: 75_000_000,
+      includedGrantedMicros: 75_000_000,
+    });
+    // Once the old month ends, only the Plus allowance is left.
+    now = NOW + 31 * DAY;
+    expect(ledger.snapshot().includedGrantedMicros).toBe(60_000_000);
   });
 
   test("an event about an older subscription cannot replace a newer one", () => {
@@ -589,7 +775,8 @@ describe("the payments port", () => {
 
   test("a plan with no subscription spends purchased credit without one", () => {
     const plan: PaymentsPlanV1 = {
-      subscription: null,
+      subscriptions: [],
+      trial: null,
       topUpCents: [500],
       purchasedCreditNeedsSubscription: false,
     };
@@ -617,6 +804,7 @@ describe("the payments port", () => {
       port.apply("evt_period", {}, (effects) =>
         effects.recordPaidPeriod({
           subscriptionId: "sub_none",
+          planId: "standard",
           periodStart: NOW,
           periodEnd: NOW + DAY,
         }),

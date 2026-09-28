@@ -74,7 +74,8 @@ export const PAYMENTS_PACKAGE_V1: PaymentsPackageBuildV1<PaymentsPackageEnvironm
       },
     ],
     plan: {
-      subscription: null,
+      subscriptions: [],
+      trial: null,
       topUpCents: [500, 2_000],
       purchasedCreditNeedsSubscription: false,
     },

@@ -25,12 +25,15 @@ function account(
     async readBilling() {
       return {
         plan: PAYMENTS_PACKAGE_V1.plan,
+        trial: null,
+        trialUsed: false,
         subscription: null,
         paidAccess: null,
         canSpend: false,
         subscribed: false,
         suspended: false,
         includedMicros: 0,
+        includedGrantedMicros: 0,
         purchasedMicros: 0,
         complimentaryMicros: 0,
         reservedMicros: 0,
@@ -40,7 +43,7 @@ function account(
       };
     },
     async paymentsCommand() {
-      return { url: "https://checkout.stripe.com/c/test" };
+      return { value: { url: "https://checkout.stripe.com/c/test" } };
     },
     async reconcileBilling() {},
     async reserveUsage() {
@@ -87,7 +90,7 @@ describe("billing HTTP routes", () => {
     expect(() => new Function(billingScript)).not.toThrow();
     for (const text of [
       "US$20",
-      "US$15",
+      "Includes US$20 of usage",
       "US$10",
       "US$25",
       "US$50",
@@ -147,20 +150,26 @@ describe("billing HTTP routes", () => {
     expect(response?.headers.get("cache-control")).toBe("no-store");
     expect(await response?.json()).toMatchObject({
       plan: {
-        subscription: { monthlyCents: 2000, includedMicros: 15_000_000 },
+        subscriptions: [
+          { id: "standard", monthlyCents: 2000, includedMicros: 20_000_000 },
+          { id: "plus", monthlyCents: 5000, includedMicros: 60_000_000 },
+        ],
+        trial: { days: 7, creditMicros: 3_000_000 },
         topUpCents: [1000, 2500, 5000],
         purchasedCreditNeedsSubscription: true,
       },
       paymentsProvider: "Stripe",
-      // Not subscribed: the plan is for sale, and nothing else is offered.
+      // Not subscribed: Standard is for sale, and nothing else is offered.
+      // Plus is not, without its price.
       actions: [
         {
           purpose: "subscribe",
-          label: "Subscribe",
+          plan: "standard",
+          label: "Start Standard",
           target: {
             kind: "command",
             path: "/api/billing/provider/checkout",
-            body: { kind: "subscription" },
+            body: { kind: "subscription", plan: "standard" },
           },
           opens: "browser",
           hosts: ["checkout.stripe.com"],
@@ -317,7 +326,7 @@ describe("billing HTTP routes", () => {
         account({
           async paymentsCommand() {
             calls += 1;
-            return { url: "https://checkout.stripe.com/c/test" };
+            return { value: { url: "https://checkout.stripe.com/c/test" } };
           },
         }),
       rates,
@@ -341,6 +350,40 @@ describe("billing HTTP routes", () => {
     expect(calls).toBe(0);
   });
 
+  test("a Package refusal keeps its status across the account's RPC", async () => {
+    const routes = billingRoutes(
+      env,
+      () =>
+        account({
+          async paymentsCommand() {
+            return {
+              refused: { message: "Plan change key was reused", status: 409 },
+            };
+          },
+        }),
+      rates,
+    );
+    const request = new Request(
+      "https://app.frockbot.com/api/billing/provider/checkout",
+      {
+        method: "POST",
+        headers: {
+          origin: "https://app.frockbot.com",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ id: "0123456789abcdef", kind: "subscription" }),
+      },
+    );
+    const response = await routes.publicRoute!(request, new URL(request.url), {
+      client: "browser",
+      sessionUserId: async () => "user-one",
+    });
+    expect(response?.status).toBe(409);
+    expect((await response!.json()) as unknown).toEqual({
+      error: "Plan change key was reused",
+    });
+  });
+
   test("hands a signed-in purchase to that account, as the person's", async () => {
     const seen: unknown[] = [];
     const routes = billingRoutes(
@@ -349,7 +392,7 @@ describe("billing HTTP routes", () => {
         account({
           async paymentsCommand(input) {
             seen.push({ userId, input });
-            return { url: "https://checkout.stripe.com/c/test" };
+            return { value: { url: "https://checkout.stripe.com/c/test" } };
           },
         }),
       rates,
@@ -442,7 +485,7 @@ describe("billing HTTP routes", () => {
         account({
           async paymentsCommand(input) {
             seen.push(input);
-            return { url: "https://checkout.stripe.com/c/test" };
+            return { value: { url: "https://checkout.stripe.com/c/test" } };
           },
         }),
       rates,

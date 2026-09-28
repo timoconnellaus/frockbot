@@ -97,6 +97,7 @@ export async function provePaymentsPackageV1(
       paidPeriod: null,
       subscribed: false,
       suspended: false,
+      trialUsed: false,
     })[0]?.target.kind === "url",
     "the Billing page is not offered the Package's own page",
   );
