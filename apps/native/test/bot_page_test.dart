@@ -202,4 +202,23 @@ void main() {
     expect(find.byType(RoutineRunRow), findsOneWidget);
     expect(tester.getSize(find.byType(RoutineRunRow)).height, lessThan(56));
   });
+
+  testWidgets('the Work log is a door on the Bot page', (tester) async {
+    tester.view.physicalSize = const Size(390, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    var opened = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: Scaffold(
+          body: BotPageView(botName: 'Scout', onOpenWorkLog: () => opened++),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Every step of every Turn'), findsOneWidget);
+    await tester.tap(find.text('Work log'));
+    expect(opened, 1);
+  });
 }

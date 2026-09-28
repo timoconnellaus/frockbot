@@ -30,6 +30,10 @@ import {
 } from "@frockbot/app/shell/run-protocol";
 import { decodeApprovalDecisionCommandV1 } from "@frockbot/app/shell/approvals";
 import {
+  decodeWorkLogQueryV1,
+  type WorkLogQueryV1,
+} from "@frockbot/app/shell/work-log";
+import {
   decodeSecretSubmitCommandV1,
   isSecretRequestIdV1,
   SecretDecodeError,
@@ -726,6 +730,7 @@ function createUserApplicationRoute() {
     }
 
     const skillsMatch = url.pathname.match(/^\/api\/bots\/([^/]+)\/skills$/);
+    const workLogMatch = url.pathname.match(/^\/api\/bots\/([^/]+)\/work-log$/);
     const workspaceFileMatch = url.pathname.match(
       /^\/api\/bots\/([^/]+)\/workspace\/file$/,
     );
@@ -744,6 +749,7 @@ function createUserApplicationRoute() {
     );
     if (
       !skillsMatch &&
+      !workLogMatch &&
       !workspaceFileMatch &&
       !turnMatch &&
       !lookupMatch &&
@@ -757,6 +763,7 @@ function createUserApplicationRoute() {
     try {
       const matched =
         skillsMatch ??
+        workLogMatch ??
         workspaceFileMatch ??
         turnMatch ??
         lookupMatch ??
@@ -776,7 +783,7 @@ function createUserApplicationRoute() {
       env,
       botId,
       request.method === "GET" &&
-        Boolean(turnMatch || lookupMatch || questionsMatch),
+        Boolean(turnMatch || lookupMatch || questionsMatch || workLogMatch),
     );
     if (missingBot) return missingBot;
     // An installed client older than protocol 3 refuses a Run it does not
@@ -797,6 +804,37 @@ function createUserApplicationRoute() {
         );
       } catch (error) {
         return botFailure(error, "skill catalog failed");
+      }
+    }
+
+    if (workLogMatch) {
+      if (request.method !== "GET") return jsonError(405, "method not allowed");
+      let query: WorkLogQueryV1;
+      try {
+        const keys = [...url.searchParams.keys()];
+        if (
+          keys.some((key) => key !== "before") ||
+          url.searchParams.getAll("before").length > 1
+        ) {
+          throw new Error("work log query is invalid");
+        }
+        const before = url.searchParams.get("before");
+        query = decodeWorkLogQueryV1({
+          schemaVersion: 1,
+          ...(before === null ? {} : { before }),
+        });
+      } catch (error) {
+        return jsonError(
+          400,
+          error instanceof Error ? error.message : "invalid work log page",
+        );
+      }
+      try {
+        return Response.json(
+          await env.BOT_STATE.workLog({ schemaVersion: 1, botId, query }),
+        );
+      } catch (error) {
+        return botFailure(error, "work log failed");
       }
     }
 

@@ -49,6 +49,9 @@ class BotPageView extends StatelessWidget {
   final void Function(RoutineRunSummary run)? onOpenRun;
   final VoidCallback? onOpenRoutines;
 
+  /// Opens every step of every Turn this Bot ran.
+  final VoidCallback? onOpenWorkLog;
+
   /// Plugin conversation panels for this Bot.
   final PanelCanvasController? panels;
   final List<BotPageDoor> panelDoors;
@@ -61,6 +64,7 @@ class BotPageView extends StatelessWidget {
     this.inbox,
     this.onOpenRun,
     this.onOpenRoutines,
+    this.onOpenWorkLog,
     this.panels,
     this.panelDoors = const [],
   });
@@ -84,6 +88,22 @@ class BotPageView extends StatelessWidget {
       if (onOpenRoutines != null) ...[
         const FrockSectionLabel('Routines'),
         _routines(context),
+      ],
+      if (onOpenWorkLog != null) ...[
+        const FrockSectionLabel('Work'),
+        FrockRowGroup(
+          rows: [
+            identified(
+              SettingsIds.botPageWorkLog,
+              FrockRow(
+                icon: Icons.receipt_long_outlined,
+                title: 'Work log',
+                subtitle: 'Every step of every Turn',
+                onTap: onOpenWorkLog,
+              ),
+            ),
+          ],
+        ),
       ],
       if (panels != null && panelDoors.isNotEmpty) ...[
         const FrockSectionLabel('Panels'),
@@ -178,11 +198,7 @@ class BotPageView extends StatelessWidget {
           for (final door in panelDoors)
             identified(
               door.identifier,
-              FrockRow(
-                icon: door.icon,
-                title: door.label,
-                onTap: door.onTap,
-              ),
+              FrockRow(icon: door.icon, title: door.label, onTap: door.onTap),
             ),
         ],
       ),

@@ -981,6 +981,71 @@ export type ActivityPage = {
   nextCursor?: string;
   indexState: "ready" | "rebuilding" | "truncated";
 };
+export type WorkLogTokens = {
+  input: number;
+  cachedInput: number;
+  output: number;
+  reasoning: number;
+};
+export type WorkLogField = { label: string; value: string };
+export type WorkLogSection = { label: string; text: string; mono?: boolean };
+export type WorkLogEntry = {
+  seq: number;
+  at: Instant;
+  kind:
+    | "input"
+    | "model"
+    | "jev"
+    | "tool"
+    | "memory"
+    | "skill"
+    | "plugin"
+    | "computer"
+    | "retry"
+    | "compaction"
+    | "send"
+    | "task"
+    | "system";
+  step?: number;
+  title: string;
+  detail?: string;
+  durationMs?: number;
+  isError?: boolean;
+  tokens?: WorkLogTokens;
+  fields?: Array<WorkLogField>;
+  sections?: Array<WorkLogSection>;
+};
+export type WorkLogTotals = {
+  steps: number;
+  modelRequests: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  toolCalls: number;
+  toolErrors: number;
+  jevChecks: number;
+  retries: number;
+  computerMs: number;
+};
+export type WorkLogTurn = {
+  runId: string;
+  at: Instant;
+  status: "running" | "completed" | "failed" | "cancelled";
+  via: string;
+  input: string;
+  turn?: number;
+  durationMs?: number;
+  outcome?: string;
+  totals: WorkLogTotals;
+  entries: Array<WorkLogEntry>;
+  omittedEntries?: number;
+};
+export type WorkLogPage = {
+  schemaVersion: 1;
+  turns: Array<WorkLogTurn>;
+  nextCursor?: string;
+};
 export type SetupHistory = {
   schemaVersion: 1;
   botId: BotId;
@@ -1283,6 +1348,13 @@ export interface ProtocolTypes {
   AuditPage: AuditPage;
   ActivityRow: ActivityRow;
   ActivityPage: ActivityPage;
+  WorkLogTokens: WorkLogTokens;
+  WorkLogField: WorkLogField;
+  WorkLogSection: WorkLogSection;
+  WorkLogEntry: WorkLogEntry;
+  WorkLogTotals: WorkLogTotals;
+  WorkLogTurn: WorkLogTurn;
+  WorkLogPage: WorkLogPage;
   SetupHistory: SetupHistory;
   MessageCursor: MessageCursor;
   GroupId: GroupId;

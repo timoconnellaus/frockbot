@@ -2644,5 +2644,159 @@
       "events": [],
       "canRetry": false
     }
+  },
+  {
+    "name": "WorkLogTokens negative count",
+    "schema": "WorkLogTokens",
+    "value": {
+      "input": 14210,
+      "cachedInput": 11980,
+      "output": -1,
+      "reasoning": 0
+    }
+  },
+  {
+    "name": "WorkLogField empty value",
+    "schema": "WorkLogField",
+    "value": {
+      "label": "Model",
+      "value": ""
+    }
+  },
+  {
+    "name": "WorkLogSection missing text",
+    "schema": "WorkLogSection",
+    "value": {
+      "label": "Input"
+    }
+  },
+  {
+    "name": "WorkLogEntry unknown kind",
+    "schema": "WorkLogEntry",
+    "value": {
+      "seq": 12,
+      "at": "2026-09-28T09:14:20.000Z",
+      "kind": "prompt",
+      "step": 1,
+      "title": "Check Thursday on the calendar",
+      "detail": "1 tool call",
+      "durationMs": 1840,
+      "tokens": {
+        "input": 14210,
+        "cachedInput": 11980,
+        "output": 188,
+        "reasoning": 0
+      },
+      "fields": [
+        {
+          "label": "Model",
+          "value": "Frock AI"
+        }
+      ],
+      "sections": [
+        {
+          "label": "What the model said",
+          "text": "Looking at Thursday."
+        }
+      ]
+    }
+  },
+  {
+    "name": "WorkLogTotals missing a count",
+    "schema": "WorkLogTotals",
+    "value": {
+      "steps": 1,
+      "modelRequests": 1,
+      "inputTokens": 14210,
+      "cachedInputTokens": 11980,
+      "outputTokens": 188,
+      "reasoningTokens": 0,
+      "toolCalls": 1,
+      "toolErrors": 0,
+      "jevChecks": 2,
+      "computerMs": 0
+    }
+  },
+  {
+    "name": "WorkLogTurn unknown status",
+    "schema": "WorkLogTurn",
+    "value": {
+      "runId": "run-42",
+      "at": "2026-09-28T09:14:18.000Z",
+      "status": "queued",
+      "via": "You",
+      "input": "Find a free Thursday evening",
+      "turn": 42,
+      "durationMs": 38200,
+      "outcome": "Completed",
+      "totals": {
+        "steps": 1,
+        "modelRequests": 1,
+        "inputTokens": 14210,
+        "cachedInputTokens": 11980,
+        "outputTokens": 188,
+        "reasoningTokens": 0,
+        "toolCalls": 1,
+        "toolErrors": 0,
+        "jevChecks": 2,
+        "retries": 0,
+        "computerMs": 0
+      },
+      "entries": [
+        {
+          "seq": 12,
+          "at": "2026-09-28T09:14:20.000Z",
+          "kind": "model",
+          "step": 1,
+          "title": "Check Thursday on the calendar",
+          "detail": "1 tool call",
+          "durationMs": 1840,
+          "tokens": {
+            "input": 14210,
+            "cachedInput": 11980,
+            "output": 188,
+            "reasoning": 0
+          },
+          "fields": [
+            {
+              "label": "Model",
+              "value": "Frock AI"
+            }
+          ],
+          "sections": [
+            {
+              "label": "What the model said",
+              "text": "Looking at Thursday."
+            }
+          ]
+        },
+        {
+          "seq": 14,
+          "at": "2026-09-28T09:14:22.000Z",
+          "kind": "tool",
+          "step": 1,
+          "title": "calendar.freebusy",
+          "detail": "→ free after 6:00 pm",
+          "durationMs": 412,
+          "isError": false,
+          "sections": [
+            {
+              "label": "Input",
+              "text": "{\"day\":\"Thu\"}",
+              "mono": true
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "WorkLogPage extra field",
+    "schema": "WorkLogPage",
+    "value": {
+      "schemaVersion": 1,
+      "turns": [],
+      "cost": 1
+    }
   }
 ]

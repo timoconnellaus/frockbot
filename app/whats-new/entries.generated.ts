@@ -42,6 +42,7 @@ import entry_voice_smooth_playback from "./entries/voice-smooth-playback.ts";
 import entry_web_search from "./entries/web-search.ts";
 import entry_whats_new from "./entries/whats-new.ts";
 import entry_whats_new_reading from "./entries/whats-new-reading.ts";
+import entry_work_log from "./entries/work-log.ts";
 import entry_working_bot from "./entries/working-bot.ts";
 
 export const WHATS_NEW_ENTRY_FILES_V1 = [
@@ -88,5 +89,6 @@ export const WHATS_NEW_ENTRY_FILES_V1 = [
   entry_web_search,
   entry_whats_new,
   entry_whats_new_reading,
+  entry_work_log,
   entry_working_bot,
 ];

@@ -5190,6 +5190,283 @@
       "required": ["schemaVersion", "rows", "indexState"],
       "additionalProperties": false
     },
+    "WorkLogTokens": {
+      "type": "object",
+      "properties": {
+        "input": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cachedInput": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "output": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reasoning": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": ["input", "cachedInput", "output", "reasoning"],
+      "additionalProperties": false
+    },
+    "WorkLogField": {
+      "type": "object",
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      },
+      "required": ["label", "value"],
+      "additionalProperties": false
+    },
+    "WorkLogSection": {
+      "type": "object",
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "mono": {
+          "type": "boolean"
+        }
+      },
+      "required": ["label", "text"],
+      "additionalProperties": false
+    },
+    "WorkLogEntry": {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "$ref": "#/$defs/Instant"
+        },
+        "kind": {
+          "enum": [
+            "input",
+            "model",
+            "jev",
+            "tool",
+            "memory",
+            "skill",
+            "plugin",
+            "computer",
+            "retry",
+            "compaction",
+            "send",
+            "task",
+            "system"
+          ]
+        },
+        "step": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 400
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "isError": {
+          "type": "boolean"
+        },
+        "tokens": {
+          "$ref": "#/$defs/WorkLogTokens"
+        },
+        "fields": {
+          "type": "array",
+          "maxItems": 24,
+          "items": {
+            "$ref": "#/$defs/WorkLogField"
+          }
+        },
+        "sections": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "$ref": "#/$defs/WorkLogSection"
+          }
+        }
+      },
+      "required": ["seq", "at", "kind", "title"],
+      "additionalProperties": false
+    },
+    "WorkLogTotals": {
+      "type": "object",
+      "properties": {
+        "steps": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "modelRequests": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "inputTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cachedInputTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "outputTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reasoningTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "toolCalls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "toolErrors": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "jevChecks": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "retries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "computerMs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "steps",
+        "modelRequests",
+        "inputTokens",
+        "cachedInputTokens",
+        "outputTokens",
+        "reasoningTokens",
+        "toolCalls",
+        "toolErrors",
+        "jevChecks",
+        "retries",
+        "computerMs"
+      ],
+      "additionalProperties": false
+    },
+    "WorkLogTurn": {
+      "type": "object",
+      "properties": {
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "at": {
+          "$ref": "#/$defs/Instant"
+        },
+        "status": {
+          "enum": ["running", "completed", "failed", "cancelled"]
+        },
+        "via": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "input": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 400
+        },
+        "turn": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "outcome": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "totals": {
+          "$ref": "#/$defs/WorkLogTotals"
+        },
+        "entries": {
+          "type": "array",
+          "maxItems": 400,
+          "items": {
+            "$ref": "#/$defs/WorkLogEntry"
+          }
+        },
+        "omittedEntries": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "runId",
+        "at",
+        "status",
+        "via",
+        "input",
+        "totals",
+        "entries"
+      ],
+      "additionalProperties": false
+    },
+    "WorkLogPage": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "turns": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/WorkLogTurn"
+          }
+        },
+        "nextCursor": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        }
+      },
+      "required": ["schemaVersion", "turns"],
+      "additionalProperties": false
+    },
     "SetupHistory": {
       "type": "object",
       "properties": {
