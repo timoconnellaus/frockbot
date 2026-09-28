@@ -656,13 +656,14 @@ export class AccountPayments {
             // the trial credit, never the plan's allowance or a paid period.
             if (
               reason === "subscription_create" &&
-              subscription.trialEnd === end
+              subscription.trialEnd !== null &&
+              end <= subscription.trialEnd
             ) {
               grant = {
                 id: `trial:${subscriptionId}`,
                 kind: "complimentary",
                 micros: BILLING_PLAN.trialMicros,
-                expires: end,
+                expires: subscription.trialEnd,
               };
               trialGranted = true;
             }
