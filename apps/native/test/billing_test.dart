@@ -608,6 +608,21 @@ void main() {
     api.close();
   });
 
+  testWidgets('the gauge measures every live allowance as granted', (
+    tester,
+  ) async {
+    // Moved down to Standard: the paid Plus month still runs to renewal.
+    final api = _api(
+      subscribed({
+        'includedMicros': 30000000,
+        'includedGrantedMicros': 60000000,
+      }),
+    );
+    await _show(tester, api);
+    expect(find.text('50% left'), findsOneWidget);
+    api.close();
+  });
+
   testWidgets('Plus is not for sale where the Package offers no way to it', (
     tester,
   ) async {

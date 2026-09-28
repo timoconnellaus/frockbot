@@ -752,7 +752,11 @@ _Fuel _fuel(
   final subscribed = data['subscribed'] == true;
   final trial = subscribed ? null : data['trial'] as Map?;
   final subscription = data['subscription'] as Map?;
-  final allowance = plan?.includedMicros ?? 0;
+  // Every monthly allowance still live, as granted: after a move down the
+  // paid month of the bigger plan runs to renewal, and after a move up the old
+  // month's credit sits beside the new one.
+  final granted = micros('includedGrantedMicros');
+  final allowance = granted > 0 ? granted : plan?.includedMicros ?? 0;
   final trialDays =
       ((data['plan'] as Map?)?['trial'] as Map?)?['days'] as num? ?? 7;
   final end =
