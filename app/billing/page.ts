@@ -22,9 +22,18 @@ export function billingPageV1(options: {
   providerName: string | null;
 }): string {
   const product = escaped(options.productName);
-  const { subscription, topUpCents } = options.plan;
-  const plan = subscription
-    ? `<section class="plan"><div><h2>${product}</h2><p class="price">${dollars(subscription.monthlyCents)} <span>/ month</span></p><p>Includes ${dollars(subscription.includedMicros / 10_000)} of usage credit each billing month.</p><p id="subscription"></p></div><div class="actions"><button id="subscribe" disabled>Subscribe</button><button id="manage" class="secondary" disabled>Manage subscription</button></div></section>`
+  const { subscriptions, trial, topUpCents } = options.plan;
+  const offered = subscriptions
+    .map(
+      (each) =>
+        `<p class="price">${escaped(each.name)} · ${dollars(each.monthlyCents)} <span>/ month</span></p><p>Includes ${dollars(each.includedMicros / 10_000)} of usage each billing month.</p>`,
+    )
+    .join("");
+  const trialNote = trial
+    ? `<p>A first subscription starts with a ${trial.days}-day trial and ${dollars(trial.creditMicros / 10_000)} of credit.</p>`
+    : "";
+  const plan = subscriptions.length
+    ? `<section class="plan"><div><h2>${product}</h2>${offered}${trialNote}<p id="subscription"></p></div><div class="actions"><button id="subscribe" disabled>Subscribe</button><button id="manage" class="secondary" disabled>Manage subscription</button></div></section>`
     : "";
   const topUps = topUpCents.length
     ? `<section><h2>Add a top-up</h2><p>Prepaid credit. No automatic overage charges.${

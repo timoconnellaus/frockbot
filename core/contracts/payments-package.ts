@@ -21,16 +21,34 @@
  * makes commits at most once, together, under that event's receipt.
  */
 
+/**
+ * One monthly subscription a deployment sells: its price and the credit each
+ * paid month includes, which expires at the period's end.
+ */
+export interface PaymentsSubscriptionPlanV1 {
+  /** Stable, and what a subscription and its paid periods name. */
+  readonly id: string;
+  /** As the Billing page names it. */
+  readonly name: string;
+  readonly monthlyCents: number;
+  readonly includedMicros: number;
+}
+
 /** What a deployment sells. Amounts are US cents; credit is micro-dollars. */
 export interface PaymentsPlanV1 {
   /**
-   * The monthly subscription: its price and the credit each paid month
-   * includes, which expires at the period's end. None when the deployment
-   * sells no subscription.
+   * The monthly subscriptions, cheapest first; the first is the one a
+   * subscription starts on unless the person chose another. Empty when the
+   * deployment sells no subscription.
    */
-  readonly subscription: {
-    readonly monthlyCents: number;
-    readonly includedMicros: number;
+  readonly subscriptions: readonly PaymentsSubscriptionPlanV1[];
+  /**
+   * The trial an account's first subscription starts with: how long it runs
+   * and the credit it carries, which ends with it. None when there is none.
+   */
+  readonly trial: {
+    readonly days: number;
+    readonly creditMicros: number;
   } | null;
   /** The top-up amounts a person may buy, smallest first. */
   readonly topUpCents: readonly number[];
@@ -46,15 +64,21 @@ export interface PaymentsPlanV1 {
 export interface PaymentsSubscriptionV1 {
   readonly customerId: string;
   readonly subscriptionId: string;
+  /** The plan it is on, one of the deployment's `subscriptions`. */
+  readonly planId: string;
   readonly status: string;
   readonly periodStart: number;
   readonly periodEnd: number;
+  /** When its trial ends, if it had one. Epoch milliseconds. */
+  readonly trialEnd: number | null;
   readonly cancelAtPeriodEnd: boolean;
 }
 
 /** One period of a subscription the provider confirmed was paid. */
 export interface PaymentsPaidPeriodV1 {
   readonly subscriptionId: string;
+  /** The plan that was paid for, whose allowance the period grants. */
+  readonly planId: string;
   /** Epoch milliseconds. */
   readonly periodStart: number;
   readonly periodEnd: number;
@@ -67,6 +91,8 @@ export interface PaymentsAccountV1 {
   /** A paid period is current, its subscription active, and nothing suspended. */
   readonly subscribed: boolean;
   readonly suspended: boolean;
+  /** The account has had its one trial. */
+  readonly trialUsed: boolean;
 }
 
 /**
@@ -97,6 +123,16 @@ export interface PaymentsLedgerEffectsV1 {
   grantPurchased(grant: {
     readonly key: string;
     readonly micros: number;
+  }): void;
+  /**
+   * The plan's trial credit for a subscription that started one, expiring
+   * with the trial. Once per account: the account then counts as having had
+   * its trial, and a second is refused.
+   */
+  grantTrial(trial: {
+    readonly subscriptionId: string;
+    /** When the trial ends. Epoch milliseconds. */
+    readonly expires: number;
   }): void;
   /** Stops paid work pending review: a refund or a dispute. */
   suspend(): void;
@@ -134,7 +170,8 @@ export interface PaymentsLedgerPortV1 {
 }
 
 /** Where the Billing page offers an action. */
-export type PaymentsActionPurposeV1 = "subscribe" | "top-up" | "manage";
+export type PaymentsActionPurposeV1 =
+  "subscribe" | "change-plan" | "top-up" | "manage";
 
 /**
  * One thing the Billing page offers, as data. The page draws it where its
@@ -152,6 +189,11 @@ export type PaymentsActionPurposeV1 = "subscribe" | "top-up" | "manage";
  */
 export interface PaymentsActionV1 {
   readonly purpose: PaymentsActionPurposeV1;
+  /**
+   * The plan a `subscribe` or `change-plan` action is for. During a trial, a
+   * `change-plan` to the account's own plan ends the trial and starts paying.
+   */
+  readonly plan?: string;
   /** The button's words; a top-up's is followed by the chosen amount. */
   readonly label: string;
   readonly target:

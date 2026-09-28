@@ -16,7 +16,8 @@ export const PAYMENTS_PACKAGE_V1: PaymentsPackageBuildV1<PaymentsPackageEnvironm
       { name: "STUB_PAYMENTS_SECRET", why: "Verifies payment events." },
     ],
     plan: {
-      subscription: null,
+      subscriptions: [],
+      trial: null,
       topUpCents: [500],
       purchasedCreditNeedsSubscription: false,
     },

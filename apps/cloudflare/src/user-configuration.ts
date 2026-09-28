@@ -26,7 +26,11 @@ import {
   type SpendingReportV1,
   type SpendPeriodV1,
 } from "@frockbot/app/billing/spending";
-import { paymentsPackageV1, type BillingEnv } from "./billing.js";
+import {
+  paymentsPackageV1,
+  type BillingEnv,
+  type PaymentsCommandResultV1,
+} from "./billing.js";
 import { PAYMENTS_PACKAGE_V1 } from "#payments";
 import {
   hostedBillingEnabledV1,
@@ -729,7 +733,7 @@ export class UserConfiguration
     command: string;
     input: unknown;
     signedIn: boolean;
-  }): Promise<unknown> {
+  }): Promise<PaymentsCommandResultV1> {
     await this.assertUserIdentity(input.userId);
     if (input.signedIn) await this.assertAccountOpen();
     const account = paymentsPackageV1(this.env).account?.(
@@ -737,11 +741,21 @@ export class UserConfiguration
       input.userId,
     );
     if (!account)
-      throw new BillingError(
-        "Payments are not available on this deployment",
-        404,
-      );
-    return account.command(input.command, input.input);
+      return {
+        refused: {
+          message: "Payments are not available on this deployment",
+          status: 404,
+        },
+      };
+    // An error thrown over RPC loses its class, and with it the status: the
+    // Package's refusal (a reused key, a plan not sold) travels as data.
+    try {
+      return { value: await account.command(input.command, input.input) };
+    } catch (error) {
+      if (error instanceof BillingError)
+        return { refused: { message: error.message, status: error.status } };
+      throw error;
+    }
   }
   async reserveUsage(input: { userId: string; reservation: UsageReservation }) {
     await this.assertUserIdentity(input.userId);

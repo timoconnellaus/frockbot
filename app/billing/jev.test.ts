@@ -16,7 +16,15 @@ import {
 
 /** Complimentary credit is what these draw on; the plan only has to exist. */
 const PLAN: PaymentsPlanV1 = {
-  subscription: { monthlyCents: 2_000, includedMicros: 15_000_000 },
+  subscriptions: [
+    {
+      id: "standard",
+      name: "Standard",
+      monthlyCents: 2_000,
+      includedMicros: 15_000_000,
+    },
+  ],
+  trial: null,
   topUpCents: [1_000],
   purchasedCreditNeedsSubscription: true,
 };

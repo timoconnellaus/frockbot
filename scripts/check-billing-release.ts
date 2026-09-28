@@ -16,6 +16,9 @@ for (const name of [
 ]) {
   if (!process.env[name]?.trim()) issues.push(`${name} is required.`);
 }
+// Plus is optional: without its price the Package sells Standard alone.
+if (!process.env.STRIPE_PLUS_PRICE_ID?.trim())
+  console.log("STRIPE_PLUS_PRICE_ID is absent: only Standard is sold.");
 if (issues.length) {
   console.error(
     "Billing is not ready for release:\n" +

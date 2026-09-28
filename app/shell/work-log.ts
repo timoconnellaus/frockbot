@@ -544,12 +544,9 @@ class TurnBuilder {
         push({
           kind: "plugin",
           title: `${str(event.packageId) ?? "Plugin"} asked a model`,
-          detail: [
-            str(event.model),
-            cost === undefined ? undefined : dollars(cost),
-          ]
-            .filter(Boolean)
-            .join(" · "),
+          // Usage reads as a share of the plan where people glance; the exact
+          // charge stays in the row's fields for whoever opens it.
+          detail: str(event.model),
           tokens: {
             input: num(event.inputTokens) ?? 0,
             cachedInput: num(event.cachedInputTokens) ?? 0,
