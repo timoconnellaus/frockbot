@@ -125,7 +125,7 @@ describe("who wrote each part of a Turn's input", () => {
       "person",
     ]);
     expect(input?.segments.at(-1)?.text).toBe("remember my wife is Becky");
-    expect(inputSegmentsTextV1(input?.segments ?? [])).toBe(input?.text);
+    expect(inputSegmentsTextV1(input?.segments ?? [])).toBe(input?.text ?? "");
   });
 
   test("a Routine's cue splits into FrockBot's line, the prompt, and the payload", async () => {
@@ -190,7 +190,7 @@ describe("who wrote each part of a Turn's input", () => {
     expect(input?.segments.some((part) => part.author === "person")).toBe(
       false,
     );
-    expect(inputSegmentsTextV1(input?.segments ?? [])).toBe(input?.text);
+    expect(inputSegmentsTextV1(input?.segments ?? [])).toBe(input?.text ?? "");
   });
 });
 
