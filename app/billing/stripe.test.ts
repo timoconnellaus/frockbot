@@ -815,7 +815,7 @@ describe("plans and the trial", () => {
       trial: { endsAt: trialEnd * 1000, creditMicros: 3_000_000 },
       plan: { id: "standard", includedMicros: 20_000_000 },
     });
-    expect(ledger.get("trialUsed")).toBe(true);
+    expect(ledger.get<boolean>("trialUsed")).toBe(true);
     // The trial credit ends with the trial.
     const later = new BillingLedger(
       storage(),

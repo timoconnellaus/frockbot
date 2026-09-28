@@ -326,7 +326,9 @@ describe("billing HTTP routes", () => {
     };
     expect((await change("gold"))?.status).toBe(400);
     const answer = await change("plus");
-    expect(await answer!.json()).toEqual({ plan: "plus" });
+    expect((await answer!.json()) as { plan: string }).toEqual({
+      plan: "plus",
+    });
     expect(changes).toEqual([
       {
         userId: "user-one",
