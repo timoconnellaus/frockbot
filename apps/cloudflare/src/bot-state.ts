@@ -20,6 +20,7 @@ import { cleanSupersedeStateV1 } from "./supersede-cleanup.js";
 import { cleanBotLabelV1 } from "./sidebar-label-cleanup.js";
 import { cleanBotTitleV1 } from "./bot-title-cleanup.js";
 import { cleanProjectEventsV1 } from "./project-events-cleanup.js";
+import { cleanSupervisionCallDigestsV1 } from "./supervision-call-cleanup.js";
 import { cleanUndecodableSkillIndexesV1 } from "./skill-index-cleanup.js";
 import {
   messageIdV1,
@@ -697,6 +698,9 @@ export class BotState
       // Before anything decodes a machine intent: a `messages` op no longer parses.
       await cleanBotMachineMessagesV1(this.ctx.storage);
       await cleanProjectEventsV1(this.ctx.storage);
+      // Before anything decodes an event: a `supervision/call` with no
+      // `callDigest` no longer parses.
+      await cleanSupervisionCallDigestsV1(this.ctx.storage);
       await cleanUnpreparedRunsV1(this.ctx.storage);
       await cleanUndecodableSkillIndexesV1(this.ctx.storage);
       await cleanRetiredPublicationStateV1(this.ctx.storage);

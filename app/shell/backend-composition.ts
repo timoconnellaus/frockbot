@@ -174,6 +174,11 @@ export interface ShellCompositionMountOptions {
    */
   remainingEffectAdmissions?(): Promise<number>;
   /**
+   * Whether a tool effect was already sent to a callee that honours no key, so
+   * a resume settles it rather than sending it again.
+   */
+  sentOnce?(effectId: string): Promise<boolean>;
+  /**
    * How this Turn gives way to a person's message waiting behind it. The loop
    * asks at each step boundary and ends or parks the Turn there.
    */
@@ -270,6 +275,7 @@ export function createShellCompositionHost(
         ...(options.remainingEffectAdmissions
           ? { remainingEffectAdmissions: options.remainingEffectAdmissions }
           : {}),
+        ...(options.sentOnce ? { sentOnce: options.sentOnce } : {}),
         ...(options.userMessageWaiting
           ? { userMessageWaiting: options.userMessageWaiting }
           : {}),

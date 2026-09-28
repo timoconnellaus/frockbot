@@ -19,7 +19,7 @@ import {
 import { LlmRegistry } from "@frockbot/core/models";
 import { SystemPromptRegistry } from "@frockbot/core/prompt";
 import { ToolRegistry } from "@frockbot/core/tools";
-import type { AgentOptions } from "./agent.js";
+import type { AgentEffectAdmission, AgentOptions } from "./agent.js";
 import {
   type AgentLoop,
   createAgentLoop,
@@ -935,10 +935,10 @@ describe("AgentLoop", () => {
       },
     };
     const runtime = mountRuntime(provider, tool);
-    const admissions: Array<{ kind: "model" | "tool"; effectId: string }> = [];
+    const admissions: AgentEffectAdmission[] = [];
     let toolIntentWasDurable = false;
     const fenceOptions = {
-      admitEffect: (effect: { kind: "model" | "tool"; effectId: string }) => {
+      admitEffect: (effect: AgentEffectAdmission) => {
         admissions.push(effect);
         if (effect.kind === "tool") {
           toolIntentWasDurable =
@@ -976,7 +976,7 @@ describe("AgentLoop", () => {
     expect(toolIntentWasDurable).toBe(true);
     expect(admissions).toEqual([
       { kind: "model", effectId: request.request.requestId },
-      { kind: "tool", effectId: call.occurrenceId },
+      { kind: "tool", effectId: call.occurrenceId, once: false },
     ]);
     expect(streams).toBe(1);
     expect(executions).toBe(0);

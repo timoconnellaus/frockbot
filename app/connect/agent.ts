@@ -200,6 +200,7 @@ async function resolveConnectTool(
         description: string;
         inputSchema: Record<string, unknown>;
         idempotent: false;
+        unkeyed: true;
         execute: (input: unknown) => Promise<ToolExecutionResult>;
       }[];
       registration: {
@@ -240,6 +241,7 @@ async function resolveConnectTool(
         description: tool.description,
         inputSchema: tool.inputSchema,
         idempotent: false,
+        unkeyed: true,
         execute: async (input) => {
           if (config.permitConnection && !(await config.permitConnection())) {
             return {

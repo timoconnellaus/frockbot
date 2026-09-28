@@ -12,9 +12,14 @@ import type {
 
 export type AgentStatus = "idle" | "running" | "disposed";
 
-/** One exact new external effect whose durable intent is already journaled. */
+/**
+ * One exact new external effect whose durable intent is already journaled.
+ * `once` marks a tool call whose callee honours no key: its admission is the
+ * durable record that it was sent, so a resume never sends it again.
+ */
 export type AgentEffectAdmission =
-  { kind: "model"; effectId: string } | { kind: "tool"; effectId: string };
+  | { kind: "model"; effectId: string }
+  | { kind: "tool"; effectId: string; once: boolean };
 
 /** One dispatch of a model request, as a tool-input watcher is shown it. */
 export interface ToolInputDispatchV1 {
@@ -65,6 +70,13 @@ export interface AgentOptions {
    * and admits without bound.
    */
   remainingEffectAdmissions?(): Promise<number>;
+  /**
+   * Whether this tool effect was admitted `once` — sent to a callee that
+   * honours no key — so it must not be sent again. Asked only of an
+   * occurrence whose intent is journaled with no result. Absent ⇒ the host
+   * keeps no admission record, and nothing is known to have been sent.
+   */
+  sentOnce?(effectId: string): Promise<boolean>;
   /**
    * How this Turn gives way to a person's message waiting for it, asked at
    * each step boundary that would otherwise continue. `yield` ends the Turn

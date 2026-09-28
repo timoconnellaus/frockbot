@@ -8,6 +8,7 @@ import {
   SUPERVISION_NOT_AUTHORIZED_PREFIX_V1,
   SUPERVISION_WITHHELD_SEND_PREFIX_V1,
   type LlmProvider,
+  type LoopHookListV1,
   type NormalizedModelRequest,
   type ProgressEvidenceV1,
   type SendReviewEvidenceV1,
@@ -73,6 +74,8 @@ async function run(
     specialists?: readonly { name: string; slug: string }[];
     /** What the Turn is opened with, when not the default request. */
     initialText?: string;
+    /** Handed the Turn's hooks, for a tool that reviews synthetic calls. */
+    hooks?: (hooks: LoopHookListV1) => void;
   } = {},
 ): Promise<SessionEvent[]> {
   const root = createAgentRuntimeHarness({});
@@ -89,6 +92,7 @@ async function run(
     }) as unknown as Parameters<typeof root.mount>[0],
   );
   await root.mount(createShellAgentFeatureV1("FrockBot"));
+  options.hooks?.(root.hooks);
   const followUp = options.followUp;
   if (followUp !== undefined) {
     root.hooks.add({
@@ -627,6 +631,69 @@ test("a namespaced mutate call is reviewed and recorded under its namespace", as
   expect(
     events.filter((event) => event.type === "supervision/call"),
   ).toMatchObject([{ tool: "composio-gmail/GMAIL_SEND_EMAIL" }]);
+});
+
+test("a recorded verdict is reused only for the exact call it was given for", async () => {
+  const reviewed: CallReviewEvidenceV1[] = [];
+  const outcomes: string[] = [];
+  let hooks: LoopHookListV1 | undefined;
+  // A tool that reviews requests of its own, as the Computer's egress does,
+  // under one synthetic id: the collision a position counter produced.
+  const egress: ToolDefinition = {
+    name: "egress",
+    description: "Sends requests.",
+    inputSchema: { type: "object", additionalProperties: true },
+    execute: async (_input, context) => {
+      const id = `${context.effectId}:egress:0`;
+      for (const method of ["GET", "GET", "POST"]) {
+        const call: ToolCall = {
+          id,
+          name: "credentialed_request",
+          input: { method, url: "https://api.example.com/items" },
+        };
+        const prepared = await hooks!.prepareTool(
+          call,
+          { ...context, effectId: id, toolCall: call, effect: "mutate" },
+          async () => ({ kind: "ready", call, idempotent: false }),
+        );
+        outcomes.push(`${method} ${prepared.kind}`);
+      }
+      return { content: "done", isError: false };
+    },
+  };
+  const events = await run(
+    scripted([
+      [{ id: "e", name: "egress", input: {} }],
+      [{ id: "a", name: "send_to_user", input: text("Done.", "finish") }],
+    ]),
+    createFakeTurnSupervisorV1({
+      reviewCall: async (evidence) => {
+        reviewed.push(evidence);
+        return evidence.call.arguments.method === "GET"
+          ? { decision: "allow", reasonCode: "authorized", judgments: [] }
+          : {
+              decision: "reject",
+              reasonCode: "no_authorization",
+              judgments: [],
+            };
+      },
+    }),
+    { tools: [egress], hooks: (turnHooks) => (hooks = turnHooks) },
+  );
+  // The repeated GET reuses its verdict; the POST under the same id does not.
+  expect(outcomes).toEqual(["GET ready", "GET ready", "POST denied"]);
+  expect(reviewed.map((evidence) => evidence.call.arguments.method)).toEqual([
+    "GET",
+    "POST",
+  ]);
+  const recorded = events.filter((event) => event.type === "supervision/call");
+  expect(recorded).toHaveLength(2);
+  const [get, post] = recorded;
+  if (get?.type !== "supervision/call" || post?.type !== "supervision/call") {
+    throw new Error("supervision/call missing");
+  }
+  expect(get.occurrenceId).toBe(post.occurrenceId);
+  expect(get.callDigest).not.toBe(post.callDigest);
 });
 
 test("work Jev names for a specialist the Turn is offered is handed to it from the first request's tail", async () => {

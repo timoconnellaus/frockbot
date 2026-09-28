@@ -516,6 +516,11 @@ export interface SessionEventMap {
     step: number;
     occurrenceId: string;
     tool: string;
+    /**
+     * Digest of the reviewed call, tool and arguments. A recorded verdict is
+     * reused only for a call with the same digest.
+     */
+    callDigest: string;
     decision: CallDecisionV1;
     latencyMs: number;
   };
@@ -1904,13 +1909,22 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
     case "supervision/call":
       requireEventKeys(
         event,
-        keys("turn", "step", "occurrenceId", "tool", "decision", "latencyMs"),
+        keys(
+          "turn",
+          "step",
+          "occurrenceId",
+          "tool",
+          "callDigest",
+          "decision",
+          "latencyMs",
+        ),
         "session event",
       );
       turn();
       step();
       eventString(event.occurrenceId, "session event.occurrenceId");
       eventString(event.tool, "session event.tool");
+      eventString(event.callDigest, "session event.callDigest");
       decodeCallDecisionV1(event.decision, "session event.decision");
       eventInteger(event.latencyMs, "session event.latencyMs", 0);
       break;

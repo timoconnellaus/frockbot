@@ -687,7 +687,11 @@ async function invokeBotToolForIsolateV1(
       { userId: input.userId, botId: input.botId },
       input.runId,
       input.sessionId,
-      { kind: "tool", effectId },
+      {
+        kind: "tool",
+        effectId,
+        once: active.mounted.runtime.services.tools.sendsOnce(preparation),
+      },
     );
     if (!admitted) {
       result = {

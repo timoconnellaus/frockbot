@@ -22,7 +22,8 @@ import type { LoopRuntime } from "./runtime.js";
  *
  * The occurrence id is the call's idempotency key. It is derived from the
  * Turn, the step and the call's position, so a call re-issued after a crash
- * carries the same key and a tool that honours keys runs its effect once.
+ * carries the same key and a tool that honours keys runs its effect once. A
+ * tool with no key to honour is sent at most once instead.
  */
 export async function executeToolsV1(
   runtime: LoopRuntime,
@@ -116,6 +117,12 @@ async function settleV1(
  * journal already holds its result: a replay of a Turn that got this far does
  * not run the effect again.
  *
+ * An occurrence with an intent and no result is a resume. A keyed call is
+ * dispatched again under its occurrence id. A call admitted `once` — its
+ * callee honours no key — may already have happened, so it is settled as
+ * uncertain before anything is prepared: it is neither reviewed again, where
+ * a fresh verdict could contradict an effect that already ran, nor sent.
+ *
  * A call declared inside a `batch` reaches this the same way a call the model
  * issued on its own does — same journalling, same admission fence, same
  * per-occurrence key — so the durable log holds one `tool/call` per effect
@@ -130,6 +137,16 @@ async function runOccurrenceV1(
   const { call, occurrenceId } = occurrence;
   const existing = journalEntryV1(runtime, occurrenceId);
   if (existing?.result) return undefined;
+  if (existing?.intent && (await options.sentOnce?.(occurrenceId))) {
+    const result = {
+      content: uncertainToolFailureV1(
+        "The Bot was interrupted after this call was sent and before its result was recorded. It was not sent again",
+      ),
+      isError: true,
+    };
+    await settleV1(runtime, occurrence, result, "interrupted");
+    return result;
+  }
   const context = {
     botId: runtime.agent.botId,
     agentId: runtime.agent.id,
@@ -152,11 +169,14 @@ async function runOccurrenceV1(
   } else {
     // Re-admitted on every dispatch, including a re-issue of an already
     // journaled intent: admission is keyed by effect id, so a Stop still
-    // fences a call the evicted Turn had already started.
+    // fences a call the evicted Turn had already started. An unkeyed call's
+    // admission is also the durable fact that it was sent, committed before
+    // it leaves.
     if (
       !(await options.admitEffect({
         kind: "tool",
         effectId: occurrenceId,
+        once: services.tools.sendsOnce(preparation),
       }))
     ) {
       await settleV1(

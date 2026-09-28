@@ -6,7 +6,12 @@ import {
   type UserSettingsViewV1,
 } from "@frockbot/core/configuration";
 import { createShellBotBackendContribution } from "./backend.js";
-import { remainingRunEffectAdmissions, stopRun } from "./turn.js";
+import {
+  admitRunEffect,
+  remainingRunEffectAdmissions,
+  sentRunEffectOnce,
+  stopRun,
+} from "./turn.js";
 import type { ShellBotBackendHost } from "./backend-state.js";
 import {
   botTurnCommandFingerprintV1,
@@ -433,5 +438,61 @@ describe("effect admission budget", () => {
         }),
       ),
     ).toThrow();
+  });
+});
+
+describe("unkeyed effect admission", () => {
+  const effect = { kind: "tool" as const, effectId: "tool:1:1:0" };
+
+  async function journaled(): ReturnType<typeof fixture> {
+    const events = toolIntentEvents();
+    const fixed = await fixture(
+      storedRun({
+        events: [],
+        eventRange: { startSeq: 0, endSeq: events.length },
+      } as Partial<StoredRun>),
+    );
+    await new SessionEventLog(fixed.storage).rewrite(turn.sessionId, events);
+    return fixed;
+  }
+
+  test("records an unkeyed call as sent before it leaves, and never admits it again", async () => {
+    const { storage, contribution } = await journaled();
+
+    await expect(
+      admitRunEffect(contribution.state, identity, turn.runId, turn.sessionId, {
+        ...effect,
+        once: true,
+      }),
+    ).resolves.toBe(true);
+    // The admission is the durable fact the call was sent: it is committed
+    // before admission returns, so before the tool is dispatched.
+    expect(
+      (storage.values.get(`run:${turn.runId}`) as StoredRun).effectAdmissions,
+    ).toEqual([{ ...effect, outcome: "admitted-once" }]);
+    await expect(
+      sentRunEffectOnce(contribution.state, turn.runId, effect.effectId),
+    ).resolves.toBe(true);
+    await expect(
+      admitRunEffect(contribution.state, identity, turn.runId, turn.sessionId, {
+        ...effect,
+        once: true,
+      }),
+    ).rejects.toThrow("was already sent");
+  });
+
+  test("admits a keyed call again under the same key", async () => {
+    const { contribution } = await journaled();
+    const admit = () =>
+      admitRunEffect(contribution.state, identity, turn.runId, turn.sessionId, {
+        ...effect,
+        once: false,
+      });
+
+    await expect(admit()).resolves.toBe(true);
+    await expect(
+      sentRunEffectOnce(contribution.state, turn.runId, effect.effectId),
+    ).resolves.toBe(false);
+    await expect(admit()).resolves.toBe(true);
   });
 });

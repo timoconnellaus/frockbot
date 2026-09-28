@@ -64,6 +64,7 @@ import {
   computerEgressGenericOriginV1,
   createComputerEgressHandlerV1,
   openComputerEgressV1,
+  syntheticReviewIdsV1,
   type ComputerEgressJevV1,
   type ComputerEgressSeamV1,
 } from "./egress.js";
@@ -1412,6 +1413,8 @@ export function createComputerAgentFeature(
         subagentRoles: ["executor", "computerUse"],
       },
       idempotent: config.idempotentEffects === true,
+      // A shell command carries no key the Computer honours.
+      unkeyed: true,
       // Every command is reviewed before it runs, like any call that can act
       // on the world: a shell reaches the internet and the User's connected
       // accounts, so what it reads and where it sends it are both the
@@ -2411,6 +2414,8 @@ export function createComputerAgentFeature(
         subagentRoles: ["executor", "browserUse", "computerUse"],
       },
       idempotent: config.idempotentEffects === true,
+      // A click or a fill acts on a page that honours no key.
+      unkeyed: true,
       description:
         'Control the browser in the Bot\'s selected Computer and return an accessibility snapshot. Shapes: {"action":"snapshot"}; {"action":"navigate","url":...}; {"action":"click","role":"button","name":"Add"} (role AND name, both from the snapshot line, e.g. checkbox "Mark done"); {"action":"fill","label":"New todo","text":...}; {"action":"press","key":"Enter"}; {"action":"wait","milliseconds":500}. For a password, card number or other secret the user saved, fill by its reference instead of text: {"action":"fill","label":"Password","secret":"secret-…"}. You are never given the value, and must not read it back from the page; the result says only whether the field was filled. A payment detail, or a secret used on a site other than its own, first asks the user to approve that page and field; once they have, repeat the same fill with "approval" set to the id you were given.',
       inputSchema: {
@@ -2527,6 +2532,8 @@ export function createComputerAgentFeature(
       },
       // Its own clicks that commit anything are reviewed as `mutate` calls
       // one by one, before each runs; the task as a whole acts on nothing.
+      // Those clicks act on pages that honour no key.
+      unkeyed: true,
       description: [
         "Do one thing on a web page in the Computer's browser, fast: give the outcome you want as `goal` and every piece of text to type in `values`, and a decision model reads the page and clicks, types, ticks and chooses a step at a time until the goal is done.",
         "Use it for forms, settings, lists and anything that takes several clicks. Use computer_browser to read a page, to act once, or for a password or card number the person saved.",
@@ -2583,8 +2590,7 @@ export function createComputerAgentFeature(
               );
             }
             // Every host call and Jev request of the task is its own effect,
-            // under the task call's id, so a re-run after an eviction repeats
-            // none of them under a new identity.
+            // named under the task call's id.
             let sequence = 0;
             const perform = async (action: ComputerBrowserAction) =>
               operation(context, async () =>
@@ -2603,7 +2609,7 @@ export function createComputerAgentFeature(
               if (origin) previewOrigins.add(origin);
             }
             let decisions = 0;
-            let reviews = 0;
+            const reviewId = syntheticReviewIdsV1(`${context.effectId}:review`);
             const report = await runBrowserTaskV1(task, {
               observe: async () => {
                 const state = await perform({ type: "snapshot" });
@@ -2626,16 +2632,17 @@ export function createComputerAgentFeature(
                   context.signal,
                 ),
               review: async (action, page) => {
-                const effectId = `${context.effectId}:review:${reviews++}`;
+                const input = {
+                  goal: task.goal,
+                  click: action.describe,
+                  ...(page.url ? { url: page.url } : {}),
+                  ...(page.title ? { title: page.title } : {}),
+                };
+                const effectId = await reviewId(input);
                 const call: ToolCall = {
                   id: effectId,
                   name: "computer_browser_task",
-                  input: {
-                    goal: task.goal,
-                    click: action.describe,
-                    ...(page.url ? { url: page.url } : {}),
-                    ...(page.title ? { title: page.title } : {}),
-                  },
+                  input,
                 };
                 const prepared = await runtime.hooks.prepareTool(
                   call,
