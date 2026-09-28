@@ -5245,9 +5245,53 @@
         },
         "mono": {
           "type": "boolean"
+        },
+        "tab": {
+          "enum": ["summary", "prompt", "output", "tools", "input", "result"]
         }
       },
       "required": ["label", "text"],
+      "additionalProperties": false
+    },
+    "WorkLogLink": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "enum": [
+            "input",
+            "model",
+            "jev",
+            "tool",
+            "memory",
+            "skill",
+            "plugin",
+            "computer",
+            "retry",
+            "compaction",
+            "send",
+            "task",
+            "system"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "isError": {
+          "type": "boolean"
+        }
+      },
+      "required": ["kind", "title"],
       "additionalProperties": false
     },
     "WorkLogEntry": {
@@ -5286,6 +5330,11 @@
           "minLength": 1,
           "maxLength": 200
         },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
         "detail": {
           "type": "string",
           "minLength": 1,
@@ -5296,6 +5345,14 @@
           "minimum": 0
         },
         "isError": {
+          "type": "boolean"
+        },
+        "verdict": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "beforeTurn": {
           "type": "boolean"
         },
         "tokens": {
@@ -5313,6 +5370,13 @@
           "maxItems": 6,
           "items": {
             "$ref": "#/$defs/WorkLogSection"
+          }
+        },
+        "chain": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/WorkLogLink"
           }
         }
       },

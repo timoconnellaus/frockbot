@@ -3305,5 +3305,48 @@
       ],
       "nextCursor": "run-index:0001"
     }
+  },
+  {
+    "name": "WorkLogLink for a Jev check",
+    "schema": "WorkLogLink",
+    "value": {
+      "kind": "jev",
+      "title": "Jev · allow",
+      "detail": "matches request",
+      "durationMs": 212
+    }
+  },
+  {
+    "name": "WorkLogEntry for a tool call with its chain",
+    "schema": "WorkLogEntry",
+    "value": {
+      "seq": 3,
+      "at": "2026-09-28T09:14:22.000Z",
+      "kind": "tool",
+      "step": 1,
+      "title": "calendar/freebusy",
+      "label": "Tool call",
+      "detail": "Free after 6:00 pm",
+      "durationMs": 412,
+      "chain": [
+        {
+          "kind": "model",
+          "title": "Asked for by request #1"
+        },
+        {
+          "kind": "tool",
+          "title": "Ran",
+          "durationMs": 412
+        }
+      ],
+      "sections": [
+        {
+          "label": "Input",
+          "text": "{}",
+          "mono": true,
+          "tab": "input"
+        }
+      ]
+    }
   }
 ]

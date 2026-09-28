@@ -13,6 +13,7 @@ import {
   decodeProtocol,
   type WorkLogEntry,
   type WorkLogField,
+  type WorkLogLink,
   type WorkLogPage,
   type WorkLogSection,
   type WorkLogTotals,
@@ -226,6 +227,12 @@ class TurnBuilder {
   outcomeReason: string | undefined;
   private turnStartedAt: number | undefined;
   private readonly models = new Map<string, WorkLogEntry>();
+  private requests = 0;
+  /** Which request asked for the calls that follow it, by its number. */
+  private readonly requestNumbers = new Map<string, number>();
+  private lastAsking: number | undefined;
+  /** Jev's call reviews, waiting for the call they were about. */
+  private readonly callReviews = new Map<string, WorkLogLink>();
   private readonly tools = new Map<
     string,
     { entry: WorkLogEntry; at: number }
@@ -257,6 +264,9 @@ class TurnBuilder {
         ...entry,
         title: cut(entry.title, TITLE_CHARS) || type,
       };
+      if (entry.kind === "compaction" && this.turnStartedAt === undefined) {
+        full.beforeTurn = true;
+      }
       if (entry.detail !== undefined) {
         const detail = cut(entry.detail, DETAIL_CHARS);
         if (detail) full.detail = detail;
@@ -303,6 +313,9 @@ class TurnBuilder {
           "Turn read",
           turnReadDetail(obj(event.directive)),
           obj(event.directive),
+          {
+            verdict: capital(words(obj(event.directive).complexity)) ?? "Read",
+          },
         );
       case "supervision/step":
         return this.jev(
@@ -311,6 +324,10 @@ class TurnBuilder {
           "Step review",
           stepDetail(obj(event.decision)),
           obj(event.decision),
+          {
+            verdict: capital(str(obj(event.decision).text)) ?? "Reviewed",
+            isError: str(obj(event.decision).text) === "withhold",
+          },
         );
       case "supervision/send": {
         const decision = obj(event.decision);
@@ -322,11 +339,17 @@ class TurnBuilder {
             .filter(Boolean)
             .join(" · "),
           decision,
+          {
+            verdict: capital(str(decision.send)) ?? "Reviewed",
+            isError: str(decision.send) === "withhold",
+          },
         );
       }
       case "supervision/call": {
         const decision = obj(event.decision);
-        return this.jev(
+        const rejected = str(decision.decision) === "reject";
+        const verdict = capital(str(decision.decision)) ?? "Reviewed";
+        this.jev(
           push,
           event,
           `Call review · ${str(event.tool) ?? "tool"}`,
@@ -334,8 +357,23 @@ class TurnBuilder {
             .filter(Boolean)
             .join(" · "),
           decision,
-          str(decision.decision) === "reject",
+          { verdict, isError: rejected, label: "Call review" },
         );
+        // The review belongs on the call's own chain too, wherever it lands.
+        const link: WorkLogLink = {
+          kind: "jev",
+          title: `Jev · ${verdict.toLowerCase()}`,
+          ...(words(decision.reasonCode)
+            ? { detail: words(decision.reasonCode)! }
+            : {}),
+          ...optionalDuration(num(event.latencyMs)),
+          ...(rejected ? { isError: true } : {}),
+        };
+        const id = str(event.occurrenceId);
+        const call = id ? this.tools.get(id) : undefined;
+        if (call) addLink(call.entry, link, true);
+        else if (id) this.callReviews.set(id, link);
+        return;
       }
       case "supervision/progress": {
         const decision = obj(event.decision);
@@ -348,7 +386,10 @@ class TurnBuilder {
             ? `stuck · ${signals.join(", ")}`
             : "making progress",
           decision,
-          bool(decision.stuck),
+          {
+            verdict: bool(decision.stuck) ? "Stuck" : "On track",
+            isError: bool(decision.stuck),
+          },
         );
       }
       case "supervision/outcome": {
@@ -361,6 +402,7 @@ class TurnBuilder {
             .filter(Boolean)
             .join(" · "),
           decision,
+          { verdict: capital(words(decision.status)) ?? "Checked" },
         );
       }
       case "supervision/question": {
@@ -371,6 +413,12 @@ class TurnBuilder {
           "Question routing",
           `answered by the ${str(route.answerer) ?? "conversation"}`,
           route,
+          {
+            verdict:
+              str(route.answerer) === "person"
+                ? "Ask the person"
+                : "From the conversation",
+          },
         );
       }
       case "model/request": {
@@ -380,9 +428,28 @@ class TurnBuilder {
           num(request.messageCount) ?? arr(request.messages).length;
         const tools = num(request.toolCount) ?? arr(request.tools).length;
         this.totals.modelRequests += 1;
+        this.requests += 1;
+        const cutRequest = obj(request.excerpt);
+        const lastMessage = arr(request.messages).at(-1);
         const entry = push({
           kind: "model",
           title: "Model request",
+          label: `Request #${this.requests}`,
+          ...withSections(
+            sec(
+              "System prompt",
+              str(cutRequest.system) ?? str(request.system),
+              false,
+              "prompt",
+            ),
+            sec(
+              "Last message in",
+              str(cutRequest.lastMessage) ??
+                (lastMessage === undefined ? undefined : pretty(lastMessage)),
+              true,
+              "prompt",
+            ),
+          ),
           fields: fields([
             ["Provider", providerName(str(request.provider))],
             ["Model", str(request.model)],
@@ -391,7 +458,10 @@ class TurnBuilder {
             ["Request", requestId],
           ]),
         });
-        if (requestId) this.models.set(requestId, entry);
+        if (requestId) {
+          this.models.set(requestId, entry);
+          this.requestNumbers.set(requestId, this.requests);
+        }
         return;
       }
       case "model/usage": {
@@ -472,10 +542,11 @@ class TurnBuilder {
         entry.detail = callWords;
         appendSections(
           entry,
-          sec("What the model said", text),
-          sec("Tool calls", calls.join("\n"), true),
+          sec("What the model said", text, false, "output"),
+          sec("Tool calls", calls.join("\n"), true, "tools"),
           excerpt(event),
         );
+        this.lastAsking = this.requestNumbers.get(str(event.requestId) ?? "");
         return;
       }
       case "tool/call": {
@@ -484,16 +555,34 @@ class TurnBuilder {
           name: str(event.name) ?? "tool",
           input: event.input,
         });
+        const id = str(event.occurrenceId);
+        const review = id ? this.callReviews.get(id) : undefined;
         const entry = push({
           kind: "tool",
           title: name,
+          label: "Tool call",
+          chain: [
+            ...(this.lastAsking === undefined
+              ? []
+              : [
+                  {
+                    kind: "model" as const,
+                    title: `Asked for by request #${this.lastAsking}`,
+                  },
+                ]),
+            ...(review ? [review] : []),
+          ],
           ...withSections(
-            sec("Input", pretty(event.input), true),
+            sec("Input", pretty(event.input), true, "input"),
             excerpt(event),
           ),
+          fields: fields([["Effect key", id]]),
         });
-        const id = str(event.occurrenceId);
-        if (id) this.tools.set(id, { entry, at: time });
+        if (entry.chain?.length === 0) delete entry.chain;
+        if (id) {
+          this.tools.set(id, { entry, at: time });
+          this.callReviews.delete(id);
+        }
         return;
       }
       case "tool/result": {
@@ -509,9 +598,18 @@ class TurnBuilder {
           ? "interrupted"
           : firstLine(content) || (isError ? "failed" : "done");
         if (isError || interrupted) entry.isError = true;
+        addLink(entry, {
+          kind: "tool",
+          title: interrupted ? "Interrupted" : isError ? "Failed" : "Ran",
+          ...(firstLine(content)
+            ? { detail: cut(firstLine(content), 200) }
+            : {}),
+          ...optionalDuration(entry.durationMs),
+          ...(isError || interrupted ? { isError: true } : {}),
+        });
         appendSections(
           entry,
-          sec(isError ? "Error" : "Result", content, true),
+          sec(isError ? "Error" : "Result", content, true, "result"),
           excerpt(event),
         );
         return;
@@ -520,7 +618,7 @@ class TurnBuilder {
         const entry = push({
           kind: "plugin",
           title: `${str(event.packageId) ?? "plugin"} · ${str(event.name) ?? "tool"}`,
-          ...withSections(sec("Input", pretty(event.input), true)),
+          ...withSections(sec("Input", pretty(event.input), true, "input")),
         });
         const id = str(event.callId);
         if (id) this.pluginCalls.set(id, { entry, at: time });
@@ -535,7 +633,12 @@ class TurnBuilder {
         if (bool(event.isError)) call.entry.isError = true;
         appendSections(
           call.entry,
-          sec(bool(event.isError) ? "Error" : "Result", content, true),
+          sec(
+            bool(event.isError) ? "Error" : "Result",
+            content,
+            true,
+            "result",
+          ),
         );
         return;
       }
@@ -865,7 +968,7 @@ class TurnBuilder {
     title: string,
     detail: string,
     decision: Event,
-    isError = false,
+    how: { verdict: string; isError?: boolean; label?: string },
   ): void {
     this.totals.jevChecks += 1;
     const judgments = arr(decision.judgments)
@@ -880,9 +983,11 @@ class TurnBuilder {
     push({
       kind: "jev",
       title,
+      label: how.label ?? title,
+      verdict: cut(how.verdict, 40),
       detail,
       ...optionalDuration(num(event.latencyMs)),
-      ...(isError ? { isError: true } : {}),
+      ...(how.isError ? { isError: true } : {}),
       fields: fields([
         ["Judge", str(decision.model)],
         ["Billing", "Platform overhead — not charged"],
@@ -1057,6 +1162,21 @@ function millis(ms: number): string {
 function dollars(micros: number): string {
   return `$${(micros / 1_000_000).toFixed(micros < 10_000 ? 4 : 3)}`;
 }
+function capital(value: string | undefined): string | undefined {
+  return value ? value[0]!.toUpperCase() + value.slice(1) : undefined;
+}
+/** Adds one step to the way a call got to run; a review goes before the run. */
+function addLink(entry: WorkLogEntry, link: WorkLogLink, beforeRun = false) {
+  const chain = [...(entry.chain ?? [])];
+  const run = chain.findIndex(
+    (existing) => existing.kind === "tool" && !beforeRun,
+  );
+  if (beforeRun) {
+    const ran = chain.findIndex((existing) => existing.kind === "tool");
+    chain.splice(ran === -1 ? chain.length : ran, 0, link);
+  } else if (run === -1) chain.push(link);
+  entry.chain = chain.slice(0, 8);
+}
 function optionalDuration(ms: number | undefined): { durationMs?: number } {
   return ms === undefined ? {} : { durationMs: ms };
 }
@@ -1064,9 +1184,19 @@ function sec(
   label: string,
   text: string | undefined,
   mono = false,
+  tab?: WorkLogSection["tab"],
 ): WorkLogSection[] {
   const body = cut(text?.trim(), SECTION_CHARS);
-  return body ? [{ label, text: body, ...(mono ? { mono } : {}) }] : [];
+  return body
+    ? [
+        {
+          label,
+          text: body,
+          ...(mono ? { mono } : {}),
+          ...(tab ? { tab } : {}),
+        },
+      ]
+    : [];
 }
 /** What a projection kept of an event too large to store inline. */
 function excerpt(event: Event): WorkLogSection[] {
