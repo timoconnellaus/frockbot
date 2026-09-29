@@ -607,6 +607,13 @@ export async function describePlugin(
       DISPOSE_DEADLINE_MS,
       "The Workers runtime did not stop",
     );
+    // Under Bun (the test suites; the build service runs on Node), the
+    // finalizer of workerd's control-pipe stream closes its fd number again
+    // after exit has already closed it. Left to a later collection, that close
+    // lands on whatever reused the number — often the next runtime's control
+    // pipe, which then never reports ready. Collecting now runs it while the
+    // number is still free.
+    (globalThis as { Bun?: { gc(force: boolean): void } }).Bun?.gc(true);
   }
 }
 
