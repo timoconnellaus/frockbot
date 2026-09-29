@@ -16,23 +16,43 @@ navigation?.addEventListener("click", (event) => {
 const year = document.querySelector("#year");
 if (year) year.textContent = String(new Date().getFullYear());
 
-const heroFlock = document.querySelector(".hero-flock");
-let heroVisible = true;
-
-const updateHeroMotion = () => {
-  if (!(heroFlock instanceof SVGSVGElement)) return;
-  heroFlock.classList.toggle("paused", document.hidden || !heroVisible);
-};
-
-updateHeroMotion();
-document.addEventListener("visibilitychange", updateHeroMotion);
-
-if (heroFlock && "IntersectionObserver" in window) {
-  new IntersectionObserver(
-    ([entry]) => {
-      heroVisible = entry?.isIntersecting ?? false;
-      updateHeroMotion();
+// The hero's characters sink behind the devices as the page scrolls away.
+const heroStage = document.querySelector(".hero-stage");
+if (heroStage instanceof HTMLElement) {
+  let queued = false;
+  const sink = () => {
+    queued = false;
+    const distance = window.innerWidth < 700 ? 260 : 420;
+    heroStage.style.setProperty(
+      "--p",
+      String(Math.min(1, window.scrollY / distance)),
+    );
+  };
+  window.addEventListener(
+    "scroll",
+    () => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(sink);
     },
-    { rootMargin: "100px 0px" },
-  ).observe(heroFlock);
+    { passive: true },
+  );
+  sink();
+}
+
+// Further down, each section's characters pop out while it is on screen.
+if ("IntersectionObserver" in window) {
+  const zones = document.querySelectorAll("[data-peek-zone]");
+  if (zones.length) {
+    document.documentElement.classList.add("js-peek");
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          entry.target.classList.toggle("is-peeking", entry.isIntersecting);
+        }
+      },
+      { rootMargin: "0px 0px -30% 0px" },
+    );
+    for (const zone of zones) observer.observe(zone);
+  }
 }

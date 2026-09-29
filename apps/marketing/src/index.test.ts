@@ -5,6 +5,7 @@ import {
   CONNECT_APP_COUNT_V1,
   connectToolkitV1,
 } from "../../../app/connect/catalog";
+import { COMPUTER_TARIFF } from "../../../app/billing/computer";
 import worker, {
   MAC_DOWNLOAD_URL,
   canonicalUrl,
@@ -210,17 +211,58 @@ describe("marketing worker", () => {
     expect(homepage.headers.get("x-frame-options")).toBe("DENY");
     const page = await homepage.text();
     const hero = page.slice(
-      page.indexOf('<div class="hero-peek"'),
-      page.indexOf("</section>", page.indexOf('<div class="hero-peek"')),
+      page.indexOf('<section class="hero"'),
+      page.indexOf("</section>", page.indexOf('<section class="hero"')),
     );
-    expect(hero).toMatch(/<svg[^>]*class="hero-flock"/);
-    expect(hero).not.toMatch(/<object\b|<style\b|\bstyle=/);
-    expect(hero).toContain('data-character="pixel"');
-    expect(hero).toContain('id="rabbit-foot-right"');
+    // Everything moves through classes and custom properties the script sets,
+    // because the policy refuses inline styles.
+    expect(page).not.toMatch(/<object\b|<style\b|\bstyle=/);
+    expect(hero).toContain('<div class="hero-stage-wrap" aria-hidden="true">');
+    const cast = [...hero.matchAll(/class="peek peek-([a-z]+)"/g)].map(
+      (match) => match[1]!,
+    );
+    expect(cast).toHaveLength(11);
+    for (const name of cast) {
+      expect(hero).toContain(`src="/assets/characters/${name}.png"`);
+    }
     const css = await publicFile("styles.css");
-    expect(css).toContain(".hero-flock .arrival");
-    expect(css).toContain(".hero-flock.paused *");
+    expect(css).toContain("@keyframes peek-in");
     expect(css).toContain("prefers-reduced-motion: reduce");
+    const script = await publicFile("script.js");
+    expect(script).toMatch(/heroStage\.style\.setProperty\(\s*"--p"/);
+  });
+
+  test("characters down the page only pop out of sections that say so", async () => {
+    const page = await publicFile("index.html");
+    const zones = [...page.matchAll(/data-peek-zone="([a-z]+)"/g)].map(
+      (match) => match[1]!,
+    );
+    expect(zones).toEqual([
+      "why",
+      "teaser",
+      "how",
+      "uses",
+      "apps",
+      "pricing",
+      "tinker",
+      "cta",
+    ]);
+    const css = parseStyleRules(await publicFile("styles.css"));
+    for (const [, name] of page.matchAll(
+      /class="follow [^"]*(follow-[a-z]+-[a-z]+)"/g,
+    )) {
+      // Each one has a place to stand and a place to hide.
+      const rule = css.find((entry) => entry.selectors.includes(`.${name}`));
+      expect(rule?.declarations.left).toBeDefined();
+      expect(
+        rule?.declarations["--hx"] ?? rule?.declarations["--hy"],
+      ).toBeDefined();
+    }
+    // A character leaning in from the screen's edge must never widen the page.
+    const zone = css.find((entry) =>
+      entry.selectors.includes("[data-peek-zone]"),
+    );
+    expect(zone?.declarations["overflow-x"]).toBe("clip");
   });
 
   test.each(["/download/mac", "/download/mac/"])(
@@ -570,7 +612,7 @@ describe("legal policy pages", () => {
   });
 });
 
-describe("Mac download button", () => {
+describe("hero downloads", () => {
   test("the hero offers the site download route with the Apple mark", async () => {
     const homepage = await publicFile("index.html");
     const links: { classes: string; text: string; symbols: string[] }[] = [];
@@ -599,10 +641,46 @@ describe("Mac download button", () => {
     );
 
     expect(links).toHaveLength(1);
-    expect(links[0].classes.split(/\s+/)).toContain("button-mac");
-    expect(links[0].text.replace(/\s+/g, " ").trim()).toBe("Download for Mac");
+    expect(links[0].classes.split(/\s+/)).toContain("store-badge");
+    expect(links[0].text.replace(/\s+/g, " ").trim()).toBe(
+      "Download for macOS",
+    );
     expect(links[0].symbols).toEqual(["#apple-mark"]);
     expect(homepage).not.toContain("releases/download/mac-v");
+  });
+
+  test("stores that do not list FrockBot yet are shown, never linked", async () => {
+    const homepage = await publicFile("index.html");
+    const soon: { src: string; alt: string }[] = [];
+    let linked = 0;
+    await drain(
+      new HTMLRewriter()
+        .on(".store-group-soon img", {
+          element(element) {
+            soon.push({
+              src: element.getAttribute("src") ?? "",
+              alt: element.getAttribute("alt") ?? "",
+            });
+          },
+        })
+        .on(".store-group-soon a", {
+          element() {
+            linked += 1;
+          },
+        }),
+      homepage,
+    );
+    expect(linked).toBe(0);
+    expect(soon.map((badge) => badge.alt)).toEqual([
+      "App Store, coming soon",
+      "Google Play, coming soon",
+      "Microsoft Store, coming soon",
+    ]);
+    for (const badge of soon) {
+      const mark = await publicFile(badge.src.slice(1));
+      expect(mark).toStartWith("<svg");
+      expect(mark).not.toMatch(/<script|<foreignObject|\sstyle=|href="(?!#)/i);
+    }
   });
 
   test("hero buttons keep their label on one line and wrap as a row", async () => {
@@ -616,14 +694,31 @@ describe("Mac download button", () => {
       ) as Record<string, string>;
 
     expect(declarations(".button")["white-space"]).toBe("nowrap");
+    expect(declarations(".store-badge")["white-space"]).toBe("nowrap");
     expect(declarations(".hero-actions")["flex-wrap"]).toBe("wrap");
-    expect(declarations(".button-mac").background).toBe("var(--ink)");
-    expect(declarations(".button-mac svg").fill).toBe("currentColor");
+    expect(declarations(".store-badge svg").fill).toBe("currentColor");
   });
+});
 
+describe("homepage pricing", () => {
+  // The plans, trial and top-ups are the Stripe Package's to state; its own
+  // tests hold this section to them. The Computer rate is billing's.
+  test("states the Computer rate every plan draws from", async () => {
+    const homepage = await publicFile("index.html");
+    const start = homepage.indexOf('class="section pricing"');
+    const section = homepage
+      .slice(start, homepage.indexOf("</section>", start))
+      .replace(/\s+/g, " ");
+    expect(section).toContain(
+      `US$${COMPUTER_TARIFF.activeUsdPerHour.toFixed(2)} per hour, with up to ${COMPUTER_TARIFF.storageIncludedGb} GB`,
+    );
+  });
+});
+
+describe("connected apps", () => {
   test("the connected-apps wall shows real apps and the catalog's own count", async () => {
     const homepage = await publicFile("index.html");
-    const start = homepage.indexOf('<section class="section apps"');
+    const start = homepage.indexOf('class="section apps"');
     const section = homepage.slice(
       start,
       homepage.indexOf("</section>", start),
