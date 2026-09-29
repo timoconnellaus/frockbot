@@ -207,6 +207,57 @@ describe("the paged Session event log", () => {
     expect(pages.length).toBeGreaterThan(1);
   });
 
+  test("reads and appends after a repair grows a page past the append budget", async () => {
+    const storage = new MemoryStorage();
+    const log = new SessionEventLog(storage);
+    const session = new Session(SESSION_ID);
+    for (let turn = 1; turn <= 250; turn += 1) {
+      session.appendBatch([
+        { type: "turn/start", turn },
+        { type: "step/start", turn, step: 1 },
+        {
+          type: "user/message",
+          turn,
+          step: 1,
+          messageId: `message-${turn}`,
+          text: "u".repeat(1_000),
+        },
+        { type: "step/end", turn, step: 1, outcome: "completed" },
+        { type: "turn/end", turn, outcome: "completed" },
+      ]);
+    }
+    const events = [...session.activeRunJournal];
+    await log.rewrite(SESSION_ID, events);
+
+    const grow = (event: Record<string, unknown>) =>
+      event.type === "user/message"
+        ? { ...event, text: `${event.text as string}${"v".repeat(200)}` }
+        : undefined;
+    await log.repairStoredEvents(SESSION_ID, grow);
+
+    const firstPage = storage.values.get(
+      `${sessionEventLogPagePrefixV1(SESSION_ID)}${"0".repeat(10)}`,
+    );
+    expect(Buffer.byteLength(JSON.stringify(firstPage))).toBeGreaterThan(
+      SESSION_EVENT_PAGE_BYTES_V1,
+    );
+    const repaired = events.map(
+      (event) =>
+        (grow(event as unknown as Record<string, unknown>) ??
+          event) as SessionEvent,
+    );
+    expect(await log.read(SESSION_ID)).toEqual(repaired);
+
+    const later = decodeSessionEvent({
+      type: "turn/start",
+      turn: 251,
+      seq: repaired.length,
+      timestamp: new Date().toISOString(),
+    });
+    await log.append(SESSION_ID, [later]);
+    expect(await log.read(SESSION_ID)).toEqual([...repaired, later]);
+  });
+
   test("rebases compact run ranges when repair inserts into the log", async () => {
     const storage = new MemoryStorage();
     const log = new SessionEventLog(storage);

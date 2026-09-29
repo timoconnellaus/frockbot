@@ -18,7 +18,11 @@ import {
   type WorkingContextAppendMetaV1,
 } from "./working-context.js";
 
-/** Maximum serialized size of one Session page value. */
+/**
+ * The size an append fills a Session page to. A read does not enforce it: a
+ * repair may grow a full page past it, and the page stays well under the
+ * SQLite value ceiling.
+ */
 export const SESSION_EVENT_PAGE_BYTES_V1 = 256 * 1024;
 /** Events at or below this size may live directly in a page. */
 export const SESSION_EVENT_INLINE_BYTES_V1 = 16 * 1024;
@@ -288,8 +292,7 @@ function requirePage(
     input.page !== page ||
     !Number.isSafeInteger(input.startSeq) ||
     input.startSeq < 0 ||
-    !Array.isArray(input.entries) ||
-    utf8Bytes(input) > SESSION_EVENT_PAGE_BYTES_V1
+    !Array.isArray(input.entries)
   ) {
     throw new Error(`Session event page ${page} for "${sessionId}" is invalid`);
   }
