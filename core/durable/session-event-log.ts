@@ -276,6 +276,8 @@ function requireIndex(
   return input;
 }
 
+// The page budget is a rule for writers. A page that grew past it is still
+// whole, and refusing it here made every read of the log fail.
 function requirePage(
   input: StoredSessionEventPageV1 | undefined,
   sessionId: string,
@@ -288,8 +290,7 @@ function requirePage(
     input.page !== page ||
     !Number.isSafeInteger(input.startSeq) ||
     input.startSeq < 0 ||
-    !Array.isArray(input.entries) ||
-    utf8Bytes(input) > SESSION_EVENT_PAGE_BYTES_V1
+    !Array.isArray(input.entries)
   ) {
     throw new Error(`Session event page ${page} for "${sessionId}" is invalid`);
   }
@@ -761,6 +762,9 @@ export class SessionEventLog {
     );
     if (!index) return 0;
     let repaired = 0;
+    // Pages are filled to the budget, so a replacement that grows can push
+    // one over it. From that page on, the entries are paged again.
+    let overflow: { page: number; entries: StoredSessionEventV1[] } | undefined;
     for (let page = 0; page < index.pageCount; page += 1) {
       const key = sessionEventLogPageKey(sessionId, page);
       const stored = requirePage(
@@ -801,7 +805,30 @@ export class SessionEventLog {
         changed = true;
         repaired += 1;
       }
-      if (changed) await this.storage.put(key, { ...stored, entries });
+      if (overflow) {
+        overflow.entries.push(...entries);
+        await this.storage.delete(key);
+        continue;
+      }
+      const next = { ...stored, entries };
+      if (changed && utf8Bytes(next) > SESSION_EVENT_PAGE_BYTES_V1) {
+        overflow = { page, entries };
+        await this.storage.delete(key);
+        continue;
+      }
+      if (changed) await this.storage.put(key, next);
+    }
+    if (overflow) {
+      const first = overflow.entries[0];
+      await this.appendStored(
+        sessionId,
+        {
+          ...index,
+          eventCount: first ? storedEventSeq(first) : index.eventCount,
+          pageCount: overflow.page,
+        },
+        overflow.entries,
+      );
     }
     return repaired;
   }

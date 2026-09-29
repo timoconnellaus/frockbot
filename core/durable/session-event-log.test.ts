@@ -15,6 +15,12 @@ import {
 
 const SESSION_ID = "user-1:primary";
 
+function pageKeysOf(storage: MemoryStorage): string[] {
+  return [...storage.values.keys()].filter((key) =>
+    key.startsWith(sessionEventLogPagePrefixV1(SESSION_ID)),
+  );
+}
+
 function journal(systemBytes = 80_000): SessionEvent[] {
   const session = new Session(SESSION_ID);
   session.appendBatch([
@@ -205,6 +211,69 @@ describe("the paged Session event log", () => {
       key.startsWith(sessionEventLogPagePrefixV1(SESSION_ID)),
     );
     expect(pages.length).toBeGreaterThan(1);
+  });
+
+  test("keeps a repaired log readable when a repair grows a full page", async () => {
+    const storage = new MemoryStorage();
+    const log = new SessionEventLog(storage);
+    const session = new Session(SESSION_ID);
+    for (let turn = 1; turn <= 40; turn += 1) {
+      session.appendBatch([
+        { type: "turn/start", turn },
+        { type: "step/start", turn, step: 1 },
+        {
+          type: "user/message",
+          turn,
+          step: 1,
+          messageId: `message-${turn}`,
+          text: "u".repeat(10_000),
+        },
+        { type: "step/end", turn, step: 1, outcome: "completed" },
+        { type: "turn/end", turn, outcome: "completed" },
+      ]);
+    }
+    const events = [...session.activeRunJournal];
+    await log.rewrite(SESSION_ID, events);
+    const before = pageKeysOf(storage).length;
+
+    const grown = (event: Record<string, unknown>) =>
+      event.type === "user/message"
+        ? { ...event, text: `${event.text as string}${"g".repeat(5_000)}` }
+        : undefined;
+    expect(await log.repairStoredEvents(SESSION_ID, grown)).toBe(40);
+
+    const expected = events.map((event) =>
+      decodeSessionEvent(
+        grown(event as unknown as Record<string, unknown>) ?? event,
+      ),
+    );
+    expect(await log.read(SESSION_ID)).toEqual(expected);
+    expect(await log.readRange(SESSION_ID, 95, 110)).toEqual(
+      expected.slice(95, 110),
+    );
+    expect(pageKeysOf(storage).length).toBeGreaterThan(before);
+    for (const key of pageKeysOf(storage)) {
+      expect(
+        new TextEncoder().encode(JSON.stringify(storage.values.get(key)))
+          .byteLength,
+      ).toBeLessThanOrEqual(SESSION_EVENT_PAGE_BYTES_V1);
+    }
+  });
+
+  test("reads a page that was stored over the page budget", async () => {
+    const storage = new MemoryStorage();
+    const log = new SessionEventLog(storage);
+    const events = journal(1_000);
+    await log.rewrite(SESSION_ID, events);
+    const key = pageKeysOf(storage)[0]!;
+    const page = storage.values.get(key) as { entries: unknown[] };
+    storage.values.set(key, {
+      ...page,
+      padding: "p".repeat(SESSION_EVENT_PAGE_BYTES_V1),
+    });
+
+    expect(await log.read(SESSION_ID)).toEqual(events);
+    expect(await log.readRange(SESSION_ID, 1, 3)).toEqual(events.slice(1, 3));
   });
 
   test("rebases compact run ranges when repair inserts into the log", async () => {
