@@ -988,7 +988,32 @@ export type WorkLogTokens = {
   reasoning: number;
 };
 export type WorkLogField = { label: string; value: string };
-export type WorkLogSection = { label: string; text: string; mono?: boolean };
+export type WorkLogSection = {
+  label: string;
+  text: string;
+  mono?: boolean;
+  tab?: "summary" | "prompt" | "output" | "tools" | "input" | "result";
+};
+export type WorkLogLink = {
+  kind:
+    | "input"
+    | "model"
+    | "jev"
+    | "tool"
+    | "memory"
+    | "skill"
+    | "plugin"
+    | "computer"
+    | "retry"
+    | "compaction"
+    | "send"
+    | "task"
+    | "system";
+  title: string;
+  detail?: string;
+  durationMs?: number;
+  isError?: boolean;
+};
 export type WorkLogEntry = {
   seq: number;
   at: Instant;
@@ -1008,12 +1033,16 @@ export type WorkLogEntry = {
     | "system";
   step?: number;
   title: string;
+  label?: string;
   detail?: string;
   durationMs?: number;
   isError?: boolean;
+  verdict?: string;
+  beforeTurn?: boolean;
   tokens?: WorkLogTokens;
   fields?: Array<WorkLogField>;
   sections?: Array<WorkLogSection>;
+  chain?: Array<WorkLogLink>;
 };
 export type WorkLogTotals = {
   steps: number;
@@ -1351,6 +1380,7 @@ export interface ProtocolTypes {
   WorkLogTokens: WorkLogTokens;
   WorkLogField: WorkLogField;
   WorkLogSection: WorkLogSection;
+  WorkLogLink: WorkLogLink;
   WorkLogEntry: WorkLogEntry;
   WorkLogTotals: WorkLogTotals;
   WorkLogTurn: WorkLogTurn;

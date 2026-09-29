@@ -77,6 +77,7 @@ function booking() {
         messageCount: 4,
         toolCount: 14,
         truncated: true,
+        excerpt: { system: "You are Pixel.", lastMessage: "Book Diggies" },
       },
     }),
     event(320, "model/retry", {
@@ -328,6 +329,87 @@ describe("projectWorkLogTurnV1", () => {
     expect(turn.entries[0]!.sections?.[0]?.label).toBe(
       "Excerpt — the full event is too large to show",
     );
+  });
+});
+
+describe("the inspector's shape", () => {
+  test("a tool call carries how it got to run", () => {
+    const tool = projectWorkLogTurnV1(run, booking()).entries.find(
+      (entry) => entry.kind === "tool",
+    )!;
+    expect(tool.label).toBe("Tool call");
+    expect(tool.chain).toEqual([
+      { kind: "model", title: "Asked for by request #1" },
+      {
+        kind: "jev",
+        title: "Jev · allow",
+        detail: "matches request",
+        durationMs: 212,
+      },
+      {
+        kind: "tool",
+        title: "Ran",
+        detail: "Free after 6:00 pm",
+        durationMs: 412,
+      },
+    ]);
+    expect(tool.fields).toContainEqual({ label: "Effect key", value: "o1" });
+    expect(tool.sections?.map((section) => section.tab)).toEqual([
+      "input",
+      "result",
+    ]);
+  });
+
+  test("a model request is numbered, and its prompt and output are tabbed", () => {
+    const model = projectWorkLogTurnV1(run, booking()).entries.find(
+      (entry) => entry.kind === "model",
+    )!;
+    expect(model.label).toBe("Request #1");
+    expect(
+      model.sections?.map((section) => [section.label, section.tab]),
+    ).toEqual([
+      ["System prompt", "prompt"],
+      ["Last message in", "prompt"],
+      ["What the model said", "output"],
+      ["Tool calls", "tools"],
+    ]);
+  });
+
+  test("a Jev check says its verdict", () => {
+    const entries = projectWorkLogTurnV1(run, booking()).entries;
+    const review = entries.find((entry) => entry.label === "Call review")!;
+    expect(review.verdict).toBe("Allow");
+    expect(entries.find((entry) => entry.title === "Turn read")!.verdict).toBe(
+      "Moderate",
+    );
+  });
+
+  test("a compaction before the Turn began is marked as between Turns", () => {
+    seq = 0;
+    const turn = projectWorkLogTurnV1(run, [
+      event(0, "conversation/compaction-intent", {
+        effectId: "e",
+        throughTurn: 38,
+        provider: "frock-ai",
+        model: "auto",
+      }),
+      event(4100, "conversation/compacted", {
+        effectId: "e",
+        fromTurn: 1,
+        throughTurn: 38,
+        summary: "Tim books dinners with Sam.",
+        identifiers: ["Sam"],
+        provider: "frock-ai",
+        model: "auto",
+      }),
+      event(4200, "turn/start", { turn: 39 }),
+    ]);
+    expect(turn.entries[0]).toMatchObject({
+      kind: "compaction",
+      beforeTurn: true,
+      durationMs: 4100,
+    });
+    expect(() => decodeProtocol("WorkLogTurn", turn)).not.toThrow();
   });
 });
 

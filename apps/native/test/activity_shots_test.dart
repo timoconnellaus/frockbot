@@ -133,7 +133,11 @@ Future<void> _shoot(
   await tester.runAsync(() async {
     final inter = FontLoader(interFontFamily);
     for (final weight in [400, 500, 600, 700]) {
-      inter.addFont(rootBundle.load('packages/frockbot_client/assets/fonts/inter-latin-$weight.ttf'));
+      inter.addFont(
+        rootBundle.load(
+          'packages/frockbot_client/assets/fonts/inter-latin-$weight.ttf',
+        ),
+      );
     }
     await inter.load();
     await (FontLoader(

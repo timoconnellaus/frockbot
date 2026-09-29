@@ -2798,5 +2798,21 @@
       "turns": [],
       "cost": 1
     }
+  },
+  {
+    "name": "WorkLogLink without a title",
+    "schema": "WorkLogLink",
+    "value": {
+      "kind": "jev"
+    }
+  },
+  {
+    "name": "WorkLogSection on a tab nobody draws",
+    "schema": "WorkLogSection",
+    "value": {
+      "label": "Input",
+      "text": "{}",
+      "tab": "diff"
+    }
   }
 ]

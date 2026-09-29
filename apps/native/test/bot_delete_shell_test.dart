@@ -94,8 +94,7 @@ class DeleteHarness extends NativeApi {
     String botId, {
     String? cursor,
     String? epoch,
-  }) async =>
-      throw const FormatException('offline fixture');
+  }) async => throw const FormatException('offline fixture');
 }
 
 class Shell {

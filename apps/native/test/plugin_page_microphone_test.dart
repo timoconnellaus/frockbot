@@ -113,8 +113,7 @@ void main() {
         throwsA(isA<PluginPageMicrophoneRefused>()),
       );
       final denied = MicOwnership();
-      final capture = FakeVoiceCapture()
-        ..failure = MicrophoneDenied('No.');
+      final capture = FakeVoiceCapture()..failure = MicrophoneDenied('No.');
       await expectLater(
         ShellPageMicrophone(
           ownership: denied,

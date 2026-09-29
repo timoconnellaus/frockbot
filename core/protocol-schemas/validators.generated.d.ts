@@ -173,6 +173,7 @@ declare const validators: {
   isWorkLogTokens(value: unknown): value is ProtocolTypes["WorkLogTokens"];
   isWorkLogField(value: unknown): value is ProtocolTypes["WorkLogField"];
   isWorkLogSection(value: unknown): value is ProtocolTypes["WorkLogSection"];
+  isWorkLogLink(value: unknown): value is ProtocolTypes["WorkLogLink"];
   isWorkLogEntry(value: unknown): value is ProtocolTypes["WorkLogEntry"];
   isWorkLogTotals(value: unknown): value is ProtocolTypes["WorkLogTotals"];
   isWorkLogTurn(value: unknown): value is ProtocolTypes["WorkLogTurn"];

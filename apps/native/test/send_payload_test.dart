@@ -18,11 +18,7 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      drawn({
-        'type': 'card',
-        'surfaceId': 'draft-email',
-        'messages': const [],
-      }),
+      drawn({'type': 'card', 'surfaceId': 'draft-email', 'messages': const []}),
     );
     final card = tester.widget<CardChatCard>(find.byType(CardChatCard));
     expect(card.surfaceId, 'draft-email');

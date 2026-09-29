@@ -152,7 +152,9 @@ void main() {
     store.values[pageCacheKey('user-1', 'bot-two')] = encodePageCache([
       run('cached-run', 'Cached Clementine conversation'),
     ], null);
-    await tester.pumpWidget(FrockBotApp(store: store, api: OfflineSocketApi(store)));
+    await tester.pumpWidget(
+      FrockBotApp(store: store, api: OfflineSocketApi(store)),
+    );
     await tester.pump();
     await tester.pump();
     expect(find.byType(ChatHeader), findsOneWidget);

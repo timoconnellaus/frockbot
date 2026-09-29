@@ -602,18 +602,24 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
 - `AuditPage` — `lib/audit/page.dart`: Activity, each Turn's effects and each
   use of the microphone by a Plugin's page, narrowed by a Bot picker and four
   filters, with a row's Turn opening on the Work view
-- `WorkLogPage` — `lib/work_log/page.dart`: one Bot's Work log, opened from
-  the Bot page. Every Turn, step by step — model requests, Jev checks, tool
-  calls, memory and skills, plugin effects, Computer operations, retries,
-  compaction and sends — with kind filters, search, and an inspector beside
-  the log at wide widths and a page of its own on the phone. It reads
+- `WorkLogView` — `lib/work_log/`: one Bot's Work log. At the desk it is the
+  conversation column's other tab, beside Chat in the Bot's header (the Bot
+  page's Work log row switches to it); on a phone `WorkLogPage` pushes it.
+  Every Turn, step by step — model requests, Jev checks, tool calls, memory
+  and skills, plugin effects, Computer operations, retries, compaction and
+  sends. A timeline across the top lays the page's rows in three lanes by
+  order, duration or clock time (`timeline.dart`); the rows are a table with
+  input and output tokens and time, grouped by Turn and step, with older Turns
+  folded to one line (`ledger.dart`); a picked row opens in a tabbed inspector
+  beside the log, or as a page on a phone (`inspector.dart`). It reads
   `GET /api/bots/{botId}/work-log?before=<run cursor>`, which
   `app/shell/work-log.ts` projects from each run's bounded event projections
   (never a full prompt) into `WorkLogPage`, eight Turns a page. The server
-  writes every row's words; the client draws them. A running Turn's card has
-  a Stop, which posts the same Stop command `/stop` does; it is how a Routine
-  that has not said anything in the chat, and so is not in the thread, is
-  stopped.
+  writes every row's words and names the tab each section goes on, a call's
+  chain from the request that asked for it through Jev's review to its run,
+  and Jev's verdict; the client draws them. A running Turn has a Stop, which
+  posts the same Stop command `/stop` does; it is how a Routine that has not
+  said anything in the chat, and so is not in the thread, is stopped.
 - `WhatsNewPage` — `lib/whats_new/page.dart`: the curated list of what
   production shipped, from `GET /api/whats-new`. Reached from the megaphone
   beside the profile in the sidebar, which wears an unread mark; it never
