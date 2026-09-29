@@ -53,7 +53,7 @@ const OPEN_TURN_POLL_MS = 30_000;
 /** How long an owed admission waits before it is asked for again. */
 const ADMISSION_RETRY_MS = 15_000;
 
-export interface GroupChatEnv {
+interface GroupChatEnv {
   BOT_STATES: DurableObjectNamespace;
   USER_CONFIGURATIONS: DurableObjectNamespace;
   GROUP_CHATS: DurableObjectNamespace;

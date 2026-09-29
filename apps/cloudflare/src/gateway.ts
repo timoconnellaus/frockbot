@@ -113,7 +113,7 @@ function clientOfRequest(request: Request) {
  * router before this Worker runs, so nothing about it is per-account and no
  * request for it arrives at this function.
  */
-export function isPublicAssetPathV1(pathname: string): boolean {
+function isPublicAssetPathV1(pathname: string): boolean {
   return (
     pathname === "/" ||
     pathname === "/favicon.ico" ||

@@ -21,7 +21,7 @@ import {
 export { rpcJsonSnapshotV1 } from "@frockbot/app/durable-rpc";
 
 type RpcValueDecoder = (value: unknown, label: string) => unknown;
-export type RpcJsonValue =
+type RpcJsonValue =
   | null
   | boolean
   | number
@@ -275,7 +275,7 @@ export function rpcDecoded(
   return (value) => decoder(value);
 }
 
-export interface DecodedStartConnectionRpcV1 {
+interface DecodedStartConnectionRpcV1 {
   schemaVersion: 1;
   userId: string;
   connection: {
@@ -407,7 +407,7 @@ export function decodeBotRunRpcV1(input: unknown): DecodedBotRunRpcV1 {
   };
 }
 
-export interface DecodedBotAgentRunRpcV1 {
+interface DecodedBotAgentRunRpcV1 {
   schemaVersion: 1;
   userId: string;
   botId: string;
@@ -435,7 +435,7 @@ const rpcRunCause: RpcValueDecoder = (value, label) => {
   }
 };
 
-export interface DecodedBotVoiceRunRpcV1 {
+interface DecodedBotVoiceRunRpcV1 {
   schemaVersion: 1;
   userId: string;
   botId: string;
@@ -500,7 +500,7 @@ export function decodeBotVoiceRunRpcV1(
   };
 }
 
-export interface DecodedVoiceChatResultRpcV1 {
+interface DecodedVoiceChatResultRpcV1 {
   schemaVersion: 1;
   userId: string;
   botId: string;
@@ -537,7 +537,7 @@ export function decodeVoiceChatResultRpcV1(
   };
 }
 
-export interface DecodedVoiceCallTranscriptRpcV1 {
+interface DecodedVoiceCallTranscriptRpcV1 {
   schemaVersion: 1;
   userId: string;
   botId: string;
@@ -633,7 +633,7 @@ export function decodeBotAgentRunRpcV1(
   };
 }
 
-export interface DecodedBotEmailTurnRpcV1 {
+interface DecodedBotEmailTurnRpcV1 {
   schemaVersion: 1;
   userId: string;
   botId: string;
@@ -693,7 +693,7 @@ export function decodeBotEmailTurnRpcV1(
   return { schemaVersion: 1, userId, botId, command };
 }
 
-export interface DecodedBotGroupTurnRpcV1 {
+interface DecodedBotGroupTurnRpcV1 {
   schemaVersion: 1;
   userId: string;
   botId: string;

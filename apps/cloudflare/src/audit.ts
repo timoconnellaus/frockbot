@@ -60,7 +60,7 @@ export function createUserAuditSinkV1(
 }
 
 /** The stored-run page the Shell Package offers, as this adapter reads it. */
-export interface StoredRunEventPageV1 {
+interface StoredRunEventPageV1 {
   runs: ReadonlyArray<{
     runId: string;
     acceptedAt: string;

@@ -17,18 +17,7 @@ import type {
   ToolSchema,
 } from "@frockbot/core/contracts";
 
-/** The meta-tools `@frockbot/core/tools` contributes to every registry. */
-export const META_TOOL_NAMES_V1 = [
-  "get_dynamic_tools",
-  "call_dynamic_tool",
-] as const;
-
-/** The names a root with no native tools of its own still offers. */
-export function metaOnlyToolNamesV1(): readonly string[] {
-  return [...META_TOOL_NAMES_V1];
-}
-
-export interface DynamicCallV1 {
+interface DynamicCallV1 {
   namespace: string;
   toolName: string;
   input?: unknown;
@@ -64,7 +53,7 @@ export function dynamicToolCallV1(id: string, call: DynamicCallV1): ToolCall {
 }
 
 /** One `get_dynamic_tools` discovery call. */
-export function discoveryCallV1(
+function discoveryCallV1(
   id: string,
   input: { namespace?: string; toolName?: string; pattern?: string } = {},
 ): ToolCall {
@@ -72,14 +61,14 @@ export function discoveryCallV1(
 }
 
 /** One tool as a namespace lookup reports it: full description and schema. */
-export interface DiscoveredToolV1 {
+interface DiscoveredToolV1 {
   tool: string;
   description: string;
   inputSchema?: unknown;
 }
 
 /** A `get_dynamic_tools({ namespace })` result, decoded. */
-export interface DiscoveredNamespaceV1 {
+interface DiscoveredNamespaceV1 {
   namespace: string;
   namespaceStatus?: string;
   namespaceDescription?: string;
@@ -87,14 +76,12 @@ export interface DiscoveredNamespaceV1 {
 }
 
 /** A `get_dynamic_tools()` or `{ pattern }` catalog result, decoded. */
-export interface DiscoveredCatalogV1 {
+interface DiscoveredCatalogV1 {
   mode: "catalog";
   namespaces: DiscoveredNamespaceV1[];
 }
 
-export function decodeDiscoveredCatalogV1(
-  content: string,
-): DiscoveredCatalogV1 {
+function decodeDiscoveredCatalogV1(content: string): DiscoveredCatalogV1 {
   return JSON.parse(content) as DiscoveredCatalogV1;
 }
 
@@ -104,7 +91,7 @@ export function decodeDiscoveredCatalogV1(
  * that wants the full two-tier round-trip uses it rather than hard-coding a
  * namespace the registry chose.
  */
-export function namespaceOfToolV1(
+function namespaceOfToolV1(
   catalog: DiscoveredCatalogV1,
   toolName: string,
 ): string | undefined {
@@ -114,12 +101,12 @@ export function namespaceOfToolV1(
 }
 
 /** What a scripted model does next, given the transcript so far. */
-export type TwoTierStepV1 =
+type TwoTierStepV1 =
   | { kind: "discover"; call: ToolCall }
   | { kind: "invoke"; call: ToolCall }
   | { kind: "answer"; content: string; isError: boolean };
 
-export interface TwoTierScriptV1 {
+interface TwoTierScriptV1 {
   /** The tool the scripted model intends to reach, by its bare name. */
   toolName: string;
   /** The arguments it passes, once discovery has told it where the tool lives. */

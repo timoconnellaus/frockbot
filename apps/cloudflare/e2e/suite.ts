@@ -12,7 +12,7 @@ export const publicationSpecFiles = [
  */
 export const publicationJourneyTimeoutMs = 900_000;
 
-export type E2ESuite = "all" | "core" | "publication";
+type E2ESuite = "all" | "core" | "publication";
 
 /** Which corpus this runner owns. Local runs default to every browser spec. */
 export function e2eSuite(env: NodeJS.ProcessEnv = process.env): E2ESuite {

@@ -24,7 +24,7 @@ export const MODEL_RATES_SEED_RECEIPT_KEY =
   "maintenance:model-rates-seed:2026-09-24";
 
 /** The synchronous key-value half of SQLite-backed Durable Object storage. */
-export interface ModelRatesStorageV1 {
+interface ModelRatesStorageV1 {
   kv: Pick<SyncKvStorage, "get" | "put" | "list">;
   transactionSync<T>(callback: () => T): T;
 }
@@ -175,14 +175,14 @@ export function reportUnpricedServedModelV1(
 // --- The Bot object's copy -------------------------------------------------------
 
 /** How long a Bot object prices from its copy before reading the table again. */
-export const HOSTED_MODEL_RATES_CACHE_MS_V1 = 60_000;
+const HOSTED_MODEL_RATES_CACHE_MS_V1 = 60_000;
 
 export interface HostedModelRatesAuthorityV1 {
   readModelRates(input: unknown): Promise<unknown>;
   reportUnpricedServedModel(input: unknown): Promise<unknown>;
 }
 
-export interface HostedModelRatesReaderV1 {
+interface HostedModelRatesReaderV1 {
   rates(): Promise<HostedModelRatesV1>;
   /** Each route's prepaid bounds, keyed by the model id it prices. */
   limits(): Promise<ReturnType<typeof hostedModelLimitsV1>>;

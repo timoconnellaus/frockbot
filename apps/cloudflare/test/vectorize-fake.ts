@@ -1,7 +1,7 @@
 import type { AuxiliaryWorkerOptionsV1 } from "./frock-ai-fake.ts";
 
-export const VECTORIZE_FAKE_NAME = "vectorize-fake";
-export const VECTORIZE_FAKE_ENTRYPOINT = "VectorizeFake";
+const VECTORIZE_FAKE_NAME = "vectorize-fake";
+const VECTORIZE_FAKE_ENTRYPOINT = "VectorizeFake";
 
 const SCRIPT = `
 import { WorkerEntrypoint } from "cloudflare:workers";

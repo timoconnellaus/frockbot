@@ -76,9 +76,9 @@ const EMAIL_USERNAME = (value: unknown, label: string): unknown => {
 };
 
 /** Written by admission itself, so an audit can tell a sign-in from an admin. */
-export const ADMISSION_UPDATED_BY = "admission";
+const ADMISSION_UPDATED_BY = "admission";
 /** Written when the account's own deletion ends its access. */
-export const DELETION_UPDATED_BY = "account-deletion";
+const DELETION_UPDATED_BY = "account-deletion";
 
 /** The signups-switch record this authority replaced; see `cleanRetiredDeploymentPolicyV1`. */
 export const RETIRED_SIGNUPS_POLICY_KEY = "deployment:policy:v1";
@@ -115,7 +115,7 @@ export function cleanRetiredDeploymentPolicyV1(
  * survive the Durable Object RPC boundary, and a lost race is an ordinary
  * answer, not a failure.
  */
-export type RevisionedWriteV1<T> =
+type RevisionedWriteV1<T> =
   | { status: "applied"; value: T }
   | { status: "conflict"; currentRevision: number };
 

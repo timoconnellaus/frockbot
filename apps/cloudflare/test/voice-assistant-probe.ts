@@ -27,13 +27,13 @@ import type {
 } from "@frockbot/app/voice/memory";
 
 /** One scheduled row, with its payload as JSON. */
-export interface VoiceScheduleRow {
+interface VoiceScheduleRow {
   callback: string;
   payload: string;
 }
 
 /** One memory request the object made, as a test reads it back. */
-export interface VoiceMemoryRequest {
+interface VoiceMemoryRequest {
   system?: string;
   /** Every message's content in order, so a test can look for a turn's words. */
   contents: string[];
@@ -42,7 +42,7 @@ export interface VoiceMemoryRequest {
 }
 
 /** What the end-of-call memory request answers with. */
-export interface VoiceProbeScript {
+interface VoiceProbeScript {
   memory?: {
     operations?: Record<string, unknown>[];
     raw?: string;
@@ -85,7 +85,7 @@ function sse(events: unknown[]): ReadableStream<Uint8Array> {
  * an index signature of `unknown` collapses to `never` across the Workers RPC
  * stub, which costs the array its element type at the call site.
  */
-export interface VoiceTraceLine {
+interface VoiceTraceLine {
   event: string;
   connection?: string;
   device?: string;
@@ -116,7 +116,7 @@ export interface VoiceTraceLine {
  * One emitted diagnostic line. Declared field by field for the same reason
  * [VoiceTraceLine] is: an index signature collapses across the RPC stub.
  */
-export interface VoiceTimingLine {
+interface VoiceTimingLine {
   trace: string;
   side: string;
   event: string;

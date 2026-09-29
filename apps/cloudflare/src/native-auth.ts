@@ -43,7 +43,7 @@ import type {
  * apps installed beside the released ones, which a deployment serves only
  * when its profile names them.
  */
-export type NativeReturnPlatformV1 =
+type NativeReturnPlatformV1 =
   "android" | "macos" | "macos-dev" | "ios" | "ios-dev";
 const NATIVE_RETURN_PLATFORMS: readonly NativeReturnPlatformV1[] = [
   "android",

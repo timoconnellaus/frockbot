@@ -233,7 +233,7 @@ export const test = base.extend<E2EFixtures, E2EOptions>({
 });
 
 /** What a spec file gets back when it provisions once for all of its tests. */
-export interface SharedApplication {
+interface SharedApplication {
   page: Page;
   /** The account every test in the file shares. */
   userId: string;
@@ -416,30 +416,6 @@ export async function expectNoHorizontalOverflow(
  */
 export function field(page: Page | Locator, identifier: string): Locator {
   return sem(page, identifier).locator("input, textarea");
-}
-
-/**
- * Fill a document's fields, and prove the form still holds all of them.
- *
- * Reaching the next field while the last one's editing session is still closing
- * empties *the last one*, silently, and the action then refuses with "This
- * action still needs an answer" — which reads exactly like the product refusing
- * the form rather than like a lost keystroke.
- *
- * So the read-back is over every field after the last one is typed, not per
- * field as it is typed: `fill()` writes the input directly, so a read
- * immediately after it always agrees and would catch nothing.
- */
-export async function answerFields(
-  page: Page | Locator,
-  values: Record<string, string>,
-): Promise<void> {
-  await answerInputs(
-    Object.entries(values).map(([id, value]) => [
-      field(page, `view-field-${id}`),
-      value,
-    ]),
-  );
 }
 
 /**
@@ -738,10 +714,6 @@ export async function createBot(
   await expectBotOpen(page, name);
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-}
-
 /** The sheet the list's own avatar opens: every account surface is in it. */
 export async function openProfileMenu(page: Page): Promise<void> {
   await revealSidebar(page);
@@ -997,7 +969,7 @@ export async function openBotPage(page: Page): Promise<void> {
  * has the heading in the tree, and `.or()` treats that hidden node as the
  * match, so a visible name on the list never counts.
  */
-export async function expectBotOpen(page: Page, name: string): Promise<void> {
+async function expectBotOpen(page: Page, name: string): Promise<void> {
   await expect(composerInput(page)).toBeVisible({ timeout: 30_000 });
   await expect(async () => {
     const current = sem(page, "shell-sidebar")
@@ -1159,7 +1131,7 @@ export async function provisionThroughUi(
  * walking `provisionThroughUi`.
  */
 /** What a provisioned account is, for a spec that needs to name its parts. */
-export interface ProvisionedAccount {
+interface ProvisionedAccount {
   userId: string;
   /** The Bot `bot/create` made, under the id the client's rule gives it. */
   botId: string;

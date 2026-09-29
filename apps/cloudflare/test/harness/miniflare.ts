@@ -8,42 +8,8 @@
 //
 // This module is imported by Vitest config files, so it runs in Node, not in
 // workerd. It must stay free of Worker-only globals.
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { fakeJevFetchV1 } from "@frockbot/app/supervision/testing";
 import { dynamicToolInputV1 } from "../dynamic-tools.ts";
-
-/**
- * Reads one variable out of `apps/cloudflare/.dev.vars` without importing it
- * into the process environment. Nothing in the suite needs one today; it is
- * kept because a live opt-in probe is one edit away and reading `.dev.vars`
- * correctly (quoted values included) is the part that is easy to get wrong.
- */
-export function readDevVariable(name: string): string | undefined {
-  let source: string;
-  try {
-    source = readFileSync(
-      resolve(import.meta.dirname, "..", "..", ".dev.vars"),
-      "utf8",
-    );
-  } catch {
-    return undefined;
-  }
-  for (const line of source.split(/\r?\n/)) {
-    const match = line.match(/^\s*([A-Z][A-Z0-9_]*)\s*=\s*(.*?)\s*$/);
-    if (!match || match[1] !== name) continue;
-    const value = match[2] ?? "";
-    if (
-      value.length >= 2 &&
-      ((value.startsWith('"') && value.endsWith('"')) ||
-        (value.startsWith("'") && value.endsWith("'")))
-    ) {
-      return value.slice(1, -1);
-    }
-    return value;
-  }
-  return undefined;
-}
 
 /**
  * The User Durable Object mounts the Credential Store Contribution the moment
@@ -112,7 +78,7 @@ function bearerKey(request: Request): string {
 export const TOOL_CALL_TRIGGER = "frockbot-test-tool-call:";
 
 /** A test-only script for one tool call on each model step. */
-export const REPEATED_TOOL_CALL_TRIGGER = "frockbot-test-repeated-tool-call:";
+const REPEATED_TOOL_CALL_TRIGGER = "frockbot-test-repeated-tool-call:";
 
 /** Builds the trigger message for one or more scripted calls. */
 export function toolCallTriggerPrompt(
@@ -562,7 +528,7 @@ async function mcpStub(request: Request, url: URL): Promise<Response> {
  * test sees both outcomes without waiting on a poll interval. The tools list
  * carries one important tool per app, and executing it echoes the arguments.
  */
-export const COMPOSIO_STUB_ORIGIN = "https://backend.composio.dev";
+const COMPOSIO_STUB_ORIGIN = "https://backend.composio.dev";
 export const COMPOSIO_TEST_API_KEY = "workerd-composio-key";
 const composioAuthConfigs = new Map<string, string>();
 const composioAccounts = new Map<
@@ -851,7 +817,7 @@ async function composioStub(request: Request, url: URL): Promise<Response> {
  * Every call is counted, which is how a test proves a second upstream call did
  * *not* happen.
  */
-export const DEEPSEEK_STUB_ORIGIN = "https://api.deepseek.com";
+const DEEPSEEK_STUB_ORIGIN = "https://api.deepseek.com";
 export const DEEPSEEK_TEST_API_KEY = "workerd-deepseek-key";
 export const DEEPSEEK_CUT_TRIGGER = "frockbot-test-cut-stream:";
 export const DEEPSEEK_RATE_LIMIT_TRIGGER = "frockbot-test-rate-limit:";
@@ -1056,7 +1022,7 @@ async function webStub(url: URL): Promise<Response> {
  * as `BRAVE_SEARCH_API_KEY`; anything else is refused as the real service
  * would. At most three results, whatever `count` asked for.
  */
-export const BRAVE_STUB_ORIGIN = "https://api.search.brave.com";
+const BRAVE_STUB_ORIGIN = "https://api.search.brave.com";
 export const BRAVE_TEST_API_KEY = "workerd-brave-key";
 
 function braveSearchStub(request: Request, url: URL): Response {
@@ -1091,7 +1057,7 @@ function braveSearchStub(request: Request, url: URL): Response {
 /** Jev's API. Turn supervision is required, so every Turn here reaches it. */
 export const JEV_STUB_ORIGIN = "https://api.typesafe.ai";
 
-export async function ollamaCloudStub(request: Request): Promise<Response> {
+async function ollamaCloudStub(request: Request): Promise<Response> {
   const url = new URL(request.url);
   if (url.origin === JEV_STUB_ORIGIN) return fakeJevFetchV1(request);
   if (url.origin === WEB_STUB_ORIGIN) return webStub(url);

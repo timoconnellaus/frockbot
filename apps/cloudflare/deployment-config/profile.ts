@@ -80,7 +80,6 @@ export type DeploymentWorkerV1 = NonNullable<
   NonNullable<DeploymentProfileV1["workers"]>["app"]
 >;
 
-export type DeploymentImagesV1 = NonNullable<DeploymentProfileV1["images"]>;
 export type DeploymentRegionV1 = NonNullable<DeploymentProfileV1["region"]>;
 
 export const DEPLOYMENT_REGIONS_V1 =

@@ -11,9 +11,9 @@
 import type { AuxiliaryWorkerOptionsV1 } from "./frock-ai-fake.ts";
 
 /** The service name both bindings point at. */
-export const EMAIL_FAKE_NAME = "email-fake";
+const EMAIL_FAKE_NAME = "email-fake";
 /** The RPC entrypoint `SEND_EMAIL` and `EMAIL_PROBE` are wired to. */
-export const EMAIL_FAKE_ENTRYPOINT = "EmailFake";
+const EMAIL_FAKE_ENTRYPOINT = "EmailFake";
 
 /** One message as the fake received it: the builder's own fields. */
 export interface FakeSentEmailV1 {

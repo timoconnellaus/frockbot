@@ -55,7 +55,7 @@ function unavailable(reason: string): {
 
 export type { BotCapabilitiesPropsV1 };
 
-export interface BotCapabilitiesEnv {
+interface BotCapabilitiesEnv {
   BOT_STATES: DurableObjectNamespace<BotState>;
 }
 

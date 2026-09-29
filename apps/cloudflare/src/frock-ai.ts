@@ -9,7 +9,7 @@ import {
   type FrockAiChatCompletionV1,
 } from "@frockbot/providers/frock-ai/runtime";
 
-export const DEFAULT_FROCK_AI_GATEWAY_ID_V1 = "flock";
+const DEFAULT_FROCK_AI_GATEWAY_ID_V1 = "flock";
 
 export interface FrockAiGatewayHostV1 {
   /** `null` when this host took the `AI` binding, which carries no dynamic route. */
@@ -38,9 +38,9 @@ export interface FrockAiGatewayHostV1 {
  * this stays the backstop for a transport that never reaches the seam at all.
  * Both are far inside the fifteen-minute Turn deadline.
  */
-export const FROCK_AI_GATEWAY_TIMEOUT_MS_V1 = MODEL_FIRST_BYTE_DEADLINE_MS_V1;
+const FROCK_AI_GATEWAY_TIMEOUT_MS_V1 = MODEL_FIRST_BYTE_DEADLINE_MS_V1;
 
-export interface FrockAiBillingLimitV1 {
+interface FrockAiBillingLimitV1 {
   inputTokens: number;
   outputTokens: number;
 }
@@ -53,7 +53,7 @@ export interface FrockAiBillingLimitV1 {
  */
 export const FROCK_AI_IMAGE_INPUT_TOKENS_V1 = 6_000;
 
-export interface FrockAiGatewayConfigV1 {
+interface FrockAiGatewayConfigV1 {
   /**
    * Each hosted model's prepaid bound, keyed by its Frock AI model id, as the
    * deployment's rate table holds them when the request is sent. A request is

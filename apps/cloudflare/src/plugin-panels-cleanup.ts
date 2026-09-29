@@ -7,9 +7,9 @@
 // product it is deleting.
 import { COMPOSITION_GENERATION_PREFIX } from "@frockbot/core/durable";
 
-export const PLUGIN_PANELS_USER_CLEANUP_RECEIPT_KEY =
+const PLUGIN_PANELS_USER_CLEANUP_RECEIPT_KEY =
   "maintenance:plugin-panels:2026-09-21";
-export const PLUGIN_PANELS_BOT_CLEANUP_RECEIPT_KEY =
+const PLUGIN_PANELS_BOT_CLEANUP_RECEIPT_KEY =
   "maintenance:plugin-panels:2026-09-21";
 
 const USER_FEATURES_KEY = "user:features:v1";

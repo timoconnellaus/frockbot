@@ -10,7 +10,7 @@ import {
   type IdentityCreationRequestV1,
 } from "@frockbot/app/admin/shared";
 
-export interface AdmissionEvaluationV1 {
+interface AdmissionEvaluationV1 {
   decision: AccountAdmissionDecisionV1;
   /** Whether this admission moves the account to `active`. */
   activate: boolean;

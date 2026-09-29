@@ -42,7 +42,7 @@ import { rpcJsonSnapshotV1 } from "./durable-rpc.js";
  * Deliberately narrower than the app's `Env`, and naming them here is what
  * says so.
  */
-export interface AdminEntrypointEnvV1 {
+interface AdminEntrypointEnvV1 {
   AUTH_DB: D1Database;
   USER_CONFIGURATIONS: DurableObjectNamespace;
   DEPLOYMENT_POLICY: DurableObjectNamespace;
@@ -91,7 +91,7 @@ function deploymentPolicyStub(
   ) as unknown as DeploymentPolicyAdminRpc;
 }
 
-export function createAdminOperationsHostV1(
+function createAdminOperationsHostV1(
   env: AdminEntrypointEnvV1,
 ): AdminOperationsHostV1 {
   return {

@@ -5,7 +5,7 @@ export { adminEmailsV1 };
 /** The one identity a development stack signs in as; an admin there. */
 export const DEVELOPMENT_USER_ID = "development";
 
-export interface GatewayIdentityV1 {
+interface GatewayIdentityV1 {
   id: string;
   email?: string;
   /** Whether the provider verified `email`; an unverified one names nobody. */

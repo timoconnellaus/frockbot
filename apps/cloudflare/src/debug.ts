@@ -50,7 +50,7 @@ export interface DebugGatewaySurface {
   ): Promise<UserFeaturesV1>;
 }
 
-export type DebugTurnSubmitter = (
+type DebugTurnSubmitter = (
   userId: string,
   botId: string,
   text: string,

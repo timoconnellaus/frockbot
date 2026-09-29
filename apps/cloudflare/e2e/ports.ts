@@ -38,9 +38,9 @@ export const PORT_RANGE_START = 12_000;
 export const PORT_RANGE_END = 31_000;
 
 /** How many candidates to try before giving up. */
-export const PORT_ATTEMPTS = 200;
+const PORT_ATTEMPTS = 200;
 
-export interface ReservePortOptions {
+interface ReservePortOptions {
   start?: number;
   end?: number;
   attempts?: number;

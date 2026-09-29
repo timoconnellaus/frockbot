@@ -41,7 +41,7 @@ export const MAX_RESTARTS = 5;
 export const RESTART_WINDOW_MS = 5 * 60_000;
 
 /** Lines of the dead child's output printed when it exits unexpectedly. */
-export const CRASH_TAIL_LINES = 60;
+const CRASH_TAIL_LINES = 60;
 
 /** 1s, 2s, 4s, 8s, then 15s for every attempt after. */
 export function restartDelayMs(attempt: number): number {
@@ -84,7 +84,7 @@ export class OutputTail {
   }
 }
 
-export interface SuperviseOptions {
+interface SuperviseOptions {
   /** How the child is named in the harness's own output. */
   label: string;
   /** Start a fresh child. Called once per start and once per restart. */

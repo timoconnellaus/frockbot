@@ -58,9 +58,9 @@ import { dynamicToolCallV1, twoTierStepV1 } from "./dynamic-tools.ts";
  * the namespace its tools are disclosed in. Non-first-party namespaces are
  * external, so a call into one carries `mcpDetails.description`.
  */
-export const PROBE_PACKAGE_ID = "bot-authored";
+const PROBE_PACKAGE_ID = "bot-authored";
 
-export interface BotIsolateProbeEnv {
+interface BotIsolateProbeEnv {
   BOT_PACKAGES: BotIsolateLoader;
   APPLICATION_ARTIFACTS: R2Bucket;
   BOT_STATES: DurableObjectNamespace<WorkerdBotState>;
@@ -265,8 +265,8 @@ function probePackageDescriptor(hooks: string[]) {
  * same hook after the provider, so a Turn proves mount order, services and
  * the chain inside one worker.
  */
-export const PROBE_PROVIDER_ID = "probe-provider";
-export const PROBE_CONSUMER_ID = "probe-consumer";
+const PROBE_PROVIDER_ID = "probe-provider";
+const PROBE_CONSUMER_ID = "probe-consumer";
 
 export const PROBE_PROVIDER_SOURCE = `
 export const tools = [

@@ -10,11 +10,7 @@ import {
   type BuiltInPaymentsPackageIdV1,
   type PaymentsPackageSettingV1,
 } from "@frockbot/core/contracts";
-import {
-  PACKAGE_ROOT_V1,
-  type DeploymentProfileV1,
-  type DeploymentWorkerV1,
-} from "./profile.ts";
+import { PACKAGE_ROOT_V1, type DeploymentProfileV1 } from "./profile.ts";
 
 /**
  * The deployables, and where each one's tracked template lives, relative to
@@ -37,15 +33,14 @@ export const DEPLOYABLE_WORKERS_V1 = {
 export type DeployableWorkerV1 = keyof typeof DEPLOYABLE_WORKERS_V1;
 
 /** The directory one Worker's generated config is written to, under a profile. */
-export const WORKER_OUTPUT_DIRECTORIES_V1: Record<DeployableWorkerV1, string> =
-  {
-    app: "app",
-    computerHost: "computer-host",
-    appletBuild: "applet-build",
-    marketing: "marketing",
-    adminPortal: "admin-portal",
-    pushRelay: "push-relay",
-  };
+const WORKER_OUTPUT_DIRECTORIES_V1: Record<DeployableWorkerV1, string> = {
+  app: "app",
+  computerHost: "computer-host",
+  appletBuild: "applet-build",
+  marketing: "marketing",
+  adminPortal: "admin-portal",
+  pushRelay: "push-relay",
+};
 
 /**
  * The image `release.yml` publishes for each container Worker. One name per
@@ -379,7 +374,7 @@ export async function validateProfileBrandV1(
  * The chooser module a profile names by path, as an absolute path, or
  * undefined for a built-in Package.
  */
-export function profileAuthChooserV1(
+function profileAuthChooserV1(
   profile: DeploymentProfileV1,
   profileDirectory: string,
 ): string | undefined {
@@ -514,7 +509,7 @@ function checkEnvironmentNamesV1(
  * The payments chooser a profile names by path, as an absolute path, or
  * undefined for a built-in Package.
  */
-export function profilePaymentsChooserV1(
+function profilePaymentsChooserV1(
   profile: DeploymentProfileV1,
   profileDirectory: string,
 ): string | undefined {

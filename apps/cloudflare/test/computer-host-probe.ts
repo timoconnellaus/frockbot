@@ -24,7 +24,7 @@ interface ProbeEnv {
 }
 
 /** What one recorded effect looks like in Durable Object storage. */
-export interface ProbeEffectRecord {
+interface ProbeEffectRecord {
   effectId: string;
   userId: string;
   botId: string;
@@ -35,7 +35,7 @@ export interface ProbeEffectRecord {
   exitCode?: number | null;
 }
 
-export interface ProbeExecInput {
+interface ProbeExecInput {
   effectId: string;
   script: string;
   userId?: string;
@@ -47,7 +47,7 @@ export interface ProbeExecInput {
   abortAfterMs?: number;
 }
 
-export interface ProbeExecOutput {
+interface ProbeExecOutput {
   ok: boolean;
   exitCode?: number | null;
   stdout?: string;

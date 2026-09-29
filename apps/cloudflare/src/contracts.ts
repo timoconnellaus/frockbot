@@ -59,7 +59,6 @@ import type {
   RevokeConnectionResult,
   StartConnectionResult,
 } from "@frockbot/core/connection";
-import type { MemoryVector, MemoryVectorMatch } from "@frockbot/app/memory";
 // Flock DTOs cross only the authenticated hosted/backend seam.
 import type {
   BotDirectoryViewV1,
@@ -220,27 +219,6 @@ export interface BotStateBinding {
     botId: string,
     command: ClientRunStopCommandV1,
   ): Promise<ClientRunStopReceiptV1>;
-}
-
-export interface MemoryBinding {
-  get(key: string): Promise<string | null>;
-  put(key: string, value: string, contentType?: string): Promise<void>;
-  delete(key: string): Promise<void>;
-  list(
-    prefix: string,
-    cursor?: string,
-  ): Promise<{
-    objects: Array<{ key: string }>;
-    truncated: boolean;
-    cursor?: string;
-  }>;
-  vectorUpsert(vectors: MemoryVector[]): Promise<void>;
-  vectorQuery(
-    vector: number[],
-    options: { topK: number; namespace: string; returnMetadata: "all" },
-  ): Promise<{ matches: MemoryVectorMatch[] }>;
-  vectorDeleteByIds(ids: string[]): Promise<void>;
-  embed(model: string, texts: string[]): Promise<{ data: number[][] }>;
 }
 
 /**

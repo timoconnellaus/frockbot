@@ -34,7 +34,7 @@ export interface AuxiliaryWorkerOptionsV1 {
 }
 
 /** A 1×1 PNG. The smallest thing that is honestly an image. */
-export const FAKE_PNG_BASE64 =
+const FAKE_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
 /**
@@ -44,9 +44,9 @@ export const FAKE_PNG_BASE64 =
 export const STALLED_SUMMARISER_SENTINEL_V1 = "STALL-SUMMARISER";
 
 /** The service name both bindings point at. */
-export const FROCK_AI_FAKE_NAME = "frock-ai-fake";
+const FROCK_AI_FAKE_NAME = "frock-ai-fake";
 /** The RPC entrypoint the `AI` binding is wired to. */
-export const FROCK_AI_FAKE_ENTRYPOINT = "FrockAiFake";
+const FROCK_AI_FAKE_ENTRYPOINT = "FrockAiFake";
 
 // Authored as a module string because miniflare's auxiliary Workers take
 // JavaScript, not a TypeScript path: this file runs in Node at config load,
