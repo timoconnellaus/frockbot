@@ -24,6 +24,10 @@ const chatCompanionSize = 56.0;
 /// thread that is only a thumb wide.
 const chatCompanionPhoneSize = 40.0;
 
+/// Where the conversation's header has room for Chat and Work log as tabs
+/// beside the name; narrower, they are one switch among the header's actions.
+const chatHeaderTabsWidthV1 = 640.0;
+
 double chatCompanionSizeFor({required bool phone}) =>
     phone ? chatCompanionPhoneSize : chatCompanionSize;
 
@@ -176,9 +180,31 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   Widget build(BuildContext context) =>
       voiceMode ? _bar(context) : _band(context);
 
-  Widget _band(BuildContext context) {
+  Widget _band(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) => _bandAt(
+      context,
+      tabs: onView != null && constraints.maxWidth >= chatHeaderTabsWidthV1,
+    ),
+  );
+
+  Widget _bandAt(BuildContext context, {required bool tabs}) {
     final scheme = Theme.of(context).colorScheme;
+    final showingLog = view == 'work-log';
     final actions = [
+      // Too narrow for the tabs beside the name: one switch between the two.
+      if (onView != null && !tabs)
+        identified(
+          WorkLogIds.viewToggle,
+          _action(
+            showingLog ? 'Show the chat' : 'Show the Work log',
+            Icon(
+              showingLog
+                  ? Icons.chat_bubble_outline_rounded
+                  : Icons.receipt_long_outlined,
+            ),
+            () => onView!(showingLog ? 'chat' : 'work-log'),
+          ),
+        ),
       if (onComputer != null)
         identified(
           ShellIds.computerDestination,
@@ -263,14 +289,22 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
                       IgnorePointer(child: companion!),
                       const SizedBox(width: 12),
                     ],
-                    if (onView == null)
-                      Expanded(child: _overlayName(context))
-                    else ...[
-                      Flexible(child: _overlayName(context)),
-                      const SizedBox(width: 16),
-                      _ViewTabs(view: view ?? 'chat', onView: onView!),
-                      const Spacer(),
-                    ],
+                    // The name keeps every point the tabs leave; nothing else
+                    // competes with it for the width.
+                    Expanded(
+                      child: tabs
+                          ? Row(
+                              children: [
+                                Flexible(child: _overlayName(context)),
+                                const SizedBox(width: 16),
+                                _ViewTabs(
+                                  view: view ?? 'chat',
+                                  onView: onView!,
+                                ),
+                              ],
+                            )
+                          : _overlayName(context),
+                    ),
                     for (final action in actions) ...[
                       const SizedBox(width: 8),
                       action,

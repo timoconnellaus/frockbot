@@ -753,4 +753,20 @@ void main() {
     await tester.pumpWidget(host(const ChatHeader(name: 'Pixel')));
     expect(find.text('Work log'), findsNothing);
   });
+
+  testWidgets('a narrow header folds the tabs into one switch', (tester) async {
+    tester.view.physicalSize = const Size(420, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final chosen = <String>[];
+    await tester.pumpWidget(
+      host(
+        ChatHeader(name: 'Pixel', view: 'work-log', onView: chosen.add),
+        size: const Size(420, 900),
+      ),
+    );
+    expect(find.text('Work log'), findsNothing);
+    await tester.tap(find.byTooltip('Show the chat'));
+    expect(chosen, ['chat']);
+  });
 }

@@ -529,6 +529,9 @@ abstract final class WorkLogIds {
   /// The Chat and Work log tabs in the conversation's header.
   static const chatTab = 'conversation-tab-chat';
   static const workLogTab = 'conversation-tab-work-log';
+
+  /// The one switch between them where the header is too narrow for tabs.
+  static const viewToggle = 'conversation-view-toggle';
   static String filter(String slug) => 'work-log-filter-$slug';
   static String stop(String runId) => 'work-log-stop-$runId';
 }
