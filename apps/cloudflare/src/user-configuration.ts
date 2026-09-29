@@ -9,7 +9,7 @@ import {
   BillingError,
   BillingLedger,
   CREDIT_EXHAUSTED_REASON_V1,
-  DAILY_LIMIT_REASON_V1,
+  subscriptionRequiredReasonV1,
   type BillingBalance,
   type ComplimentaryGrant,
   type PaidAccessState,
@@ -806,11 +806,17 @@ export class UserConfiguration
         limited ? await this.dayStart(input.userId) : undefined,
       );
     } catch (error) {
-      if (
-        error instanceof BillingError &&
-        error.message !== DAILY_LIMIT_REASON_V1
-      ) {
-        await this.noteCreditExhausted(input.userId, error.message);
+      const kind = !(error instanceof BillingError)
+        ? undefined
+        : error.message === CREDIT_EXHAUSTED_REASON_V1
+          ? "credit"
+          : error.message === subscriptionRequiredReasonV1(BRAND_V1.productName)
+            ? "subscription-required"
+            : undefined;
+      if (kind) {
+        await this.noteCreditExhausted(input.userId, kind).catch(
+          () => undefined,
+        );
       }
       throw error;
     }
@@ -820,19 +826,12 @@ export class UserConfiguration
    * Once a day at most: every Turn an account without credit tries is refused
    * the same way, and the funnel wants the day it ran out, not each attempt.
    */
-  private async noteCreditExhausted(userId: string, reason: string) {
-    const key = `analytics:credit-exhausted:${new Date().toISOString().slice(0, 10)}`;
-    if ((await this.ctx.storage.get(key)) !== undefined) return;
-    await this.ctx.storage.put(key, true);
-    this.emit({
-      name: "credit_exhausted",
-      userId,
-      kind:
-        reason === CREDIT_EXHAUSTED_REASON_V1
-          ? "credit"
-          : "subscription-required",
-      micros: this.billing().balance().complimentaryMicros,
-    });
+  private async noteCreditExhausted(userId: string, kind: string) {
+    const key = "analytics:credit-exhausted";
+    const today = new Date().toISOString().slice(0, 10);
+    if ((await this.ctx.storage.get(key)) === today) return;
+    await this.ctx.storage.put(key, today);
+    this.emit({ name: "credit_exhausted", userId, kind });
   }
   async settleUsage(input: { userId: string; settlement: UsageSettlement }) {
     await this.assertUserIdentity(input.userId);
