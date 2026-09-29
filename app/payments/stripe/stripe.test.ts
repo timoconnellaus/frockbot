@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
 import {
   BillingLedger,
@@ -1091,5 +1092,42 @@ describe("plans and the trial", () => {
     await expect(
       payments.changePlan({ id: "plan-change-nobody", plan: "plus" }),
     ).rejects.toThrow("Subscribe before changing plan");
+  });
+});
+
+describe("the marketing page's prices", () => {
+  const homepage = readFileSync(
+    new URL("../../../apps/marketing/public/index.html", import.meta.url),
+    "utf8",
+  );
+  const start = homepage.indexOf('class="section pricing"');
+  const section = homepage
+    .slice(start, homepage.indexOf("</section>", start))
+    .replace(/\s+/g, " ");
+  const usd = (cents: number) => `US$${cents / 100}`;
+
+  test("names each plan with its price and included credit", () => {
+    for (const plan of PLAN.subscriptions) {
+      expect(section).toContain(`id="plan-${plan.id}">${plan.name}</p>`);
+      expect(section).toContain(
+        `${usd(plan.monthlyCents)}<span> / month</span>`,
+      );
+      expect(section).toContain(
+        `Includes ${usd(plan.includedMicros / 10_000)} of usage credit every month.`,
+      );
+    }
+    expect(homepage).toContain(
+      `From ${usd(PLAN.subscriptions[0]!.monthlyCents)} a month`,
+    );
+  });
+
+  test("states the trial and the top-ups", () => {
+    expect(section).toContain(
+      `${PLAN.trial.days}-day trial that includes ${usd(PLAN.trial.creditMicros / 10_000)} of credit`,
+    );
+    const topUps = PLAN.topUpCents.map(usd);
+    expect(section).toContain(
+      `Add ${topUps.slice(0, -1).join(", ")}, or ${topUps.at(-1)} of prepaid credit`,
+    );
   });
 });
