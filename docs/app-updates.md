@@ -4,7 +4,7 @@ How an installed FrockBot client becomes the current one, on every platform.
 macOS is built. The other platforms are the plan, and this document is where
 that plan lives until it is built.
 
-The cloud is authoritative, so an old client is a compatibility problem, not a
+The server is authoritative, so an old client is a compatibility problem, not a
 data problem: the server's protocol range
 (`core/protocol-schemas/compatibility.generated.ts`) decides what may still
 connect. Every client names the release tag it was built from, but that is

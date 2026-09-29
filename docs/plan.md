@@ -123,6 +123,10 @@ The flip served the Flutter web build at `/` and took the Vue client out in the 
 
 A second deployment profile anyone installs into their own Cloudflare account with `bun run setup`: Cloudflare Access sign-in, no billing, no release ceremony, the Computer included. The hosted deployment is unchanged. The decisions and the staged plan are [ADR 0028](adr/0028-open-deployment.md).
 
+## Next: the desktop app as its own server
+
+On first launch the macOS app offers FrockBot Cloud or Run on this Mac. Local is a third profile, `local`, running the same app Worker on workerd inside the desktop app, with its own sign-in, the person's own model and Jev keys, and data kept on the Mac. First without a Computer, then a local Computer, then local Plugin builds. No switching between modes yet. The decisions and the order are [ADR 0039](adr/0039-local-desktop-deployment.md).
+
 ## Startup and Memory implementation handoff
 
 The walkthrough decisions below now have [prescriptive implementation packets](startup-implementation/README.md), written for agents that do not have this conversation. Use the task order, prerequisites, source entry points, record shapes, transaction/retry instructions and acceptance cases there when assigning work. The packets distinguish agreed behavior, selected engineering defaults and the remaining product decisions. Preparing this handoff does not implement the changes or authorize a release.

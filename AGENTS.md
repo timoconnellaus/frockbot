@@ -1,6 +1,6 @@
 # FrockBot
 
-FrockBot is a hosted product for creating and running persistent conversational Bots. A Bot holds a conversation, calls tools, remembers things, runs on a schedule, and can extend itself. The reference for what a Bot should be able to do is [`docs/grokbot-parity.md`](docs/grokbot-parity.md).
+FrockBot is a product for creating and running persistent conversational Bots, hosted in the cloud or run by the desktop app on the person's own Mac ([ADR 0039](docs/adr/0039-local-desktop-deployment.md)). A Bot holds a conversation, calls tools, remembers things, runs on a schedule, and can extend itself. The reference for what a Bot should be able to do is [`docs/grokbot-parity.md`](docs/grokbot-parity.md).
 
 Terms are defined in [`CONTEXT.md`](CONTEXT.md). How the system is built is in [`docs/architecture.md`](docs/architecture.md). What is changing right now is in [`docs/plan.md`](docs/plan.md). Jev turn supervision is in [`docs/jev-supervision-plan.md`](docs/jev-supervision-plan.md). Jev's latency and price are both negligible, which is why it reviews everywhere: around ten Jev calls in a Turn is no concern, so never skip or batch a check to save time or money — just don't multiply them for no reason.
 
@@ -46,7 +46,7 @@ Adding an extension point is a deliberate change to this list, not a side effect
 
 These hold regardless of how the code is organised.
 
-- **The cloud is authoritative.** Clients render state and submit commands. A client is never a second source of truth, and the Agent loop never runs in one.
+- **The server is authoritative.** Clients render state and submit commands. A client is never a second source of truth, and the Agent loop never runs in one. The server is the cloud deployment, or on a Local install the workerd the desktop app runs; the app's own UI is still just a client of it.
 - **Admit input durably before acknowledging it.** A disconnect, refresh or eviction must not lose accepted work, and only an authenticated command cancels a Turn.
 - **A Turn survives eviction.** Enough state is recorded to resume; use durable scheduling rather than staying resident.
 - **External effects are at-most-once by key.** Anything that spends money or writes to a third party carries an idempotency key and is retried by that key. Do not reconstruct after the fact whether an effect happened.
@@ -56,7 +56,7 @@ These hold regardless of how the code is organised.
 - **A User can always see and undo.** The conversation, audit and undo surfaces are part of the app, cannot be removed by a plugin, and cannot be impersonated by one.
 - **The conversation is what was said.** A thread shows what the User and the Bot said, and what the User did: a rename, a call. How the platform keeps a Bot running (compaction, retries, recovery, model choice, tool calls) never appears there unless the User asks. It belongs on the Work and audit views. A system line earns its place only if a person would miss it if it were gone.
 - **Configuration is account-shaped.** What a User enables is available to every Bot they own. Per-Bot settings exist only for what must genuinely differ: identity, instructions, notifications, and which Plugins a Bot runs — a Plugin is installed per account and enabled per Bot, because "make this Bot able to do X" is what a User says. A provider Plugin is installed by the account's own command for the Package it belongs to: nothing about it is seeded on an account that did not ask.
-- **The product works with zero configuration.** The platform picks the model. Configuration extends reach; it never repairs a broken default.
+- **The hosted product works with zero configuration.** The platform picks the model. Configuration extends reach; it never repairs a broken default. A Local install is the one exception: it asks for a model Connection and a Jev key on first run, because there is no platform to pay for either, and refuses Turns without them rather than running unsupervised.
 - **Nothing is kept for compatibility.** Removing a feature removes its code, its surfaces, its stored shapes and its decoders. Do not write a migration, keep a decoder branch, or hold a field alive so an older record still parses. There are no users yet: stored state is disposable, and legacy is a cost paid for nothing. When the first real user lands, this rule changes and forward migration becomes an invariant — until then, prefer deleting the shape to versioning it. Every breaking stored-data change must include and execute a scoped, repeatable cleanup of the incompatible test data as part of its release, and verify a fresh conversation works. Do not leave unreadable records in production. Before admitting the first real user, replace this disposable-state rule with tested forward migrations; do not wait for a data-loss incident.
 - **Secrets stay server-side.** They cross an interface only as opaque, expiring leases. Memory and the Workspace hold none. A model provider Plugin never sees one at all: the host attaches it to the one call the deployment's catalog allows.
 
