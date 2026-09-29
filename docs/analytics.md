@@ -27,7 +27,7 @@ Analytics Engine loses data by design. It samples under load and keeps about thr
 | `credit_exhausted`     | User DO, at most once a day                          | `credit` or `subscription-required` |                                                                |
 | `account_suspended`    | User DO                                              |                                     |                                                                |
 
-A Bot's own Routines, memories, Skills, Plugins and Computer use are its tools, so they are `tool_used` rows (`routine_create`, `memory_write`, `skill_write`, `plugin_create`, `computer_*`, …) rather than events of their own. A new tool is counted without a change here.
+A Bot's own Routines, memories, Skills, Plugins and Computer use are its tools, so they are `tool_used` rows (`routine_manage`, `memory_write`, `skill_write`, `plugin_create`, `computer_*`, …) rather than events of their own. A new tool is counted without a change here.
 
 The payment events are the difference in the account's payments state across one payments command. Checkout, webhooks and the provider's portal are all counted the same way.
 
