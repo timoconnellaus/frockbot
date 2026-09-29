@@ -483,6 +483,8 @@ export async function listRunEventPage(
     runId: string;
     acceptedAt: string;
     status: StoredRunStatus;
+    /** Who started it: `chat`, or the origin a non-chat Turn names. */
+    origin: string;
     events: SessionEvent[];
   }>;
   nextCursor?: string;
@@ -496,6 +498,7 @@ export async function listRunEventPage(
     runId: string;
     acceptedAt: string;
     status: StoredRunStatus;
+    origin: string;
     events: SessionEvent[];
   }> = [];
   for (const candidate of available) {
@@ -505,6 +508,8 @@ export async function listRunEventPage(
       runId: stored.runId,
       acceptedAt: stored.acceptedAt,
       status: stored.status,
+      origin:
+        stored.admission?.origin?.kind ?? stored.admission?.turnType ?? "chat",
       events: stored.events,
     });
   }

@@ -737,10 +737,10 @@ describe("Flock User contribution", () => {
     test("a new account gets exactly one General, however many calls race", async () => {
       const storage = new TransactionalStorage();
       const contribution = flock(storage);
-      await Promise.all(
+      const written = await Promise.all(
         Array.from({ length: 8 }, () => contribution.provisionGeneral()),
       );
-      await contribution.provisionGeneral();
+      expect(await contribution.provisionGeneral()).toBeUndefined();
       const directory = await contribution.listBots();
       expect(directory).toMatchObject({
         revision: 1,
@@ -753,6 +753,10 @@ describe("Flock User contribution", () => {
       });
       const generalBotId = directory.bots[0]!.botId;
       expect(generalBotId).toMatch(GENERAL_ID);
+      // Exactly one call wrote the marker, and it names General.
+      expect(written.filter((result) => result !== undefined)).toEqual([
+        generalBotId,
+      ]);
       expect(await contribution.readBootstrap()).toEqual({
         schemaVersion: 1,
         generalBotId,

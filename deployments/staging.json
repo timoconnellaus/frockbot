@@ -17,7 +17,8 @@
     "applicationArtifactsBucket": "frockbot-application-artifacts-staging",
     "memoryFilesBucket": "frockbot-memory-files-staging",
     "memoryIndex": "frockbot-memory-staging",
-    "authDatabaseName": "frockbot-auth-staging"
+    "authDatabaseName": "frockbot-auth-staging",
+    "analyticsDataset": "frockbot-events-staging"
   },
   "nativeApps": {
     "android": [

@@ -264,6 +264,8 @@ export { AdminEntrypoint } from "./admin-entrypoint.js";
 export { VoiceAssistant };
 
 interface Env {
+  /** Product events (app/analytics/events.ts). Unbound locally. */
+  ANALYTICS?: AnalyticsEngineDataset;
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
   STRIPE_MONTHLY_PRICE_ID?: string;
@@ -2706,6 +2708,7 @@ export default {
       const nativeTokenSecret = AUTH_PACKAGE_V1.nativeTokenSecret.read(env);
       const gateway = createGateway(
         {
+          analytics: env.ANALYTICS,
           loader: env.USER_APPLICATIONS,
           artifacts: new R2ApplicationArtifacts(env.APPLICATION_ARTIFACTS),
           registerPush: (userId, registration) =>

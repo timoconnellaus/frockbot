@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -34,17 +36,35 @@ extension on String {
   String ifEmpty(String Function() fallback) => isEmpty ? fallback() : this;
 }
 
-/// The protocol is what the deployment gates on. The release tag only says
-/// which build is talking, and a build made outside a release has none.
-Map<String, Object> clientHelloForRelease(String release) =>
+/// The protocol is what the deployment gates on. The release tag and the
+/// platform only say which build is talking, and a build made outside a
+/// release has no tag.
+Map<String, Object> clientHelloForRelease(String release, {String? platform}) =>
     Map<String, Object>.unmodifiable(<String, Object>{
       'schemaVersion': 1,
       'protocolVersion': wire.clientProtocolVersion,
       if (release.isNotEmpty) 'nativeVersion': release,
+      'platform': ?platform,
       'catalogs': const <Object>[],
     });
 
-final clientHello = clientHelloForRelease(compiledRelease);
+/// The hello's platform, or none for one the schema does not name.
+String? get clientPlatform {
+  if (kIsWeb) return 'web';
+  return switch (defaultTargetPlatform) {
+    TargetPlatform.android => 'android',
+    TargetPlatform.iOS => 'ios',
+    TargetPlatform.macOS => 'macos',
+    TargetPlatform.windows => 'windows',
+    TargetPlatform.linux => 'linux',
+    TargetPlatform.fuchsia => null,
+  };
+}
+
+final clientHello = clientHelloForRelease(
+  compiledRelease,
+  platform: clientPlatform,
+);
 
 String randomId() {
   final bytes = List<int>.generate(24, (_) => Random.secure().nextInt(256));

@@ -1,3 +1,4 @@
+import type { ProductEventSinkV1 } from "../analytics/events.js";
 import type { UsageAttributionV1 } from "../billing/ledger.js";
 import type { ModelBilling } from "../billing/model.js";
 import {
@@ -63,6 +64,8 @@ import type {
 } from "./durable-rpc-targets.js";
 
 export interface BotStateEnv {
+  /** Product events (app/analytics/events.ts); absent writes none. */
+  ANALYTICS?: ProductEventSinkV1;
   BILLING?: (
     userId: string,
     botId: string,

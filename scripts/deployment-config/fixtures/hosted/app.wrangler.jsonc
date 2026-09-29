@@ -79,6 +79,12 @@
   "ai": {
     "binding": "AI",
   },
+  "analytics_engine_datasets": [
+    {
+      "binding": "ANALYTICS",
+      "dataset": "frockbot-events",
+    },
+  ],
   "durable_objects": {
     "bindings": [
       {
@@ -362,6 +368,12 @@
       "ai": {
         "binding": "AI",
       },
+      "analytics_engine_datasets": [
+        {
+          "binding": "ANALYTICS",
+          "dataset": "frockbot-events-staging",
+        },
+      ],
       "durable_objects": {
         "bindings": [
           {

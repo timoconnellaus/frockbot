@@ -427,15 +427,19 @@ export class FlockUserBackendContribution {
    * nor joined by a second one. Repeating the call, concurrently or after an
    * eviction, is a read of the marker.
    *
+   * Answers what the call wrote: General's id, or `null` for an account that
+   * already owned Bots; `undefined` when the marker was already there.
+   *
    * General's id is minted here rather than fixed. A Bot Durable Object keeps
    * a tombstone for ever once its Bot is deleted, so a reused id could name an
    * object that refuses to exist again.
    */
-  async provisionGeneral(): Promise<void> {
+  async provisionGeneral(): Promise<string | null | undefined> {
     if ((await this.host.storage.get<unknown>(BOOTSTRAP_KEY)) !== undefined)
-      return;
-    await this.host.storage.transaction(async (storage) => {
-      if ((await storage.get<unknown>(BOOTSTRAP_KEY)) !== undefined) return;
+      return undefined;
+    return this.host.storage.transaction(async (storage) => {
+      if ((await storage.get<unknown>(BOOTSTRAP_KEY)) !== undefined)
+        return undefined;
       const currentValue = await storage.get<unknown>(DIRECTORY_KEY);
       const current =
         currentValue === undefined
@@ -451,6 +455,7 @@ export class FlockUserBackendContribution {
         });
       }
       await storage.put(BOOTSTRAP_KEY, marker);
+      return marker.generalBotId ?? null;
     });
   }
 

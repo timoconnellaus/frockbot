@@ -77,6 +77,14 @@
   "ai": {
     "binding": "AI",
   },
+  // Product events (app/analytics/events.ts). Deployed only: the local
+  // environments bind no dataset, so a local stack writes none.
+  "analytics_engine_datasets": [
+    {
+      "binding": "ANALYTICS",
+      "dataset": "named-by-deployment-config",
+    },
+  ],
   "durable_objects": {
     "bindings": [
       {

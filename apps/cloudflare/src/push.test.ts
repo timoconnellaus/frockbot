@@ -91,16 +91,20 @@ describe("push device registry", () => {
   test("the platform is the token's: kept by a presence update, replaced with the token", async () => {
     const durable = storage();
     const now = Date.now();
-    await registerPushDevice(
-      durable,
-      { deviceId: "iphone-1", token: TOKEN_A, platform: "ios" },
-      now - 2_000,
-    );
-    await registerPushDevice(
-      durable,
-      { deviceId: "iphone-1", activeBotId: "primary" },
-      now - 1_000,
-    );
+    expect(
+      await registerPushDevice(
+        durable,
+        { deviceId: "iphone-1", token: TOKEN_A, platform: "ios" },
+        now - 2_000,
+      ),
+    ).toBe(true);
+    expect(
+      await registerPushDevice(
+        durable,
+        { deviceId: "iphone-1", activeBotId: "primary" },
+        now - 1_000,
+      ),
+    ).toBe(false);
     expect(await durable.get<PushDevice>("push:device:iphone-1")).toEqual({
       deviceId: "iphone-1",
       token: TOKEN_A,
@@ -108,11 +112,13 @@ describe("push device registry", () => {
       activeBotId: "primary",
       updatedAt: now - 1_000,
     });
-    await registerPushDevice(
-      durable,
-      { deviceId: "iphone-1", token: TOKEN_B },
-      now,
-    );
+    expect(
+      await registerPushDevice(
+        durable,
+        { deviceId: "iphone-1", token: TOKEN_B },
+        now,
+      ),
+    ).toBe(true);
     expect(await durable.get<PushDevice>("push:device:iphone-1")).toEqual({
       deviceId: "iphone-1",
       token: TOKEN_B,

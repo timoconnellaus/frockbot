@@ -1352,6 +1352,16 @@
     }
   },
   {
+    "name": "ClientHello unknown platform",
+    "schema": "ClientHello",
+    "value": {
+      "schemaVersion": 1,
+      "protocolVersion": 4,
+      "platform": "fuchsia",
+      "catalogs": []
+    }
+  },
+  {
     "name": "turn admission invalid",
     "schema": "TurnAdmission",
     "value": {

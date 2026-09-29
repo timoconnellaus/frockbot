@@ -331,6 +331,9 @@
         },
         "authDatabaseName": {
           "$ref": "#/$defs/resourceName"
+        },
+        "analyticsDataset": {
+          "$ref": "#/$defs/resourceName"
         }
       }
     }

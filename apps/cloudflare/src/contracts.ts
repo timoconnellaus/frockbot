@@ -1,3 +1,4 @@
+import type { ProductEventSinkV1 } from "@frockbot/app/analytics/events";
 import type {
   BotPluginsFrameV1,
   PluginToolCommandV1,
@@ -768,6 +769,8 @@ export interface BotConfigurationBinding {
 }
 
 export interface GatewayDependencies {
+  /** Where product events go (app/analytics/events.ts); absent writes none. */
+  analytics?: ProductEventSinkV1;
   registerPush?(userId: string, registration: unknown): Promise<unknown>;
   /**
    * The two things a person may delete outright: their account and their

@@ -351,6 +351,11 @@ import {
   type AuditSinkV1,
   type DeviceUseV1,
 } from "@frockbot/app/audit";
+import { resolveDynamicToolNameV1 } from "@frockbot/app/audit/classify";
+import {
+  emitProductEventV1,
+  productEventsFromSettledRunV1,
+} from "@frockbot/app/analytics/events";
 import {
   createBotAuditEntryPageV1,
   createUserAuditSinkV1,
@@ -581,6 +586,10 @@ function decodeIsolateCallRpcV1(
     request: rpcDecoded(decodeRequest),
   });
 }
+
+type SettledRunEventsV1 = Awaited<
+  ReturnType<ShellBotBackendContribution["listRunEventPage"]>
+>["runs"][number];
 
 export class BotState
   extends DurableObject<BotStateEnv>
@@ -1600,6 +1609,13 @@ export class BotState
         enabled: request.enabled as boolean,
         expectedRevision: request.expectedRevision as number,
       });
+      if (request.enabled) {
+        emitProductEventV1(this.backendEnv.ANALYTICS, {
+          name: "plugin_enabled",
+          ...identity,
+          kind: request.pluginId as string,
+        });
+      }
       return { status: "applied" as const, enablement };
     } catch (error) {
       if (error instanceof PluginEnablementConflictError) {
@@ -1796,6 +1812,16 @@ export class BotState
       request.command as ReturnType<typeof decodeSetBotPluginEnabledCommandV1>,
     );
     if (receipt.status === "applied") {
+      const command = request.command as ReturnType<
+        typeof decodeSetBotPluginEnabledCommandV1
+      >;
+      if (command.enabled) {
+        emitProductEventV1(this.backendEnv.ANALYTICS, {
+          name: "plugin_enabled",
+          ...identity,
+          kind: command.pluginId,
+        });
+      }
       this.ctx.waitUntil(
         this.assembleTheme({
           schemaVersion: 1,
@@ -2664,23 +2690,17 @@ export class BotState
    * settlement or by the alarm this object already has.
    */
   private async projectSettledAudit(
-    shell: ShellBotBackendContribution,
     identity: { userId: string; botId: string },
-    runId: string,
+    run: SettledRunEventsV1 | undefined,
   ): Promise<void> {
     const sink = this.backendEnv.AUDIT_SINK;
     if (!sink) return;
     const outbox = this.auditOutbox();
     try {
-      const lookup = await shell.lookupRun({ schemaVersion: 1, runId });
-      if (lookup.state === "terminal") {
-        const stored = await shell.listRunEventPage();
-        const run = stored.runs.find((candidate) => candidate.runId === runId);
-        if (run) {
-          await outbox.append(
-            await auditEntriesFromStoredRunV1(identity.botId, run),
-          );
-        }
+      if (run) {
+        await outbox.append(
+          await auditEntriesFromStoredRunV1(identity.botId, run),
+        );
       }
     } catch {
       // A projection this object could not build is a gap a rebuild closes;
@@ -2760,7 +2780,33 @@ export class BotState
     const identity = await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY);
     if (!identity) return;
     await this.projectSettledRun(shell, identity, runId);
-    await this.projectSettledAudit(shell, identity, runId);
+    const run = await this.readSettledRunEvents(shell, runId);
+    if (run) {
+      for (const event of productEventsFromSettledRunV1(
+        { userId: identity.userId, botId: identity.botId },
+        run,
+        resolveDynamicToolNameV1,
+      )) {
+        emitProductEventV1(this.backendEnv.ANALYTICS, event);
+      }
+    }
+    await this.projectSettledAudit(identity, run);
+  }
+
+  /** One terminal run's durable events, or nothing when it cannot be read. */
+  private async readSettledRunEvents(
+    shell: ShellBotBackendContribution,
+    runId: string,
+  ): Promise<SettledRunEventsV1 | undefined> {
+    try {
+      const lookup = await shell.lookupRun({ schemaVersion: 1, runId });
+      if (lookup.state !== "terminal") return undefined;
+      const stored = await shell.listRunEventPage();
+      return stored.runs.find((candidate) => candidate.runId === runId);
+    } catch {
+      // A derived projection never decides whether a Turn settled.
+      return undefined;
+    }
   }
 
   /**
@@ -3393,14 +3439,24 @@ export class BotState
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
     await this.syncRoutineTimezone(identity, shell);
-    return executeRoutineCommand(
+    const command = request.command as RoutineCommandV1;
+    const receipt = await executeRoutineCommand(
       shell.state,
       identity,
-      request.command as RoutineCommandV1,
+      command,
       { kind: "user" },
       connectionTriggersFromUserV1(userConfigurationV1(shell.state, identity)),
       pluginTriggerIndexFromUserV1(userConfigurationV1(shell.state, identity)),
     );
+    // A Bot's own Routines arrive through its tools, and count as `tool_used`.
+    if (command.type === "routine/create" && receipt.status === "applied") {
+      emitProductEventV1(this.backendEnv.ANALYTICS, {
+        name: "routine_created",
+        ...identity,
+        kind: "user",
+      });
+    }
+    return receipt;
   }
 
   /**
