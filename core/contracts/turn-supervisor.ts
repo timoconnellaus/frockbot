@@ -370,6 +370,17 @@ export interface CallDecisionV1 {
   judgments: SupervisionJudgmentV1[];
   /** The judge's resolved model version, when one was asked. */
   model?: string;
+  /**
+   * A refused call the person can settle on an Approval card bound to its
+   * exact arguments: it reaches outside FrockBot, and nothing in the evidence
+   * tried to direct the review. Only ever on a `reject`.
+   */
+  askPerson?: true;
+  /**
+   * The Approval this decision rests on: the one an `allow` spent, or the
+   * card a refused call now waits on.
+   */
+  approvalId?: string;
 }
 
 /**
@@ -527,6 +538,12 @@ export const SUPERVISION_NOT_AUTHORIZED_PREFIX_V1 =
   "Not run: supervision found no request from the person for this call.";
 export const SUPERVISION_ARGUMENTS_CHANGED_PREFIX_V1 =
   "Not run: supervision found this call differs from what the person asked for.";
+export const SUPERVISION_AWAITING_APPROVAL_PREFIX_V1 =
+  "Not run yet: this call is waiting on the person's decision on an approval card in their conversation.";
+export const SUPERVISION_DECLINED_PREFIX_V1 =
+  "Not run: the person declined exactly this call on its approval card.";
+export const SUPERVISION_UNPLACED_CALL_PREFIX_V1 =
+  "Not run: supervision could not place this call in a step of the Turn, so it could not be reviewed.";
 export const SUPERVISION_OFF_TASK_PREFIX_V1 =
   "Not run: supervision judged this response to be working on something the person did not ask for.";
 
@@ -851,9 +868,12 @@ export function decodeCallDecisionV1(
   exactKeys(
     decision,
     ["decision", "reasonCode", "judgments"],
-    ["model"],
+    ["model", "askPerson", "approvalId"],
     label,
   );
+  if (decision.askPerson !== undefined && decision.askPerson !== true) {
+    throw new Error(`${label}.askPerson must be true when present`);
+  }
   return {
     decision: oneOf(
       decision.decision,
@@ -870,6 +890,16 @@ export function decodeCallDecisionV1(
       ? {}
       : {
           model: text(decision.model, `${label}.model`, JUDGMENT_TEXT_MAX_V1),
+        }),
+    ...(decision.askPerson === true ? { askPerson: true as const } : {}),
+    ...(decision.approvalId === undefined
+      ? {}
+      : {
+          approvalId: text(
+            decision.approvalId,
+            `${label}.approvalId`,
+            JUDGMENT_TEXT_MAX_V1,
+          ),
         }),
   };
 }

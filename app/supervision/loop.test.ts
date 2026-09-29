@@ -5,7 +5,10 @@ import {
   createFakeTurnSupervisorV1,
   createUnavailableTurnSupervisorV1,
   defaultTurnDirectiveV1,
+  SUPERVISION_AWAITING_APPROVAL_PREFIX_V1,
+  SUPERVISION_DECLINED_PREFIX_V1,
   SUPERVISION_NOT_AUTHORIZED_PREFIX_V1,
+  SUPERVISION_UNPLACED_CALL_PREFIX_V1,
   SUPERVISION_WITHHELD_SEND_PREFIX_V1,
   type LlmProvider,
   type LoopHookListV1,
@@ -16,9 +19,18 @@ import {
   type CallReviewEvidenceV1,
   type ToolCall,
   type ToolDefinition,
+  type TurnInputOriginV1,
   type TurnSupervisor,
 } from "@frockbot/core/contracts";
+import { MemoryStorage } from "@frockbot/core/durable/testing";
 import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
+import {
+  callApprovalKeyV1,
+  callApprovalUseKeyV1,
+  createCallApprovalStoreV1,
+  type CallApprovalsV1,
+} from "./call-approval.js";
+import { approvalKeyV1 } from "../shell/approvals.js";
 import { createWebFetchToolDefinitionV1 } from "@frockbot/app/web/agent";
 import { createShellAgentFeatureV1 } from "../shell/agent.js";
 import { createReplyToRequestToolV1 } from "../shell/reply-to-caller.js";
@@ -78,6 +90,14 @@ async function run(
     hooks?: (hooks: LoopHookListV1) => void;
     /** A Routine's Turn, which speaks only by handing off. */
     automation?: boolean;
+    /** The Bot's call approvals, where a card can reach the person. */
+    approvals?: CallApprovalsV1;
+    /** Where the Turn's input came from, when not the person or a voice. */
+    origin?: TurnInputOriginV1;
+    /** The admitted run's id. */
+    runId?: string;
+    /** Runs against the mounted runtime while the Turn is running. */
+    withRoot?: (root: ReturnType<typeof createAgentRuntimeHarness>) => void;
   } = {},
 ): Promise<SessionEvent[]> {
   const root = createAgentRuntimeHarness({});
@@ -86,8 +106,10 @@ async function run(
     createSupervisionRuntimeFeatureV1({
       productName: "FrockBot",
       supervisor,
-      origin: options.voice ? "voice" : "user",
+      origin: options.origin ?? (options.voice ? "voice" : "user"),
       clearReplyDraft: (ordinal) => options.cleared?.push(ordinal),
+      ...(options.approvals ? { approvals: options.approvals } : {}),
+      runId: options.runId ?? "run-1",
       ...(options.specialists
         ? { specialists: () => options.specialists ?? [] }
         : {}),
@@ -116,6 +138,7 @@ async function run(
     root.tools.register(createReplyToRequestToolV1("voice", root.sessions));
   }
   for (const tool of options.tools ?? []) root.tools.register(tool);
+  options.withRoot?.(root);
   root.tools.register(
     createWebFetchToolDefinitionV1({
       userAgent: "FrockBot/0.0.1 (+https://frockbot.com)",
@@ -1405,4 +1428,419 @@ test("a Turn that only spoke is not judged, and a judge that fails never fails t
     type: "turn/end",
     outcome: "completed",
   });
+});
+
+// Step 9: a refused call that reaches outside FrockBot is put to the person on
+// an Approval card bound to exactly that call, never asked about in words.
+
+/** Jev refusing an outward call the person can decide on a card. */
+function refusingOutward(
+  reviewed: CallReviewEvidenceV1[] = [],
+  reasonCode: "no_authorization" | "arguments_changed" = "no_authorization",
+): TurnSupervisor {
+  return createFakeTurnSupervisorV1({
+    reviewCall: async (evidence) => {
+      reviewed.push(evidence);
+      return {
+        decision: "reject",
+        reasonCode,
+        judgments: [{ question: "consequence", value: 2.9 }],
+        askPerson: true,
+      };
+    },
+  });
+}
+
+function approvalStore() {
+  const storage = new MemoryStorage();
+  return {
+    storage,
+    approvals: createCallApprovalStoreV1(
+      storage as unknown as Parameters<typeof createCallApprovalStoreV1>[0],
+    ),
+  };
+}
+
+/** A person's answer on the card, as the kernel records it. */
+async function decide(
+  storage: MemoryStorage,
+  approvalId: string,
+  decision: "approved" | "denied",
+): Promise<void> {
+  const now = new Date().toISOString();
+  await storage.put(approvalKeyV1(approvalId), {
+    schemaVersion: 1,
+    approvalId,
+    runId: "run-1",
+    sessionId: "user:test",
+    action: "Run post_to_slack",
+    risk: "high",
+    createdAt: now,
+    expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+    decision,
+    decidedBy: "user",
+    decidedAt: now,
+  });
+}
+
+const approvalSends = (events: readonly SessionEvent[]) =>
+  events.flatMap((event) =>
+    event.type === "send/to-user" && event.payload.type === "approval"
+      ? [event.payload]
+      : [],
+  );
+
+const resultOf = (events: readonly SessionEvent[], name: string) =>
+  events.find((event) => event.type === "tool/result" && event.name === name);
+
+test("a refused outward call in a chat Turn records an Approval bound to it and draws the card", async () => {
+  const ran: string[] = [];
+  const { storage, approvals } = approvalStore();
+  const seen: NormalizedModelRequest[] = [];
+  const events = await run(
+    scripted(
+      [
+        [{ id: "post", name: "post_to_slack", input: { channel: "#all" } }],
+        [{ id: "a", name: "send_to_user", input: text("Asked.", "finish") }],
+      ],
+      seen,
+    ),
+    refusingOutward(),
+    { tools: [effectTool("post_to_slack", "mutate", ran)], approvals },
+  );
+  expect(ran).toEqual([]);
+  const [card] = approvalSends(events);
+  expect(card?.approvalId).toMatch(/^call-approval-[0-9a-f]{32}$/);
+  expect(card?.action).toContain("post_to_slack");
+  expect(card?.action).toContain("channel: #all");
+  expect(card?.risk).toBe("high");
+  // The intent is what the person decides about: this tool, these arguments.
+  expect(await storage.get(callApprovalKeyV1(card!.approvalId))).toMatchObject({
+    tool: "post_to_slack",
+    arguments: '{"channel":"#all"}',
+  });
+  expect(resultOf(events, "post_to_slack")).toMatchObject({
+    isError: true,
+    content: expect.stringContaining(SUPERVISION_AWAITING_APPROVAL_PREFIX_V1),
+  });
+  expect(
+    events.find((event) => event.type === "supervision/call"),
+  ).toMatchObject({
+    decision: { askPerson: true, approvalId: card!.approvalId },
+  });
+  // The card is the Turn's question, so the Turn ends on it.
+  expect(seen).toHaveLength(1);
+});
+
+test("after approval the identical call runs without asking Jev, and spends the Approval once", async () => {
+  const ran: string[] = [];
+  const { storage, approvals } = approvalStore();
+  const first = await run(
+    scripted([
+      [{ id: "post", name: "post_to_slack", input: { channel: "#all" } }],
+    ]),
+    refusingOutward(),
+    { tools: [effectTool("post_to_slack", "mutate", ran)], approvals },
+  );
+  const approvalId = approvalSends(first)[0]!.approvalId;
+  await decide(storage, approvalId, "approved");
+
+  const reviewed: CallReviewEvidenceV1[] = [];
+  const second = await run(
+    scripted([
+      // Key order is not a different call.
+      [{ id: "post", name: "post_to_slack", input: { channel: "#all" } }],
+      [{ id: "a", name: "send_to_user", input: text("Posted.", "finish") }],
+    ]),
+    refusingOutward(reviewed),
+    {
+      tools: [effectTool("post_to_slack", "mutate", ran)],
+      approvals,
+      runId: "run-2",
+      origin: "user",
+      initialText: "[Approval] The decision is approved.",
+    },
+  );
+  expect(ran).toEqual(["post_to_slack"]);
+  expect(reviewed).toHaveLength(0);
+  expect(
+    second.find((event) => event.type === "supervision/call"),
+  ).toMatchObject({
+    decision: { decision: "allow", approvalId, judgments: [] },
+  });
+  expect(await storage.get(callApprovalUseKeyV1(approvalId))).toBeDefined();
+
+  // Spent: the same call again is judged afresh, and gets a card of its own.
+  const third = await run(
+    scripted([
+      [{ id: "post", name: "post_to_slack", input: { channel: "#all" } }],
+    ]),
+    refusingOutward(reviewed),
+    {
+      tools: [effectTool("post_to_slack", "mutate", ran)],
+      approvals,
+      runId: "run-3",
+    },
+  );
+  expect(ran).toEqual(["post_to_slack"]);
+  expect(reviewed).toHaveLength(1);
+  expect(approvalSends(third)[0]?.approvalId).not.toBe(approvalId);
+});
+
+test("changed arguments need a new decision", async () => {
+  const ran: string[] = [];
+  const { storage, approvals } = approvalStore();
+  const first = await run(
+    scripted([
+      [{ id: "post", name: "post_to_slack", input: { channel: "#all" } }],
+    ]),
+    refusingOutward(),
+    { tools: [effectTool("post_to_slack", "mutate", ran)], approvals },
+  );
+  const approvalId = approvalSends(first)[0]!.approvalId;
+  await decide(storage, approvalId, "approved");
+  const reviewed: CallReviewEvidenceV1[] = [];
+  const second = await run(
+    scripted([
+      [{ id: "post", name: "post_to_slack", input: { channel: "#everyone" } }],
+    ]),
+    refusingOutward(reviewed),
+    {
+      tools: [effectTool("post_to_slack", "mutate", ran)],
+      approvals,
+      runId: "run-2",
+    },
+  );
+  expect(ran).toEqual([]);
+  expect(reviewed).toHaveLength(1);
+  const [card] = approvalSends(second);
+  expect(card?.approvalId).not.toBe(approvalId);
+  expect(card?.action).toContain("#everyone");
+  expect(await storage.get(callApprovalUseKeyV1(approvalId))).toBeUndefined();
+});
+
+test("a declined call is reported and never made, and is not asked again", async () => {
+  const ran: string[] = [];
+  const { storage, approvals } = approvalStore();
+  const first = await run(
+    scripted([
+      [{ id: "post", name: "post_to_slack", input: { channel: "#all" } }],
+    ]),
+    refusingOutward(),
+    { tools: [effectTool("post_to_slack", "mutate", ran)], approvals },
+  );
+  const approvalId = approvalSends(first)[0]!.approvalId;
+  await decide(storage, approvalId, "denied");
+  const second = await run(
+    scripted([
+      [{ id: "post", name: "post_to_slack", input: { channel: "#all" } }],
+      [{ id: "a", name: "send_to_user", input: text("Left it.", "finish") }],
+    ]),
+    refusingOutward(),
+    {
+      tools: [effectTool("post_to_slack", "mutate", ran)],
+      approvals,
+      runId: "run-2",
+    },
+  );
+  expect(ran).toEqual([]);
+  expect(approvalSends(second)).toHaveLength(0);
+  expect(resultOf(second, "post_to_slack")).toMatchObject({
+    content: expect.stringContaining(SUPERVISION_DECLINED_PREFIX_V1),
+  });
+});
+
+test("a Routine's refused send posts a card to the conversation, and the Routine carries on", async () => {
+  const ran: string[] = [];
+  const reviewed: CallReviewEvidenceV1[] = [];
+  const { approvals } = approvalStore();
+  const seen: NormalizedModelRequest[] = [];
+  const events = await run(
+    scripted(
+      [
+        [{ id: "post", name: "post_to_slack", input: { channel: "#all" } }],
+        // The same call again in the same Turn goes to the card already drawn.
+        [{ id: "again", name: "post_to_slack", input: { channel: "#all" } }],
+        [{ id: "look", name: "lookup", input: {} }],
+        [
+          {
+            id: "done",
+            name: "wake_parent",
+            input: { message: "Posting to #all is waiting for your approval." },
+          },
+        ],
+      ],
+      seen,
+    ),
+    refusingOutward(reviewed),
+    {
+      tools: [
+        effectTool("post_to_slack", "mutate", ran),
+        effectTool("lookup", undefined, ran),
+      ],
+      approvals,
+      automation: true,
+      origin: "schedule",
+      initialText: "Post the morning summary to #all.",
+    },
+  );
+  // It carried on past the card to the rest of its work.
+  expect(ran).toEqual(["lookup"]);
+  expect(seen.length).toBeGreaterThanOrEqual(3);
+  expect(reviewed).toHaveLength(1);
+  const cards = approvalSends(events);
+  expect(cards).toHaveLength(1);
+  expect(cards[0]?.rationale).toContain("while nobody was there to ask");
+  const refusals = events.filter(
+    (event) => event.type === "tool/result" && event.name === "post_to_slack",
+  );
+  expect(refusals).toHaveLength(2);
+  for (const refusal of refusals) {
+    expect(refusal).toMatchObject({
+      content: expect.stringContaining("say in your hand-off"),
+    });
+  }
+});
+
+test("a subagent's refused call is refused in words: no card reaches the person from there", async () => {
+  const ran: string[] = [];
+  const { approvals } = approvalStore();
+  const events = await run(
+    scripted([
+      [{ id: "post", name: "post_to_slack", input: { channel: "#all" } }],
+    ]),
+    refusingOutward(),
+    {
+      tools: [effectTool("post_to_slack", "mutate", ran)],
+      approvals,
+      automation: true,
+      origin: "subagent",
+    },
+  );
+  expect(approvalSends(events)).toHaveLength(0);
+  expect(resultOf(events, "post_to_slack")).toMatchObject({
+    content: expect.stringContaining(SUPERVISION_NOT_AUTHORIZED_PREFIX_V1),
+  });
+});
+
+// Step 10: a Plugin's call to a Bot tool is placed in the step it runs under
+// and reviewed like any other, and a call supervision cannot place is refused.
+
+test("a Plugin's call to a Bot tool is placed in its Turn's step and reviewed", async () => {
+  const ran: string[] = [];
+  const reviewed: CallReviewEvidenceV1[] = [];
+  const prepared: string[] = [];
+  let root: ReturnType<typeof createAgentRuntimeHarness> | undefined;
+  const pluginTool: ToolDefinition = {
+    name: "plugin_do",
+    description: "A Plugin tool that calls a Bot tool.",
+    inputSchema: { type: "object", additionalProperties: true },
+    execute: async (_input, context) => {
+      const session = root!.sessions.get(context.sessionId)!;
+      const effectId = "package-tool:abc";
+      const at = /^tool:(\d+):(\d+):/.exec(context.effectId)!;
+      session.append({
+        type: "package/tool-call",
+        turn: Number(at[1]),
+        step: Number(at[2]),
+        effectId,
+        packageId: "weather",
+        callId: "c1",
+        name: "post_to_slack",
+        input: { channel: "#all" },
+      });
+      const inner = {
+        id: "c1",
+        name: "post_to_slack",
+        input: { channel: "#all" },
+      };
+      const preparation = await root!.tools.prepare(inner, {
+        ...context,
+        effectId,
+        toolCall: inner,
+      });
+      prepared.push(preparation.kind);
+      return { content: "plugin done", isError: false };
+    },
+  };
+  await run(
+    scripted([
+      [{ id: "p", name: "plugin_do", input: {} }],
+      [{ id: "a", name: "send_to_user", input: text("Done.", "finish") }],
+    ]),
+    createFakeTurnSupervisorV1({
+      reviewCall: async (evidence) => {
+        reviewed.push(evidence);
+        return {
+          decision: "reject",
+          reasonCode: "no_authorization",
+          judgments: [],
+        };
+      },
+    }),
+    {
+      tools: [pluginTool, effectTool("post_to_slack", "mutate", ran)],
+      withRoot: (mounted) => {
+        root = mounted;
+      },
+    },
+  );
+  expect(reviewed.map((evidence) => evidence.call.tool)).toEqual([
+    "post_to_slack",
+  ]);
+  expect(prepared).toEqual(["denied"]);
+});
+
+test("a mutate call supervision cannot place is refused; a read is not", async () => {
+  const ran: string[] = [];
+  let root: ReturnType<typeof createAgentRuntimeHarness> | undefined;
+  const outcomes: { tool: string; kind: string; content?: string }[] = [];
+  const probe: ToolDefinition = {
+    name: "probe",
+    description: "Prepares calls under an effect id nothing placed.",
+    inputSchema: { type: "object", additionalProperties: true },
+    execute: async (_input, context) => {
+      for (const name of ["post_to_slack", "lookup"]) {
+        const call = { id: name, name, input: {} };
+        const preparation = await root!.tools.prepare(call, {
+          ...context,
+          effectId: `elsewhere:${name}`,
+          toolCall: call,
+        });
+        outcomes.push({
+          tool: name,
+          kind: preparation.kind,
+          ...(preparation.kind === "denied"
+            ? { content: preparation.result.content }
+            : {}),
+        });
+      }
+      return { content: "probed", isError: false };
+    },
+  };
+  await run(
+    scripted([
+      [{ id: "p", name: "probe", input: {} }],
+      [{ id: "a", name: "send_to_user", input: text("Done.", "finish") }],
+    ]),
+    createFakeTurnSupervisorV1(),
+    {
+      tools: [
+        probe,
+        effectTool("post_to_slack", "mutate", ran),
+        effectTool("lookup", undefined, ran),
+      ],
+      withRoot: (mounted) => {
+        root = mounted;
+      },
+    },
+  );
+  expect(outcomes).toEqual([
+    {
+      tool: "post_to_slack",
+      kind: "denied",
+      content: SUPERVISION_UNPLACED_CALL_PREFIX_V1,
+    },
+    { tool: "lookup", kind: "ready" },
+  ]);
 });

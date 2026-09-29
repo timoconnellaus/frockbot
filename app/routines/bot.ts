@@ -1339,6 +1339,8 @@ export async function executeRoutineCommand(
   writer: RoutineWriterV1 = { kind: "user" },
   connectionTriggers?: RoutineConnectionTriggerSeamV1,
   pluginTriggerIndex?: RoutinePluginTriggerIndexV1,
+  /** The Approval a Bot's change was approved on (`app/routines/approval.ts`). */
+  options: { approvalId?: string } = {},
 ): Promise<RoutineCommandReceiptV1> {
   if (command.botId !== identity.botId) {
     throw new RoutineNotFoundError(command.routineId ?? command.botId);
@@ -1402,6 +1404,7 @@ export async function executeRoutineCommand(
     next,
     writer,
     await routineAccountTimezoneV1(state.ctx.storage),
+    options,
   );
   const remaining = receipt.status === "applied" ? receipt.routine : undefined;
   const stillEnabledConnection =

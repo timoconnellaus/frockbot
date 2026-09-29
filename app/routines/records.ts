@@ -124,6 +124,28 @@ export interface RoutineRecordV1 {
   createdAt: string;
   updatedAt: string;
   lastRunAt?: string;
+  /**
+   * The Approval on which the person approved this prompt and trigger, when
+   * a Bot or a Plugin wrote them. It is what lets a Routine a Bot set up
+   * fire as the person's standing request; a Bot's write of the prompt or
+   * the trigger without one clears it.
+   */
+  promptApprovalId?: string;
+}
+
+/**
+ * Who a firing's prompt speaks for. The person's own Routine, or one whose
+ * prompt and trigger they approved on a card, asks as they would; any other
+ * a Bot wrote asks nothing. Who last paused or resumed it does not change
+ * whose words the prompt is.
+ */
+export function routinePromptByV1(
+  record: Pick<RoutineRecordV1, "createdBy" | "promptApprovalId">,
+): "user" | "bot" {
+  return record.createdBy.kind === "user" ||
+    record.promptApprovalId !== undefined
+    ? "user"
+    : "bot";
 }
 
 /** One entry of a Routine's bounded run log. */
@@ -336,7 +358,7 @@ export function decodeRoutineRecordV1(value: unknown): RoutineRecordV1 {
     // record written by the previous release still carries it, and a stored
     // Routine that cannot be decoded is a Routine that disappears from the
     // list and never fires again.
-    ["schedule", "trigger", "lastRunAt", "timezone"],
+    ["schedule", "trigger", "lastRunAt", "timezone", "promptApprovalId"],
     "Routine record",
   );
   if (candidate.schemaVersion !== 1) {
@@ -378,6 +400,15 @@ export function decodeRoutineRecordV1(value: unknown): RoutineRecordV1 {
       ? {}
       : {
           lastRunAt: routineTimestamp(candidate.lastRunAt, "Routine lastRunAt"),
+        }),
+    ...(candidate.promptApprovalId === undefined
+      ? {}
+      : {
+          promptApprovalId: routineText(
+            candidate.promptApprovalId,
+            128,
+            "Routine promptApprovalId",
+          ),
         }),
   };
   requireScheduleXorTriggerV1(decoded);

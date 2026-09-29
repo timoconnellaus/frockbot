@@ -31,7 +31,9 @@ member per grant the descriptor declares that actually opens a handle:
   still opens email and opens no `fetch` host.
 - `ctx.schedule` (`schedule`) — `{ callId, input }`. `input` is a
   `routine_manage` body; `callId` is yours and makes a retry at-most-once
-  for this Plugin. Outside a Turn — a section, a control, a trigger —
+  for this Plugin. Creating a Routine, or changing its prompt or trigger,
+  answers that the User was asked on an approval card: nothing is armed
+  until they approve. Outside a Turn — a section, a control, a trigger —
   `ctx.schedule` answers unavailable. See `triggers.md` for creating a
   Routine that delivers _to_ you.
 - `ctx.model` (`ai`) — `invoke(...)` calls the Bot's own configured model

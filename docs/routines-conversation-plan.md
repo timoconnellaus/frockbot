@@ -59,9 +59,10 @@ Do not relitigate these without a reason that is new.
 8. **No provider knobs in chrome.** The detail may _show_ a `query` the Bot
    wrote. It never asks for `labelIds`, `userId`, or `interval`. `userId` is
    `me`; the poll interval is the provider default.
-9. **`userAsked` stays for Routines the User already created.** New ones are
-   Bot-authored. Do not rewrite stored `createdBy`. Pause/delete in the list
-   remain User chrome and need no `userAsked`.
+9. **Routines the User already created keep `createdBy.kind === "user"`.**
+   New ones are Bot-authored. Do not rewrite stored `createdBy`. Pause/delete
+   in the list remain User chrome. (`userAsked` has since been replaced by an
+   approval card; see [`plan.md`](plan.md), step 10.)
 
 ## Why these seams
 
@@ -150,10 +151,9 @@ classify earlier, not a guess we build now.
 
 ### Authorship
 
-`userAsked` exists because a User-authored Routine must not be silently
-rewritten. After the editor goes, every _new_ Routine is Bot-authored from a
-conversation. Keep the check for records that still say `createdBy.kind ===
-"user"`. Do not migrate them.
+A User-authored Routine must not be silently rewritten. After the editor
+goes, every _new_ Routine is Bot-authored from a conversation, and the person
+approves it on a card before it is armed.
 
 Jev already reviews `routine_manage` as a mutating call once mutation review
 is enforced. Until then, the Bot creating a Routine is the same write it can
@@ -197,7 +197,8 @@ Product-visible. Leaves every existing Routine runnable.
   coarse search the event type actually takes (Gmail `query`), never
   `labelIds` / `userId` / `interval`; one event is one firing; inbox sweeps
   are a schedule.
-- Keep `userAsked`.
+- Creating, re-prompting, re-timing, and pausing or deleting a User's
+  Routine go to an approval card.
 
 **Out of this cut**
 

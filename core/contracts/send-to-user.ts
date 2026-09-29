@@ -150,6 +150,28 @@ export const CARD_APPROVAL_ID_PREFIX_V1 = "card-approval-";
  */
 export const SECRET_FILL_APPROVAL_ID_PREFIX_V1 = "secret-fill-";
 
+/**
+ * The namespace the kernel mints the Approvals a refused call waits on in.
+ * Reserved because an approved record under this id lets that exact call run
+ * without review: a model that could ask under it in its own words could
+ * have a person approve words that are not the call.
+ */
+export const CALL_APPROVAL_ID_PREFIX_V1 = "call-approval-";
+
+/**
+ * The namespace the kernel mints the Approvals a Routine change waits on in.
+ * Reserved for the same reason: approving one arms the Routine it names.
+ */
+export const ROUTINE_APPROVAL_ID_PREFIX_V1 = "routine-approval-";
+
+/** Every approval-id namespace only the kernel may mint in, with what it is for. */
+const KERNEL_APPROVAL_PREFIXES_V1: readonly (readonly [string, string])[] = [
+  [CARD_APPROVAL_ID_PREFIX_V1, "the decisions a Card asks for"],
+  [SECRET_FILL_APPROVAL_ID_PREFIX_V1, "filling a saved secret into a page"],
+  [CALL_APPROVAL_ID_PREFIX_V1, "a call supervision asked the person about"],
+  [ROUTINE_APPROVAL_ID_PREFIX_V1, "a Routine change the person must approve"],
+];
+
 /** What may waive the reserved prefix. */
 export interface DecodeSendToUserOptionsV1 {
   /**
@@ -372,21 +394,14 @@ export function decodeSendToUserPayloadV1(
           `${label}.approvalId must be letters, digits, dot, underscore or dash`,
         );
       }
-      if (
-        options.kernelMinted !== true &&
-        approvalId.startsWith(CARD_APPROVAL_ID_PREFIX_V1)
-      ) {
-        throw new Error(
-          `${label}.approvalId must not start with "${CARD_APPROVAL_ID_PREFIX_V1}": that namespace is the kernel's, for the decisions a Card asks for`,
-        );
-      }
-      if (
-        options.kernelMinted !== true &&
-        approvalId.startsWith(SECRET_FILL_APPROVAL_ID_PREFIX_V1)
-      ) {
-        throw new Error(
-          `${label}.approvalId must not start with "${SECRET_FILL_APPROVAL_ID_PREFIX_V1}": that namespace is the kernel's, for filling a saved secret into a page`,
-        );
+      if (options.kernelMinted !== true) {
+        for (const [prefix, purpose] of KERNEL_APPROVAL_PREFIXES_V1) {
+          if (approvalId.startsWith(prefix)) {
+            throw new Error(
+              `${label}.approvalId must not start with "${prefix}": that namespace is the kernel's, for ${purpose}`,
+            );
+          }
+        }
       }
       return {
         type: "approval",

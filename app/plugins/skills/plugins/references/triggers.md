@@ -33,7 +33,9 @@ not. Then create the Routine with `routine_manage`:
 }
 ```
 
-The Routine is keyed like a webhook one — the receipt carries the URL and the
+Nothing is armed yet: the User is asked to approve the Routine, prompt and
+trigger as written, on a card in their conversation, and it is set up only
+once they do. The Routine is keyed like a webhook one — the receipt carries the URL and the
 key the outside service posts to — and the Plugin must be on for this Bot,
 or every delivery is dropped with that reason.
 

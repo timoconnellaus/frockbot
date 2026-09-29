@@ -320,7 +320,7 @@ The execution engine stays as it is. Jev stays the judge. What changes is where 
 Decisions:
 
 - **A Routine the person wrote is a standing request** for what it names. Anything irreversible or reaching a third party still goes to an Approval card bound to the exact arguments.
-- **A refused or uncertain call goes to an Approval card**, never "ask them in conversation". Open: whether a Routine waits on its card or carries on and says in its hand-off what is waiting; decided before step 9.
+- **A refused or uncertain call goes to an Approval card**, never "ask them in conversation". A Routine does not wait on its card: it posts it into the person's conversation, carries on, and says in its hand-off what is waiting (decided in step 9; reversible in `awaitingApprovalResult`, `app/supervision/loop.ts`).
 - **A Bot or Plugin that creates a Routine or edits its prompt** has that approved on a card before it is armed.
 - **A person's message steers any running Turn**, Routines included, at its next step boundary.
 - **Memory extraction reads only the person's own words** and passes the same write judgment as `memory_write`. A group's Turns extract nothing until their input records who wrote it.
@@ -335,8 +335,8 @@ Order, each step a pull request that lands its own failing eval cases or tests f
 6. **One reducer decides when a Turn ends**, from the journal. A send withheld as off-task no longer ends it.
 7. **Gates fail closed, advisors fail open.**
 8. **A stuck Turn stops.** Two stuck verdicts narrow it to the tools it speaks with; three end it. A repeated refused effect escalates rather than being judged again.
-9. **Approval cards replace conversational re-asking**, including in Routines.
-10. **Routine grants**, built as the policy model in [`jev-supervision-plan.md`](jev-supervision-plan.md#policy-model). Plugin `package-tool:` calls are supervised, and an effect id supervision cannot place is refused.
+9. **Approval cards replace conversational re-asking**, including in Routines. _Done:_ a refused outward call, or one allowed only in the uncertain band, records an Approval over the digest of its exact tool and arguments and draws the approval card; the same call made again after approval runs once without Jev. A subagent or group Turn still refuses in words ([architecture §4](architecture.md#turn-supervision--appsupervisionloopts)).
+10. **Routine grants**, built as the policy model in [`jev-supervision-plan.md`](jev-supervision-plan.md#policy-model). Plugin `package-tool:` calls are supervised, and an effect id supervision cannot place is refused. _Done:_ a Bot or Plugin's Routine create, prompt, schedule or trigger change, and pause or delete of a User's Routine, wait on a card and are applied with `promptApprovalId`, so they fire as the person's; `userAsked` is gone.
 11. **At-most-once on resume.** A non-idempotent call records that it was dispatched; one with no result settles as uncertain and is never sent again. Review ids are content-derived and a stored verdict names the call it approved.
 12. **The request ledger**, built as [continuation state](jev-supervision-plan.md#continuation-state).
 

@@ -7,8 +7,12 @@ import {
   defaultTurnDirectiveV1,
   emptyFailureStateV1,
   emptyPolicySnapshotV1,
+  decodeSendToUserPayloadV1,
   SUPERVISION_ARGUMENTS_CHANGED_PREFIX_V1,
+  SUPERVISION_AWAITING_APPROVAL_PREFIX_V1,
+  SUPERVISION_DECLINED_PREFIX_V1,
   SUPERVISION_NOT_AUTHORIZED_PREFIX_V1,
+  SUPERVISION_UNPLACED_CALL_PREFIX_V1,
   SUPERVISION_OFF_TASK_PREFIX_V1,
   SUPERVISION_WITHHELD_SEND_PREFIX_V1,
   sha256,
@@ -30,6 +34,7 @@ import {
   type ToolCall,
   type TurnDirective,
   type TurnInputOriginV1,
+  type ToolExecutionContext,
   type TurnSupervisor,
   withheldSendEndsTurnV1,
 } from "@frockbot/core/contracts";
@@ -37,6 +42,15 @@ import type { StoredRunOriginV1 } from "@frockbot/core/durable";
 import { resolveDynamicToolNameV1 } from "../audit/classify.js";
 import { SUBAGENT_SUMMARY_END_V1 } from "../routines/inbox.js";
 import type { FoundationFeature } from "../runtime.js";
+import { recordSendToUserV1 } from "../shell/agent.js";
+import {
+  CALL_APPROVAL_ARGUMENTS_MAX_V1,
+  callApprovalArgumentsV1,
+  callApprovalDigestV1,
+  callApprovalIdV1,
+  callApprovalWordingV1,
+  type CallApprovalsV1,
+} from "./call-approval.js";
 import { loopSignalsV1, progressCheckDueV1 } from "./loop-health.js";
 
 // Turn supervision, mounted into the loop. Jev judges; this file enforces.
@@ -59,8 +73,13 @@ import { loopSignalsV1, progressCheckDueV1 } from "./loop-health.js";
 //   getting anywhere. A stuck Turn is told, in that request, to change course.
 // - Right before each `mutate` call runs — a Plugin a User installed or a Bot
 //   wrote, a remote MCP server, a connected app: did the person ask for it,
-//   with these particulars. A refused call never runs; the model reads why
-//   and asks the person in conversation.
+//   with these particulars. A refused call never runs. One that reaches
+//   outside FrockBot is put to the person on an Approval card bound to its
+//   exact arguments, and runs once, without asking Jev, when the Bot makes it
+//   again after they approve; a Routine posts the card and carries on. Any
+//   other refusal is explained to the model in words.
+// - A call it cannot place in a Turn's step — neither a model's call nor a
+//   Plugin's call to a Bot tool — is refused when it needs review.
 //
 // Every decision is a session event, read back rather than asked again when a
 // Turn resumes, and inspectable per Turn through `/api/debug`. Mounted first,
@@ -82,6 +101,14 @@ export interface SupervisionRuntimeHostV1 {
    * `Task` names them by. Read at the first request, once they are known.
    */
   specialists?(): readonly { name: string; slug: string }[];
+  /**
+   * The Bot's call approvals. Absent where no approval card can reach the
+   * person — a subagent runs in its own object, a group Turn in the group —
+   * and then a refused call is refused in words, as before.
+   */
+  approvals?: CallApprovalsV1;
+  /** The admitted run, which the Approval a refused call asks under names. */
+  runId?: string;
 }
 
 /** What a run's origin says about who is on the other end of its Turn. */
@@ -260,13 +287,27 @@ function flattenCalls(
   });
 }
 
-/** `tool:<turn>:<step>:<ordinal>`, with `.<index>` for a batch sub-call. */
-function occurrenceTurnStep(
+/**
+ * The Turn and step a call runs under. A model's call is
+ * `tool:<turn>:<step>:<ordinal>`, with `.<index>` for a batch sub-call; a
+ * Plugin's call to a Bot tool is `package-tool:<hash>`, placed by the
+ * `package/tool-call` the isolate host journals at the open step before it
+ * prepares the call. Anything else cannot be placed.
+ */
+export function occurrenceTurnStepV1(
   occurrenceId: string,
-): { turn: number; step: number } | undefined {
+  events: readonly SessionEvent[],
+): { turn: number; step: number; package?: true } | undefined {
   const match = /^tool:(\d+):(\d+):/.exec(occurrenceId);
-  if (!match) return undefined;
-  return { turn: Number(match[1]), step: Number(match[2]) };
+  if (match) return { turn: Number(match[1]), step: Number(match[2]) };
+  if (!occurrenceId.startsWith("package-tool:")) return undefined;
+  const placed = events.findLast(
+    (event) =>
+      event.type === "package/tool-call" && event.effectId === occurrenceId,
+  );
+  return placed?.type === "package/tool-call"
+    ? { turn: placed.turn, step: placed.step, package: true }
+    : undefined;
 }
 
 function turnEvents(
@@ -765,6 +806,7 @@ function withheldHandoffResult(
     : `${SUPERVISION_WITHHELD_SEND_PREFIX_V1} because it says something was done that this Turn's results do not show done. Hand off again saying plainly what was and was not done.`;
 }
 
+/** A refusal no card can settle, in words. */
 function refusedCallResult(reason: string, origin: TurnInputOriginV1): string {
   // Nobody can be asked during a Routine, a subagent's task or a hand-off:
   // telling that Turn to ask the person sends it round again instead.
@@ -776,6 +818,40 @@ function refusedCallResult(reason: string, origin: TurnInputOriginV1): string {
   return reason === "arguments_changed"
     ? `${SUPERVISION_ARGUMENTS_CHANGED_PREFIX_V1} A recipient, destination or the substance is not what they asked for. Match what they asked, or check with them in conversation first, saying exactly what the call will do.`
     : `${SUPERVISION_NOT_AUTHORIZED_PREFIX_V1} If it is needed, ask them in conversation first, saying exactly what it will do, and make the call once they agree.`;
+}
+
+/**
+ * What the model reads about a call that waits on a card. The card is the
+ * question, so the Bot is told not to ask it again in words. A Turn with
+ * nobody present carries on and says in its hand-off what is waiting: the
+ * card is already in the person's conversation.
+ */
+function awaitingApprovalResult(
+  origin: TurnInputOriginV1,
+  declined: boolean,
+): string {
+  if (declined) {
+    return `${SUPERVISION_DECLINED_PREFIX_V1} Do not make it; carry on without it, and say so if it matters.`;
+  }
+  return personPresentV1(origin)
+    ? `${SUPERVISION_AWAITING_APPROVAL_PREFIX_V1} Do not make it again and do not ask about it in words: the card is the question. If they approve, you are told, and making exactly this call then runs it.`
+    : `${SUPERVISION_AWAITING_APPROVAL_PREFIX_V1} Do not make it again. Carry on with the rest of the work, and say in your hand-off what is waiting for their approval.`;
+}
+
+/**
+ * Whether a refused call from this origin can be put to the person on a card
+ * in their conversation. A subagent runs in its own object, whose Approvals
+ * the Bot never reads, and a group Turn speaks in the group; both hand the
+ * call back in words instead.
+ */
+function cardOriginV1(origin: TurnInputOriginV1): boolean {
+  return origin !== "subagent" && origin !== "group";
+}
+
+function consequenceOf(decision: CallDecisionV1): number | undefined {
+  return decision.judgments.find(
+    (judgment) => judgment.question === "consequence",
+  )?.value;
 }
 
 function offTaskResult(objective: string): string {
@@ -796,6 +872,87 @@ export function createSupervisionRuntimeFeatureV1(
         throw new Error(`supervision: session "${sessionId}" is not open`);
       }
       return session;
+    };
+
+    /**
+     * Put a refused call to the person on an Approval card bound to it, and
+     * say what the model should do meanwhile. The occurrence the Approval id
+     * was minted for draws the card: intent first, then the approval send on
+     * this Turn's log, both idempotent, so a replay draws nothing twice. A
+     * repeat pointing at an earlier card draws nothing. `undefined` when no
+     * card could be drawn, and the call is refused in words instead.
+     */
+    const askOnCard = async (input: {
+      approvals: CallApprovalsV1;
+      approvalId: string;
+      digest: string;
+      tool: string;
+      bound: string;
+      decision: CallDecisionV1;
+      context: ToolExecutionContext;
+    }): Promise<string | undefined> => {
+      const { approvals, approvalId, context } = input;
+      const own =
+        approvalId ===
+        (await callApprovalIdV1(
+          host.runId ?? "",
+          context.sessionId,
+          context.effectId,
+        ));
+      if (!own) {
+        const status = await approvals.status(approvalId);
+        if (status === "denied")
+          return awaitingApprovalResult(host.origin, true);
+        return status === "asked" || status === "pending"
+          ? awaitingApprovalResult(host.origin, false)
+          : undefined;
+      }
+      await approvals.ask({
+        schemaVersion: 1,
+        approvalId,
+        digest: input.digest,
+        tool: input.tool,
+        arguments: input.bound,
+        sessionId: context.sessionId,
+        createdAt: new Date().toISOString(),
+      });
+      const reason = input.decision.reasonCode;
+      const payload = decodeSendToUserPayloadV1(
+        {
+          type: "approval",
+          approvalId,
+          ...callApprovalWordingV1({
+            productName: host.productName,
+            tool: input.tool,
+            arguments: input.bound,
+            origin: personPresentV1(host.origin) ? "person" : "background",
+            reason:
+              reason === "arguments_changed" ||
+              reason === "policy_requires_confirmation"
+                ? reason
+                : "no_authorization",
+            ...(consequenceOf(input.decision) === undefined
+              ? {}
+              : { consequence: consequenceOf(input.decision)! }),
+          }),
+        },
+        "call approval",
+        // Minted above from this occurrence; the prefix is refused to every
+        // other author.
+        { kernelMinted: true },
+      );
+      const recorded = await recordSendToUserV1(runtime.sessions, payload, {
+        sessionId: context.sessionId,
+        occurrenceId: context.effectId,
+        tool: input.tool,
+        ...(runtime.firstPartyCards === undefined
+          ? {}
+          : { cards: runtime.firstPartyCards }),
+        context,
+      });
+      return recorded.status === "sent"
+        ? awaitingApprovalResult(host.origin, false)
+        : undefined;
     };
 
     /** Whether `step` opens stuck, asking Jev only when a check is due. */
@@ -1011,12 +1168,29 @@ export function createSupervisionRuntimeFeatureV1(
       },
 
       async prepareTool(call, context, next) {
-        const at = occurrenceTurnStep(context.effectId);
-        if (!at) return next();
+        const placing = runtime.sessions.get(context.sessionId);
+        const at = placing
+          ? occurrenceTurnStepV1(context.effectId, placing.activeRunJournal)
+          : undefined;
+        if (!at) {
+          // A call supervision cannot place in a Turn's step cannot be
+          // reviewed, so one that needs review does not run.
+          if (context.effect !== "mutate") return next();
+          return {
+            kind: "denied",
+            call,
+            result: {
+              content: SUPERVISION_UNPLACED_CALL_PREFIX_V1,
+              isError: true,
+            },
+          };
+        }
         const session = sessionOf(context.sessionId);
         const events = session.activeRunJournal;
         const decision = stepDecisionOf(events, at.turn, at.step);
-        if (!decision) {
+        // A Plugin may reach a Bot tool from a hook before the step's
+        // response is reviewed; its call is still reviewed on its own.
+        if (!decision && !at.package) {
           throw new Error(
             `supervision: step ${at.turn}:${at.step} ran a call it never reviewed`,
           );
@@ -1095,7 +1269,7 @@ export function createSupervisionRuntimeFeatureV1(
             };
           }
           if (
-            decision.responseAlignment === "wrong-objective" &&
+            decision?.responseAlignment === "wrong-objective" &&
             !speaks(call.name)
           ) {
             return {
@@ -1109,31 +1283,123 @@ export function createSupervisionRuntimeFeatureV1(
           }
           if (context.effect === "mutate") {
             const outer = context.toolCall ?? call;
-            const reviewed = {
-              tool: resolveDynamicToolNameV1(outer.name, outer.input),
-              arguments: isRecord(call.input) ? call.input : {},
-            };
+            const tool = resolveDynamicToolNameV1(outer.name, outer.input);
+            const args = isRecord(call.input) ? call.input : {};
+            const reviewed = { tool, arguments: args };
             const callDigest = await reviewedCallDigestV1(reviewed);
+            const bound = callApprovalArgumentsV1(args);
+            // Only a call the person could read on a card, and the Bot
+            // repeat exactly, is bound to one.
+            const approvals =
+              host.approvals &&
+              cardOriginV1(host.origin) &&
+              bound.length <= CALL_APPROVAL_ARGUMENTS_MAX_V1
+                ? host.approvals
+                : undefined;
+            const digest = approvals
+              ? await callApprovalDigestV1(tool, args)
+              : undefined;
             let verdict = callDecisionOf(events, context.effectId, callDigest);
+            const record = async (
+              decided: CallDecisionV1,
+              started: number,
+            ): Promise<void> => {
+              session.append({
+                type: "supervision/call",
+                turn: at.turn,
+                step: at.step,
+                occurrenceId: context.effectId,
+                tool,
+                callDigest,
+                decision: decided,
+                latencyMs: elapsed(started),
+              });
+              await session.flush();
+            };
+            const found =
+              !verdict && approvals && digest
+                ? await approvals.find(digest)
+                : undefined;
+            if (!verdict && approvals && digest && found) {
+              const started = Date.now();
+              // The person already decided about exactly this call: an
+              // approval is spent once, without asking Jev again, and a
+              // card still open is the answer to a repeat.
+              if (
+                found.status === "approved" &&
+                (await approvals.spend(
+                  found.approvalId,
+                  digest,
+                  context.effectId,
+                ))
+              ) {
+                verdict = {
+                  decision: "allow",
+                  reasonCode: "authorized",
+                  judgments: [],
+                  approvalId: found.approvalId,
+                };
+                await record(verdict, started);
+              } else if (
+                found.status === "asked" ||
+                found.status === "pending"
+              ) {
+                verdict = {
+                  decision: "reject",
+                  reasonCode: "policy_requires_confirmation",
+                  judgments: [],
+                  askPerson: true,
+                  approvalId: found.approvalId,
+                };
+                await record(verdict, started);
+              }
+            }
             if (!verdict) {
               const started = Date.now();
               verdict = await host.supervisor.reviewCall(
                 callReviewEvidenceOfV1(events, at.turn, host.origin, reviewed),
                 context.signal,
               );
-              session.append({
-                type: "supervision/call",
-                turn: at.turn,
-                step: at.step,
-                occurrenceId: context.effectId,
-                tool: reviewed.tool,
-                callDigest,
-                decision: verdict,
-                latencyMs: elapsed(started),
-              });
-              await session.flush();
+              if (
+                verdict.decision === "reject" &&
+                verdict.askPerson &&
+                approvals
+              ) {
+                // A decline stands for exactly this call: it is reported,
+                // not asked again. Anything else gets its own card.
+                verdict = {
+                  ...verdict,
+                  approvalId:
+                    found?.status === "denied"
+                      ? found.approvalId
+                      : await callApprovalIdV1(
+                          host.runId ?? "",
+                          context.sessionId,
+                          context.effectId,
+                        ),
+                };
+              }
+              await record(verdict, started);
             }
             if (verdict.decision === "reject") {
+              if (verdict.askPerson && verdict.approvalId && approvals) {
+                const asked = await askOnCard({
+                  approvals,
+                  approvalId: verdict.approvalId,
+                  digest: digest!,
+                  tool,
+                  bound,
+                  decision: verdict,
+                  context,
+                });
+                if (asked) {
+                  return {
+                    kind: "denied",
+                    call,
+                    result: { content: asked, isError: true },
+                  };
+                }
+              }
               return {
                 kind: "denied",
                 call,
@@ -1150,10 +1416,10 @@ export function createSupervisionRuntimeFeatureV1(
         if (!verdict) {
           const started = Date.now();
           verdict =
-            decision.text === "withhold"
+            decision?.text === "withhold"
               ? {
                   send: "withhold",
-                  reason: decision.textReason ?? "off_task",
+                  reason: decision?.textReason ?? "off_task",
                   judgments: [],
                 }
               : await host.supervisor.reviewSend(

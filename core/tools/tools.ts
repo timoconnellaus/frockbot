@@ -890,7 +890,9 @@ export class ToolRegistry implements ToolExecution {
   /**
    * Whether this call's effect has a position in the conversation, and so may
    * not race another such effect dispatched alongside it. The tool declares it
-   * once, on its definition; a dispatcher does not decide it per call.
+   * once, on its definition; a dispatcher does not decide it per call. A call
+   * that reaches a `mutate` definition has one too: supervision may refuse it
+   * and put an approval card for it in the conversation.
    */
   orderedEffect(call: ToolCall): boolean {
     if (call.name === CALL_DYNAMIC_TOOL_NAME) {
@@ -902,11 +904,14 @@ export class ToolRegistry implements ToolExecution {
       const resolved = this.resolveDynamicCall(call);
       return (
         "error" in resolved ||
-        resolved.registered.definition.orderedEffect === true
+        resolved.registered.definition.orderedEffect === true ||
+        this.effectOf(resolved.registered) === "mutate"
       );
     }
+    const registered = this.nativeDefinitions.get(call.name);
     return (
-      this.nativeDefinitions.get(call.name)?.definition.orderedEffect === true
+      registered?.definition.orderedEffect === true ||
+      this.effectOf(registered) === "mutate"
     );
   }
 

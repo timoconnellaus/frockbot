@@ -58,6 +58,21 @@ export const CALL_REVIEW_OUTSIDE_MIN_V1 = 0.5;
  */
 export const CALL_REVIEW_READ_MIN_V1 = 0.8;
 
+/**
+ * How sure Jev must be of the authorization it chose before a call that
+ * reaches outside FrockBot runs without asking the person on a card. Labeled
+ * on `jev-1.13.0`: outward calls that should run chose theirs at 0.65 and up.
+ */
+export const CALL_REVIEW_AUTHORIZATION_SURE_V1 = 0.55;
+
+/**
+ * The particulars Noul below which a call that reaches outside FrockBot, and
+ * that Jev would otherwise allow, is asked about on a card instead. Between
+ * {@link CALL_REVIEW_ARGUMENTS_YES_V1} and this is the uncertain band: outward
+ * calls that should run scored 0.6 and up on `jev-1.13.0`.
+ */
+export const CALL_REVIEW_ARGUMENTS_SURE_V1 = 0.5;
+
 /** Tools whose calls run in the Bot's own Computer. */
 const CALL_REVIEW_WORKSPACE_TOOLS_V1 = new Set(["computer_exec"]);
 
@@ -366,6 +381,12 @@ export function callReviewPersonAskedV1(
  * - Anything else is refused. A read is refused as unasked only when Jev is
  *   more sure than not that nobody asked, and never in the Bot's own
  *   Computer while someone who can ask spoke.
+ *
+ * A refused call that reaches outside FrockBot is one the person can decide
+ * on an Approval card bound to its exact arguments (`askPerson`), unless text
+ * in the evidence tried to direct the review. So is one Jev would allow only
+ * in the uncertain band: an authorization it is not sure of, or particulars
+ * just over the line. Reads never get a card.
  */
 export function composeCallDecisionV1(input: {
   readonly answers: CallReviewAnswersV1;
@@ -377,13 +398,24 @@ export function composeCallDecisionV1(input: {
 }): CallDecisionV1 {
   const { answers } = input;
   const authorization = answers.authorization.choice;
+  const level = (score: number) =>
+    (answers.consequence.probabilities as Readonly<Record<string, number>>)[
+      String(score)
+    ] ?? 0;
+  const read = level(0) >= CALL_REVIEW_READ_MIN_V1;
+  const reachesOutside = level(2) + level(3) >= CALL_REVIEW_OUTSIDE_MIN_V1;
+  const steered =
+    answers.instructsReviewer.noul >= CALL_REVIEW_INSTRUCTS_REVIEWER_YES_V1;
+  const askable = reachesOutside && !read && !steered;
   const reject = (
-    reasonCode: "no_authorization" | "arguments_changed",
+    reasonCode:
+      "no_authorization" | "arguments_changed" | "policy_requires_confirmation",
   ): CallDecisionV1 => ({
     decision: "reject",
     reasonCode,
     judgments: callReviewJudgmentsV1(answers),
     ...(input.model === undefined ? {} : { model: input.model }),
+    ...(askable ? { askPerson: true as const } : {}),
   });
   const allow = (): CallDecisionV1 => ({
     decision: "allow",
@@ -391,12 +423,6 @@ export function composeCallDecisionV1(input: {
     judgments: callReviewJudgmentsV1(answers),
     ...(input.model === undefined ? {} : { model: input.model }),
   });
-  const level = (score: number) =>
-    (answers.consequence.probabilities as Readonly<Record<string, number>>)[
-      String(score)
-    ] ?? 0;
-  const read = level(0) >= CALL_REVIEW_READ_MIN_V1;
-  const reachesOutside = level(2) + level(3) >= CALL_REVIEW_OUTSIDE_MIN_V1;
   // The Bot's own Computer is its workspace: a command that changes nothing
   // there touches nobody's data, and anything it asks of the person's
   // accounts is reviewed on its own as it leaves (`credentialed_request`).
@@ -415,12 +441,7 @@ export function composeCallDecisionV1(input: {
       ? allow()
       : reject("no_authorization");
   }
-  if (
-    !read &&
-    answers.instructsReviewer.noul >= CALL_REVIEW_INSTRUCTS_REVIEWER_YES_V1
-  ) {
-    return reject("no_authorization");
-  }
+  if (!read && steered) return reject("no_authorization");
   if (unasked) return reject("no_authorization");
   if (authorization === "materially_different" && !read) {
     return reject("arguments_changed");
@@ -432,6 +453,14 @@ export function composeCallDecisionV1(input: {
     answers.argumentsMatchRequest.noul < CALL_REVIEW_ARGUMENTS_YES_V1
   ) {
     return reject("arguments_changed");
+  }
+  if (
+    askable &&
+    (probability(answers.authorization, authorization) <
+      CALL_REVIEW_AUTHORIZATION_SURE_V1 ||
+      answers.argumentsMatchRequest.noul < CALL_REVIEW_ARGUMENTS_SURE_V1)
+  ) {
+    return reject("policy_requires_confirmation");
   }
   return allow();
 }
