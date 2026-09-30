@@ -24,7 +24,7 @@ import {
   type VoiceBotHistorySourceV1,
   type VoiceBotSearchSourceV1,
 } from "./history.js";
-import type { GeminiFunctionDeclarationV1 } from "./gemini-live.js";
+import type { VoiceFunctionDeclarationV1 } from "./provider.js";
 import { VOICE_ASSISTANT_MAX_DELEGATIONS_PER_TURN_V1 } from "./shared.js";
 import {
   escapeVoiceTagV1 as escapeTag,
@@ -119,6 +119,12 @@ export interface VoiceAssistantPromptInputV1 {
    * so a new call knows silently; the model must not announce it.
    */
   runningTasks?: readonly VoiceRunningTaskV1[];
+  /**
+   * False when the session cannot search the web itself (OpenAI Realtime), so
+   * the model hands a question about today's facts to `subagent` instead of
+   * being told it can look it up.
+   */
+  webSearch?: boolean;
 }
 
 export interface VoiceRunningTaskV1 {
@@ -282,7 +288,9 @@ export function renderVoiceSystemPromptV1(
       "- Use `status` before claiming what you are working on. Never guess from memory.",
       "- Read what was already said with `read_history`, or find an older conversation with `search_history`. These only read existing conversation and never start new work. Use `status` for live progress; search is an index of settled conversations and can lag.",
       "- Only use `cancel` when the person clearly asks you to stop what you are doing, and say what you stopped.",
-      "- You can search the web yourself when a question needs something current. Say what you found, not how you found it.",
+      input.webSearch === false
+        ? "- You cannot look anything up yourself. A question that needs something current — news, weather, prices, opening hours — goes to `subagent` like any other work."
+        : "- You can search the web yourself when a question needs something current. Say what you found, not how you found it.",
     );
   } else {
     lines.push(
@@ -445,7 +453,7 @@ export function renderVoiceSystemPromptV1(
  * fresh one. So a slow tool is silence, and `subagent` — which answers at once
  * and leaves the work to a Bot Turn — is what keeps a long job from being one.
  */
-export const VOICE_FUNCTION_DECLARATIONS_V1: readonly GeminiFunctionDeclarationV1[] =
+export const VOICE_FUNCTION_DECLARATIONS_V1: readonly VoiceFunctionDeclarationV1[] =
   [
     {
       name: "list_bots",
@@ -671,7 +679,7 @@ const VOICE_BOT_TOOL_NAMES_V1: readonly string[] = [
  * which is what the instruction's own rules would have been telling the model
  * to do.
  */
-export const VOICE_ACCOUNT_FUNCTION_DECLARATIONS_V1: readonly GeminiFunctionDeclarationV1[] =
+export const VOICE_ACCOUNT_FUNCTION_DECLARATIONS_V1: readonly VoiceFunctionDeclarationV1[] =
   VOICE_FUNCTION_DECLARATIONS_V1.filter(
     (declaration) => !VOICE_BOT_TOOL_NAMES_V1.includes(declaration.name),
   );

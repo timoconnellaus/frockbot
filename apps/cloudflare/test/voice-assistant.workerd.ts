@@ -2485,3 +2485,191 @@ describe("timing a call that asked to be timed", () => {
     }
   });
 });
+
+describe("a call on OpenAI Realtime", () => {
+  async function openAiCall(prefix: string) {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `${prefix}-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const stub = assistant(identity.userId);
+    await stub.probeSetScript({ provider: "openai-realtime" });
+    const opened = await open(identity.userId);
+    await startCall(opened, identity.botId);
+    await opened.waitFor(state("awake"), "awake");
+    return { identity, stub, opened };
+  }
+
+  test("opens with the Bot's instruction, an OpenAI voice and its own tools", async () => {
+    const { identity, stub, opened } = await openAiCall("voice-openai-setup");
+    expect(await stub.probeUpstreamUrl()).toBe(
+      "wss://voice-upstream.invalid/live?model=gpt-realtime-2.1",
+    );
+    expect(await stub.probeUpstreamHeaders()).toEqual({
+      Authorization: "Bearer workerd-openai-key",
+    });
+    const setup = (await stub.probeUpstreamFrames()).find(
+      (frame) => frame.kind === "setup",
+    )!;
+    expect([
+      "alloy",
+      "ash",
+      "ballad",
+      "coral",
+      "echo",
+      "sage",
+      "shimmer",
+      "verse",
+      "marin",
+      "cedar",
+    ]).toContain(setup.voiceName);
+    expect(setup.tools).toContain("subagent");
+    expect(setup.tools).not.toContain("googleSearch");
+    expect(setup.instruction).toContain(identity.botId);
+    // It cannot search, so it is not told it can.
+    expect(setup.instruction).toContain("You cannot look anything up yourself");
+
+    // 16 kHz goes up as 24 kHz: three samples for every two, less the one
+    // held back for the next chunk.
+    sendPcm(opened, 7, 1280);
+    const audio = await eventually(
+      async () =>
+        (await stub.probeUpstreamFrames()).find(
+          (frame) => frame.kind === "audio",
+        ),
+      (frame) => Boolean(frame),
+      "the microphone upstream",
+    );
+    expect(audio!.bytes).toBe(1918);
+  });
+
+  test("talk: a turn is a ledger row with what was said and answered", async () => {
+    const { stub, opened } = await openAiCall("voice-openai-talk");
+    await exchange(stub, "what bots do I have", "Just me for now.");
+    expect(await turns(stub)).toMatchObject([
+      {
+        transcript: "what bots do I have",
+        answer: "Just me for now.",
+        state: "answered",
+      },
+    ]);
+    expect(opened.audio.length).toBeGreaterThan(0);
+    await opened.waitFor(
+      (frame) =>
+        frame.type === "transcript_end" && frame.text === "Just me for now.",
+      "the spoken answer",
+    );
+  });
+
+  test("a tool call is answered, then the model is asked to speak", async () => {
+    const { identity, stub } = await openAiCall("voice-openai-tool");
+    await stub.probeHears("what are you working on");
+    await stub.probeCalls("status", {}, "call_status");
+    const frames = await eventually(
+      () => stub.probeUpstreamFrames(),
+      (seen) => seen.some((frame) => frame.kind === "response"),
+      "the response asked for",
+    );
+    const answered = frames.find((frame) => frame.kind === "tool-response")!;
+    expect(answered.callId).toBe("call_status");
+    expect(answered.result).toContain(identity.botId);
+    expect(frames.indexOf(answered)).toBeLessThan(
+      frames.findIndex((frame) => frame.kind === "response"),
+    );
+    // The answer is the next response, and it closes the same ledger turn.
+    await stub.probeSays("Nothing right now.");
+    const settled = await eventually(
+      () => turns(stub),
+      (rows) => rows[0]?.state === "answered",
+      "the held turn answered",
+    );
+    expect(settled).toHaveLength(1);
+    expect(settled[0]).toMatchObject({
+      transcript: "what are you working on",
+      answer: "Nothing right now.",
+    });
+  });
+
+  test("barge-in stops playback and truncates the reply to what was heard", async () => {
+    const { stub, opened } = await openAiCall("voice-openai-interrupt");
+    await stub.probeHears("count to forty");
+    // Ten seconds of reply, all of it sent at once, as OpenAI does.
+    await stub.probeSpeaks(480_000);
+    await eventually(
+      async () => opened.audio.length,
+      (count) => count === 1,
+      "the reply playing",
+    );
+    await stub.probeInterrupted();
+    await opened.waitFor(
+      (frame) => frame.type === "playback_interrupt",
+      "the playback interrupt",
+    );
+    const truncate = await eventually(
+      async () =>
+        (await stub.probeUpstreamFrames()).find(
+          (frame) => frame.kind === "truncate",
+        ),
+      (frame) => Boolean(frame),
+      "the truncate",
+    );
+    expect(truncate!.itemId).toBe("item_1");
+    expect(truncate!.audioEndMs).toBeLessThan(10_000);
+    // The cancelled response ends the turn; nothing more of it is played.
+    const heard = opened.audio.length;
+    await eventually(
+      () => turns(stub),
+      (rows) => rows[0]?.state !== "admitted",
+      "the interrupted turn settled",
+    );
+    expect(opened.audio.length).toBe(heard);
+  });
+
+  test("end_call waits for the goodbye, then hangs up", async () => {
+    const { stub, opened } = await openAiCall("voice-openai-end");
+    await stub.probeHears("that's all, goodbye");
+    await stub.probeCalls("end_call", {}, "call_end");
+    await eventually(
+      () => stub.probeUpstreamFrames(),
+      (seen) => seen.some((frame) => frame.kind === "response"),
+      "the goodbye asked for",
+    );
+    const early = await Promise.race([
+      opened.closed.then(() => "closed"),
+      settle(150).then(() => "open"),
+    ]);
+    expect(early).toBe("open");
+    await stub.probeSays("Bye for now.");
+    const closed = await opened.closed;
+    expect(closed.code).toBe(1000);
+    expect(closed.reason).toBe("end_call");
+    expect(opened.frames.filter((frame) => frame.type === "error")).toEqual([]);
+  });
+
+  test("a wake opens fresh and carries the conversation, having no handle", async () => {
+    const { stub, opened } = await openAiCall("voice-openai-wake");
+    await exchange(stub, "my sister is called Ada", "Nice to know.");
+    opened.socket.send(
+      JSON.stringify({ schemaVersion: 1, type: "voice/sleep" }),
+    );
+    await opened.waitFor(state("asleep"), "asleep");
+    sendWake(opened);
+    await eventually(
+      () => stub.probeUpstreamCount(),
+      (count) => count === 2,
+      "a second session",
+    );
+    const setup = await eventually(
+      async () =>
+        (await stub.probeUpstreamFrames()).find(
+          (frame) => frame.kind === "setup",
+        ),
+      (frame) => Boolean(frame),
+      "the second setup",
+    );
+    expect(setup!.handle).toBeUndefined();
+    expect(setup!.instruction).toContain("my sister is called Ada");
+  });
+});

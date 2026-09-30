@@ -3,11 +3,11 @@
 Two voice features, two transports, one credential rule: provider keys never
 leave the Worker.
 
-| Feature                                 | Route                                | Server                                                                    | Provider                                                                 |
-| --------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| Composer dictation (one Bot's composer) | `GET /api/voice/dictation` WebSocket | Worker-level relay, `apps/cloudflare/src/voice-dictation.ts`              | OpenAI Realtime transcription, model `gpt-live-transcribe`               |
-| Continuous voice session (one Bot)      | `GET /api/voice/assistant` WebSocket | `VoiceAssistant` Durable Object, `apps/cloudflare/src/voice-assistant.ts` | Gemini Live, model `gemini-3.8-live`: one bidirectional session per call |
-| Capability probe                        | `GET /api/voice/capabilities`        | Gateway                                                                   | —                                                                        |
+| Feature                                 | Route                                | Server                                                                    | Provider                                                                                                                              |
+| --------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Composer dictation (one Bot's composer) | `GET /api/voice/dictation` WebSocket | Worker-level relay, `apps/cloudflare/src/voice-dictation.ts`              | OpenAI Realtime transcription, model `gpt-live-transcribe`                                                                            |
+| Continuous voice session (one Bot)      | `GET /api/voice/assistant` WebSocket | `VoiceAssistant` Durable Object, `apps/cloudflare/src/voice-assistant.ts` | Gemini Live (`gemini-3.8-live`) or OpenAI Realtime (`gpt-realtime-2.1`), chosen by the deployment: one bidirectional session per call |
+| Capability probe                        | `GET /api/voice/capabilities`        | Gateway                                                                   | —                                                                                                                                     |
 
 Since [ADR 0031](adr/0031-voice-gemini-live.md) the continuous session is one
 `bidiGenerateContent` socket and nothing else. The cascade it replaced — ears,
@@ -22,8 +22,9 @@ and forwards the upgrade with `x-frockbot-user-id` set by itself; nothing below
 the gateway re-verifies and nothing below it is reachable another way. There is
 no `/agents/*` route.
 
-The pure parts — the protocol decoders, the Gemini Live wire
-(`app/voice/gemini-live.ts`), the durable ledger, the instruction and the
+The pure parts — the protocol decoders, the provider seam and both providers'
+wires (`app/voice/provider.ts`, `gemini-live.ts`, `openai-realtime-voice.ts`),
+the durable ledger, the instruction and the
 tools, the session's memory — live in `app/voice/` and import no Cloudflare
 SDK. The two Worker modules above are the adapters. What the Live API actually
 does, observed rather than remembered, is in
@@ -133,6 +134,66 @@ voice revision, which is separate from its avatar's). The Bot Durable Object
 is the authority and the User's directory mirrors what it reports wearing:
 [`app/flock/README.md`](../app/flock/README.md#the-voice-mirror) owns that
 half.
+
+## Which model a call runs on
+
+A call is one speech-to-speech session, and the provider behind it sits
+behind one seam, `VoiceProviderV1` in `app/voice/provider.ts`. A provider
+says where a session connects and with which key, what its audio costs,
+whether it resumes and whether it searches the web itself; its codec writes
+the object's four commands (setup, audio, a text turn, tool answers) as its own
+frames and reads its frames back as the object's events — which are Gemini
+Live's boundaries, because that is what the object was built against. The
+Durable Object owns the socket and every decision and knows neither wire.
+
+| Provider        | `VOICE_PROVIDER`         | Model              | Key              | Resumes        | Searches           |
+| --------------- | ------------------------ | ------------------ | ---------------- | -------------- | ------------------ |
+| Gemini Live     | `gemini-live` (or unset) | `gemini-3.8-live`  | `GEMINI_API_KEY` | yes, by handle | yes, Google Search |
+| OpenAI Realtime | `openai-realtime`        | `gpt-realtime-2.1` | `OPENAI_API_KEY` | no             | no                 |
+
+The deployment chooses: a profile's `voice.provider` becomes the app Worker's
+`VOICE_PROVIDER` var, and `deployments/staging.json` runs OpenAI Realtime.
+`chooseVoiceProviderV1` (`app/voice/providers.ts`) is the one place the
+choice is made, and already takes an account's choice and own key beside the
+deployment's so the setup web app can supply them later; nothing sets them
+yet, so every key today is the deployment's secret, held server-side as
+before.
+
+**OpenAI Realtime** is the GA Realtime API (`session.type: "realtime"`) over
+`wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1`, with the key in an
+`Authorization` header on the Worker's `fetch` upgrade rather than on the URL.
+Where it differs from Gemini, `openai-realtime-voice.ts` absorbs it:
+
+- It takes PCM16 at 24 kHz only, so the client's 16 kHz is resampled going up
+  (linear, across chunk boundaries). Its output is already 24 kHz.
+- The first `session.updated` is `setup-complete`; audio waits for it as it
+  waits for Gemini's.
+- Turn detection is the server's `semantic_vad` with `interrupt_response`,
+  and the person's words are transcribed by `gpt-4o-transcribe` —
+  dictation's `gpt-live-transcribe` refuses any turn detection.
+- A function call arrives in `response.done`, before that response's
+  `turn-complete`, so a silent calling response is held exactly as Gemini's
+  calling generation is. A result does not make the model speak: the codec
+  sends `response.create` once every call of the response has its answer,
+  and only while no response is running. A `subagent`'s real result, which
+  arrives after its "started", goes in as a turn, since a call takes one
+  output.
+- Barge-in: the server cancels the reply the person talks over, but it sends
+  audio faster than real time, so the client usually holds seconds nobody has
+  heard. Speech that starts while the last reply could still be playing is
+  `interrupted` (the client drops its queue) and the model's item is truncated
+  to what could have been heard (`conversation.item.truncate`), so the model
+  does not believe it said the rest.
+- It has no resumption: every wake opens fresh and carries the call's own
+  turns under `<where-we-were>`, as a forgotten Gemini handle does. It ends a
+  session at sixty minutes with `session_expired`, which is read as `goAway`.
+- It has no built-in search, so the instruction says the model cannot look
+  anything up and sends a question about today's facts to `subagent`.
+- Voices: a Bot's voice is a name from Gemini's thirty (below), and each maps
+  by Google's characterisation of it to one of OpenAI's ten
+  (`OPENAI_VOICE_BY_GEMINI_VOICE_V1`); the character defaults land on ten
+  different voices out of eleven. The delivery prose is the same instruction
+  either way.
 
 ## Capabilities
 
@@ -1165,8 +1226,9 @@ anywhere.
 
 | Name                            | Where             | Required | What it enables                                                                                                                                    |
 | ------------------------------- | ----------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `OPENAI_API_KEY`                | Worker secret     | yes      | Composer dictation. Absent: dictation reports that voice is unavailable.                                                                           |
-| `GEMINI_API_KEY`                | Worker secret     | yes      | The continuous voice session: one Gemini Live socket per call, ears, words and voice together. Absent: starting a session is refused.              |
+| `OPENAI_API_KEY`                | Worker secret     | yes      | Composer dictation, and the voice session on OpenAI Realtime. Absent: dictation reports that voice is unavailable.                                 |
+| `GEMINI_API_KEY`                | Worker secret     | yes      | The voice session on Gemini Live: one socket per call, ears, words and voice together. Absent on that provider: starting a session is refused.     |
+| `VOICE_PROVIDER`                | Worker var        | optional | `gemini-live` (unset) or `openai-realtime`, from the profile's `voice.provider`. Which key the session needs follows from it.                      |
 | `VOICE_ASSISTANT_MODEL`         | Worker var        | optional | Pins the gateway model the end-of-call memory update is asked; the platform's Auto route when unset. The call has no chat model.                   |
 | `VOICE_DICTATION_CLEANUP_MODEL` | Worker var        | optional | The model that tidies a dictated transcript. Unset is `groq/llama-3.1-8b-instant`; no `AI` binding means no tidying and the raw transcript stands. |
 | `JEV_API_KEY`                   | Worker secret     | yes      | Reviews a Groq tidy before it replaces the draft; a failed call keeps the raw transcript. Required because every Turn is supervised by it.         |
@@ -1180,15 +1242,24 @@ gateway transport for the end-of-call memory update — but it no longer gates
 the control: a deployment without it can hold a conversation and simply
 remembers nothing afterwards.
 
-The key never leaves the Worker. A browser-style WebSocket carries no headers
-of ours, so the Live endpoint takes the key on its query string, which is why
-the Durable Object is the only thing that ever builds that URL.
+The key never leaves the Worker. Gemini Live takes it on its query string and
+OpenAI Realtime in an `Authorization` header on the upgrade; either way the
+Durable Object is the only thing that ever builds the endpoint, and a trace
+never names it.
 
-What talking costs: Gemini Live is billed per minute of audio in each
-direction, and at the 2026-09-15 GA prices output is about 3.6x input, which
-is why the two meters are separate and why the session is closed the moment
-nobody is talking. The cascade it replaced billed three providers for the same
-minute.
+What talking costs: both providers bill audio in each direction, output
+several times input, which is why the two meters are separate and why the
+session is closed the moment nobody is talking. Voice is not charged to the
+account's credit; it is bounded by the day's caps in `app/voice/ledger.ts`
+(turns, delegations, and seconds of audio each way). The seconds are a money
+bound: each provider declares its audio rates (`VoiceProviderV1.rates`, in
+micro-dollars a second), and `voiceProviderDailyAudioSecondsV1` gives it the
+seconds the reference cap's money buys — four hours each way at Gemini Live's
+$3 and $12 per million audio tokens (25 a second). OpenAI Realtime's $32 and
+$64 per million, at ten tokens a second in and twenty out, is about 56 minutes
+each way. That bound is on the audio alone: OpenAI also bills the
+conversation's context again as input on every response (cached at $0.40 per
+million), which the seconds do not count and the daily turn cap bounds.
 
 ## Clients
 
