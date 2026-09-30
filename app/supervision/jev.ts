@@ -46,6 +46,7 @@ import {
   factsUnsupportedV1,
   reviewClaimV1,
 } from "./claim-check.js";
+import { composeFetchDecisionV1, reviewFetchV1 } from "./fetch-review.js";
 import { composeProgressDecisionV1, reviewProgressV1 } from "./loop-health.js";
 import { composeOutcomeDecisionV1, reviewOutcomeV1 } from "./outcome.js";
 import {
@@ -292,6 +293,22 @@ export function createJevTurnSupervisorV1(
           answers: review.answers,
           personAsked: callReviewPersonAskedV1(judged.conversation),
           tool: evidence.call.tool,
+          model: review.model,
+        });
+      } catch (error) {
+        throw classifyJevFailure(error);
+      }
+    },
+    async reviewFetch(evidence, signal) {
+      signal?.throwIfAborted();
+      try {
+        const review = await reviewFetchV1(
+          options.client,
+          callReviewEvidenceV1(evidence),
+          { signal, budget },
+        );
+        return composeFetchDecisionV1({
+          answers: review.answers,
           model: review.model,
         });
       } catch (error) {

