@@ -591,4 +591,4 @@ docs/
 
 ## License
 
-The core is MIT; see [`LICENSE`](LICENSE). Commercial add-ons such as FrockBot for Teams are licensed separately and are not in this repository. Contributors sign a [Contributor Licence Agreement](CLA.md) once, which is what allows both; [`CONTRIBUTING.md`](CONTRIBUTING.md) explains it.
+The core is MIT; see [`LICENSE`](LICENSE). Commercial add-ons such as FrockBot for Teams are licensed separately and are not in this repository. The FrockBot name and logo are not licensed. Contributors sign a [Contributor Licence Agreement](CLA.md) once, which lets their work also be licensed commercially; [`CONTRIBUTING.md`](CONTRIBUTING.md) explains it.

@@ -1,7 +1,7 @@
 name: CLA
 
 # Asks every outside contributor to sign CLA.md before their pull request may
-# merge, and records each signature in `signatures/cla.json` on the
+# merge, and records each signature in `signatures/cla-v1.0.json` on the
 # `cla-signatures` branch, which is kept apart from `main` so recording one
 # never needs a pull request of its own. The agreement is why the core can
 # stay MIT while FrockBot for Teams is licensed separately (CONTRIBUTING.md).
@@ -12,6 +12,8 @@ name: CLA
 #
 # A contributor signs by commenting the exact sentence below on their pull
 # request; `recheck` asks again. Allowlisted accounts pass without signing.
+# The sentence and the signatures file carry CLA.md's version: a new version
+# changes both, so nobody's signature silently carries over to new terms.
 
 on:
   issue_comment:
@@ -36,7 +38,7 @@ jobs:
       github.event_name == 'pull_request_target' ||
       (github.event.issue.pull_request &&
         (github.event.comment.body == 'recheck' ||
-         github.event.comment.body == 'I have read the FrockBot CLA and I hereby sign it.'))
+         github.event.comment.body == 'I have read the FrockBot CLA version 1.0 and I hereby sign it.'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -54,13 +56,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          path-to-signatures: signatures/cla.json
+          path-to-signatures: signatures/cla-v1.0.json
           path-to-document: https://github.com/${{ github.repository }}/blob/main/CLA.md
           branch: cla-signatures
-          # Tim holds the copyright already; bots sign nothing. Commits from
-          # Claude sessions are authored by Tim's account.
-          allowlist: timoconnellaus,dependabot[bot],claude,claude[bot],github-actions[bot],*[bot]
-          custom-pr-sign-comment: I have read the FrockBot CLA and I hereby sign it.
+          # Tim holds the copyright already. Commits from Tim's Claude sessions
+          # are authored as noreply@anthropic.com, which GitHub resolves to
+          # `claude`. Author emails are unverified, so anyone can claim either
+          # identity: an outside pull request is merged only by Tim, who
+          # checks who opened it. No `*[bot]` wildcard: anyone can register one.
+          allowlist: timoconnellaus,claude,claude[bot],dependabot[bot],github-actions[bot]
+          custom-pr-sign-comment: I have read the FrockBot CLA version 1.0 and I hereby sign it.
           custom-notsigned-prcomment: >-
             Thank you for your contribution. Before it can merge, each author of
             its commits needs to sign the [FrockBot Contributor Licence
