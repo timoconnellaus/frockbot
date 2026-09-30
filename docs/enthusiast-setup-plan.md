@@ -173,11 +173,16 @@ It is still a model call carrying a `requestId` idempotency key, and it costs no
 - **Voice calls** become a job with its own provider: Gemini Live today, OpenAI Realtime beside it, each on FrockBot's key or the person's.
 - **Dictation** gains an on-device option in the Mac app, following [OpenWhispr](https://github.com/OpenWhispr/openwhispr): a bundled whisper.cpp or Parakeet model, downloaded on first use, so speech never leaves the Mac. Cloud dictation stays for the phone and the web.
 
-### Each service is its own choice
+### Each job is its own choice
 
-Chat, Jev, voice calls, dictation and images are separate sections, each with its own providers, because their providers differ: Jev has four ways to reach it, voice needs a realtime speech protocol, and dictation has a long tail of transcription services. A person's accounts are shared across sections: connecting Google once serves chat and voice.
+AI is one choice: **Frock AI** (every job on Frock AI) or **Custom**. Custom lists every job (chat, writing, coding, thinking, vision, summaries, Jev, voice calls, dictation, images), and for each the person picks **a provider, then a model**.
 
-On a self-hosted install, Jev, dictation and images default to the account's own Workers AI (Jev, Whisper, Flux), and chat adds Cloudflare Workers AI, so a fresh install needs nothing configured.
+- **Every provider the product supports is offered:** Frock AI, the 28 catalog providers, Ollama Cloud, local models and a custom OpenAI-compatible endpoint. The list is too long for checkboxes, so the picker is a searchable list grouped as FrockBot, Popular, All providers and Your own.
+- **Models come from the provider's catalog,** filtered to what the job needs (vision for Vision, reasoning for Thinking).
+- **Writing, coding, thinking, vision and summaries follow chat** until changed.
+- **Jev, voice, dictation and images have their own provider lists:** Jev on Frock AI, Cloudflare Workers AI, TypeSafe, OpenRouter (Jev or Jev Router) or a custom model; voice on Frock AI, Google or OpenAI Realtime; dictation on Frock AI, on your device, Cloudflare, OpenAI, Groq, Deepgram or ElevenLabs; images on Frock AI, Cloudflare, OpenAI, Google, OpenRouter or local.
+- **Accounts are shared across jobs:** connecting OpenAI once serves every job that uses it.
+- **Self-hosting does not change the AI choice.** Frock AI keeps working through a linked FrockBot account; the install's own Cloudflare Workers AI is one option under Custom.
 
 ### Settings UI: AI setup
 
@@ -227,7 +232,7 @@ Modelled on how Cloudflare OS deploys ([repo](https://github.com/cloudflare/clou
 - **A Deploy button at frockbot.com/deploy.** A hosted flow signs in to Cloudflare, deploys a pinned FrockBot release into the person's account from prebuilt artifacts (nothing built locally), creates the Cloudflare Access application, sets the person as the first admin, and hands them the address. It runs on `workers.dev` by default.
 - **Sign-in is Cloudflare Access.** The Access policy decides who gets in, as the simple deployment already does ([ADR 0028](adr/0028-open-deployment.md)).
 - **Onboarding happens in the app.** The first visit walks through the same choices as the marketing chooser: link a FrockBot account (optional), then Computer, providers and services. Branding and admin settings are changed in the app without a redeploy.
-- **Jev comes from the account's own Workers AI.** Nothing to configure.
+- **Jev, like every AI job, stays on Frock AI unless the person chooses otherwise;** the account's own Workers AI is available under Custom.
 - **Linking a FrockBot account** is an OAuth sign-in to frockbot.com from the self-hosted install. It grants that install use of FrockBot's services (Computer, Frock AI, voice, search, image, Composio), billed to that account's credit. No plan is needed.
 - **Updates** are offered by the deploy flow: "A new release is available", one click to deploy it over the same Workers.
 - **The repository stays the advanced path:** `bun run setup` for a custom domain, code changes or reusing existing resources, with a checklist for moving an install made by the Deploy button into it.
