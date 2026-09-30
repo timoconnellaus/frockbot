@@ -32,6 +32,17 @@ export interface PaymentsSubscriptionPlanV1 {
   readonly name: string;
   readonly monthlyCents: number;
   readonly includedMicros: number;
+  /**
+   * `false`: a first subscription to this plan starts paying at once, without
+   * the deployment's trial. Absent, it starts with the trial.
+   */
+  readonly trial?: false;
+  /**
+   * Jev the plan covers each paid month, priced at Jev's rate. Beyond it the
+   * Jev a Turn needs draws from credit like any other service. Absent, the
+   * plan covers Jev in full and none of it is metered.
+   */
+  readonly jevFairUseMicros?: number;
 }
 
 /** What a deployment sells. Amounts are US cents; credit is micro-dollars. */

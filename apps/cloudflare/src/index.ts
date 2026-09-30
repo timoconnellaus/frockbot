@@ -270,6 +270,7 @@ interface Env {
   STRIPE_WEBHOOK_SECRET?: string;
   STRIPE_MONTHLY_PRICE_ID?: string;
   STRIPE_PLUS_PRICE_ID?: string;
+  STRIPE_BYO_PRICE_ID?: string;
   FCM_SERVICE_ACCOUNT?: string;
   /** Explicit qualification gate; not enabled by the production configuration. */
   NATIVE_SLICE_2_AUTH?: string;

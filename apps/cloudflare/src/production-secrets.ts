@@ -243,7 +243,13 @@ export const OPTIONAL_PRODUCTION_SECRETS_V1: readonly OptionalProductionSecretV1
     {
       name: "STRIPE_PLUS_PRICE_ID",
       why: "Pins the US$50 monthly Plus Stripe price.",
-      degraded: "only the US$20 plan is offered",
+      degraded: "the US$50 Plus plan is not offered",
+    },
+    {
+      name: "STRIPE_BYO_PRICE_ID",
+      why: "Pins the US$5 monthly BYO Stripe price.",
+      degraded:
+        "the US$5 BYO plan is not offered, so bringing your own needs Standard",
     },
     {
       name: "FROCKBOT_ADMIN_EMAILS",

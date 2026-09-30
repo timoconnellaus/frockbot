@@ -1786,6 +1786,7 @@ jobs:
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
           STRIPE_MONTHLY_PRICE_ID: ${{ secrets.STRIPE_MONTHLY_PRICE_ID }}
           STRIPE_PLUS_PRICE_ID: ${{ secrets.STRIPE_PLUS_PRICE_ID }}
+          STRIPE_BYO_PRICE_ID: ${{ secrets.STRIPE_BYO_PRICE_ID }}
           FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
           APPLET_BUILD_TOKEN: ${{ secrets.APPLET_BUILD_TOKEN }}
           # The manifest requires both voice keys; the deploy step below
@@ -1953,6 +1954,7 @@ jobs:
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
           STRIPE_MONTHLY_PRICE_ID: ${{ secrets.STRIPE_MONTHLY_PRICE_ID }}
           STRIPE_PLUS_PRICE_ID: ${{ secrets.STRIPE_PLUS_PRICE_ID }}
+          STRIPE_BYO_PRICE_ID: ${{ secrets.STRIPE_BYO_PRICE_ID }}
         run: bun scripts/check-billing-release.ts
 
       - name: Deploy Worker
@@ -1975,6 +1977,7 @@ jobs:
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
           STRIPE_MONTHLY_PRICE_ID: ${{ secrets.STRIPE_MONTHLY_PRICE_ID }}
           STRIPE_PLUS_PRICE_ID: ${{ secrets.STRIPE_PLUS_PRICE_ID }}
+          STRIPE_BYO_PRICE_ID: ${{ secrets.STRIPE_BYO_PRICE_ID }}
           FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
           # Required: the same shared secret the plugin build Worker and its
           # container check. A Turn's plugin_check and plugin_publish both call

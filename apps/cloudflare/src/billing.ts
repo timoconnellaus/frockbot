@@ -113,14 +113,15 @@ export interface BillingAccountRpc {
     userId: string;
     reservation: UsageReservation;
   }): Promise<{
-    status: "reserved" | "settled" | "released";
+    status: "reserved" | "settled" | "released" | "covered";
     created: boolean;
   }>;
   settleUsage(input: {
     userId: string;
     settlement: UsageSettlement;
   }): Promise<void>;
-  requirePaidAccount(input: { userId: string }): Promise<void>;
+  /** Refuses an account on no plan, where the deployment bills. */
+  requirePlan(input: { userId: string }): Promise<void>;
   setSpendingLimit(input: {
     userId: string;
     scope: string;

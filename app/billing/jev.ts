@@ -1,5 +1,4 @@
-// What a Jev decision the Computer asks for costs the account, and how it is
-// charged.
+// What a Jev decision costs the account, and how it is charged.
 //
 // Jev on Workers AI is priced on input tokens alone; its output is free. The account pays
 // twice the provider's rate, as it pays for every other platform-paid
@@ -9,8 +8,14 @@
 //
 // ONE CHARGE PER REQUEST. Each request is keyed by its own effect id, so a
 // re-run after an eviction finds the reservation it already made instead of
-// reserving again. Turn supervision and the other platform judges are not
-// charged: they are the product's own overhead.
+// reserving again.
+//
+// Jev the Computer asks for is always the account's. Turn supervision is the
+// product's own overhead, charged only on a plan with a Jev fair-use
+// allowance, and there first from that allowance. The other platform judges
+// are overhead on every plan.
+import type { Fetch } from "@typesafe-ai/sdk";
+import { BillingError } from "./errors.js";
 import type { AccountUsage } from "./model.js";
 
 export const JEV_TARIFF = {
@@ -104,5 +109,100 @@ export function createJevMeterV1(account: AccountUsage): JevMeterV1 {
           }),
       };
     },
+  };
+}
+
+/**
+ * Jev's own framing of a request costs tokens its body does not show, so a
+ * hold covers it on top of the body's bytes.
+ */
+const JEV_FRAMING_TOKENS_V1 = 1_000;
+
+/**
+ * A `fetch` for the Jev the product asks for itself — Turn supervision — that
+ * meters each request where the account's plan has a Jev fair-use allowance.
+ * Every other plan covers it in full, and the ledger answers `covered`
+ * without recording anything.
+ *
+ * Each request is its own charge under a fresh key: a retry, or a re-run
+ * after an eviction, is another request Jev answers and counts. The hold is
+ * taken before Jev is asked; an account that cannot pay gets a 402 carrying
+ * the ledger's sentence, which the Turn's failure shows as written. Jev's
+ * refusal releases the hold, and an answer that never arrived leaves it for
+ * reconciliation, as the terminal's Jev does.
+ */
+export function createPlatformJevFetchV1(config: {
+  account: AccountUsage;
+  botId: string;
+  sessionId: string;
+  fetch?: Fetch;
+  /** A fresh request id; tests name their own. */
+  requestId?: () => string;
+}): Fetch {
+  const send = config.fetch ?? ((input, init) => fetch(input, init));
+  const requestId = config.requestId ?? (() => crypto.randomUUID());
+  return async (input, init) => {
+    const body = init?.body;
+    const bytes =
+      typeof body === "string"
+        ? new TextEncoder().encode(body).byteLength
+        : ArrayBuffer.isView(body) || body instanceof ArrayBuffer
+          ? body.byteLength
+          : undefined;
+    // The SDK sends JSON text. A body this cannot measure has no ceiling to
+    // hold, so it is not sent unpaid.
+    if (bytes === undefined) throw new Error("Unmeasurable Jev request body");
+    const id = `jev:turn:${requestId()}`;
+    const maximumMicros = jevChargeMicrosV1(bytes + JEV_FRAMING_TOKENS_V1);
+    let reservation;
+    try {
+      reservation = await config.account.reserve({
+        id,
+        kind: "jev",
+        platform: true,
+        maximumMicros,
+        botId: config.botId,
+        sessionId: config.sessionId,
+        description: JEV_RATE_DESCRIPTION,
+        pricingVersion: JEV_PRICING_VERSION,
+        unitRates: { microsPerInputToken: JEV_TARIFF.microsPerInputToken },
+      });
+    } catch (error) {
+      if (!(error instanceof BillingError)) throw error;
+      return Response.json({ message: error.message }, { status: 402 });
+    }
+    if (reservation.status !== "reserved") return send(input, init);
+    const response = await send(input, init);
+    if (!response.ok) {
+      if (response.status < 500)
+        await config.account.settle({
+          id,
+          costMicros: 0,
+          chargeMicros: 0,
+          quantities: { inputTokens: 0 },
+        });
+      return response;
+    }
+    const answered = (await response
+      .clone()
+      .json()
+      .catch(() => undefined)) as
+      { usage?: { input_tokens?: unknown } } | undefined;
+    const inputTokens = answered?.usage?.input_tokens;
+    // An answer that does not say what it counted is not billed on a guess.
+    if (!Number.isSafeInteger(inputTokens) || (inputTokens as number) < 0)
+      return response;
+    await config.account.settle({
+      id,
+      costMicros: Math.ceil(
+        ((inputTokens as number) * PROVIDER_MICROS_PER_THOUSAND_TOKENS) / 1_000,
+      ),
+      chargeMicros: Math.min(
+        maximumMicros,
+        jevChargeMicrosV1(inputTokens as number),
+      ),
+      quantities: { inputTokens: inputTokens as number },
+    });
+    return response;
   };
 }

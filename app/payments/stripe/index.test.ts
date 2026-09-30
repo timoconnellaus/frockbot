@@ -34,9 +34,17 @@ const subscription = (status: string) => ({
 });
 
 describe("the Stripe payments Package", () => {
-  test("sells Standard and Plus with a 7-day trial, and three top-ups tied to them", () => {
+  test("sells BYO without a trial, Standard and Plus with a 7-day one, and three top-ups tied to them", () => {
     expect(STRIPE_PAYMENTS_PACKAGE_V1.plan).toEqual({
       subscriptions: [
+        {
+          id: "byo",
+          name: "BYO",
+          monthlyCents: 500,
+          includedMicros: 0,
+          trial: false,
+          jevFairUseMicros: 2_000_000,
+        },
         {
           id: "standard",
           name: "Standard",
@@ -139,6 +147,14 @@ describe("the Stripe payments Package", () => {
     expect(
       offered({ ...CONFIGURED, STRIPE_PLUS_PRICE_ID: "price_plus" }),
     ).toEqual(["standard", "plus"]);
+    // BYO is sold only with its own price, and first, as the cheapest.
+    expect(
+      offered({
+        ...CONFIGURED,
+        STRIPE_PLUS_PRICE_ID: "price_plus",
+        STRIPE_BYO_PRICE_ID: "price_byo",
+      }),
+    ).toEqual(["byo", "standard", "plus"]);
   });
 
   test("a plan change runs in the signed-in account and answers the Billing page", async () => {

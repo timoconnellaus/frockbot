@@ -124,6 +124,7 @@ const productionEnvironment = {
   STRIPE_WEBHOOK_SECRET: "whsec_production",
   STRIPE_MONTHLY_PRICE_ID: "price_production_monthly",
   STRIPE_PLUS_PRICE_ID: "price_production_plus",
+  STRIPE_BYO_PRICE_ID: "price_production_byo",
   // Required since plan step 8: a Turn's `plugin_check` and
   // `plugin_publish` both call the build service with it.
   APPLET_BUILD_TOKEN:

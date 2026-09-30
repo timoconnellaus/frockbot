@@ -1,3 +1,4 @@
+import type { Fetch } from "@typesafe-ai/sdk";
 import type { ProductEventSinkV1 } from "../analytics/events.js";
 import type { UsageAttributionV1 } from "../billing/ledger.js";
 import type { ModelBilling } from "../billing/model.js";
@@ -418,7 +419,12 @@ export class ShellBotStateV1 {
    * verdict and still admits; Cut 4 is what skips.
    */
   readonly routineEventJudge: RoutineEventJudgeV1;
-  readonly turnSupervisor: TurnSupervisor;
+  /**
+   * A Turn's supervisor. Given a `fetch`, the hosted one sends its Jev
+   * requests through it, which is how the account's plan meters them; a
+   * supervisor the host injected is used as it is.
+   */
+  readonly turnSupervisor: (fetch?: Fetch) => TurnSupervisor;
   readonly routineReportJudge: RoutineReportJudgeV1 | undefined;
   readonly compactionChooser: CompactionChooserV1 | undefined;
   readonly toolResultPruner: ToolResultPrunerV1 | undefined;
@@ -496,15 +502,25 @@ export class ShellBotStateV1 {
         AI: host.env.AI,
         JEV_BASE_URL: host.env.JEV_BASE_URL,
       });
-    this.turnSupervisor =
+    const hostedSupervisor = createHostedTurnSupervisorV1(
+      {
+        AI: host.env.AI,
+        JEV_BASE_URL: host.env.JEV_BASE_URL,
+      },
+      host.brand.productName,
+    );
+    this.turnSupervisor = (fetch) =>
       host.turnSupervisor ??
-      createHostedTurnSupervisorV1(
-        {
-          AI: host.env.AI,
-          JEV_BASE_URL: host.env.JEV_BASE_URL,
-        },
-        host.brand.productName,
-      );
+      (fetch
+        ? createHostedTurnSupervisorV1(
+            {
+              AI: host.env.AI,
+              JEV_BASE_URL: host.env.JEV_BASE_URL,
+            },
+            host.brand.productName,
+            fetch,
+          )
+        : hostedSupervisor);
     this.now = host.now ?? (() => new Date());
     this.sleep =
       host.sleep ??
