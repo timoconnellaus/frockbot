@@ -1023,6 +1023,13 @@ export async function agentRuntime(
           ),
         ...frockAiHost,
         fetch: state.outboundFetch,
+        relayLocalModel: ({ relayId, body }) =>
+          userConfiguration.relayLocalModel(
+            identity.userId,
+            binding.connection!.connectionId,
+            relayId,
+            body,
+          ),
       }),
     );
   }

@@ -1,6 +1,6 @@
 # Model provider connections
 
-FrockBot ships 28 provider entries. Every one takes an API key, and three also offer OAuth sign-in. They come from DeepSeek Harness’s pinned `@earendil-works/pi-ai` 0.85.1 catalog, less the [excluded providers](#excluded-providers). Regional API-key endpoints are separate connections. Frock AI remains the zero-configuration default, and Ollama Cloud remains available.
+FrockBot ships 28 provider entries. Every one takes an API key, and three also offer OAuth sign-in. They come from DeepSeek Harness’s pinned `@earendil-works/pi-ai` 0.85.1 catalog, less the [excluded providers](#excluded-providers). Regional API-key endpoints are separate connections. Frock AI remains the zero-configuration default, Ollama Cloud remains available, and [Local models](#local-models) run on the person's own Mac.
 
 Choose a provider on Setup's AI page (`/setup/ai`): the picker searches every provider the product supports, grouped as FrockBot, Popular, All providers and Your own. A provider not yet on the account is added as its Connect dialog opens; connect its API key, or choose **Sign in** where the provider offers one, then pick its model for chat. **Your accounts** replaces or removes a key. Frock AI is built in and needs no key. Connections belong to the User and are available to every Bot they own. Keys are encrypted server-side and never shown again. Saving a catalog-provider key does not run a paid inference probe; invalid credentials are reported when a Turn first uses them, and Setup shows the job whose provider failed. Radius reads its authenticated catalog when connecting.
 
@@ -46,6 +46,14 @@ DeepSeek is served by an installed Plugin rather than a compiled adapter ([ADR 0
 - **Google Vertex AI:** use a Google Cloud API key. Local application-default credential files are not read by the hosted product.
 
 The model picker initially shows up to 90 catalog models per connection. Exact model resolution can select other models in the installed catalog. A custom endpoint override keeps that provider’s catalog and protocol choices; it does not discover arbitrary new gateway models.
+
+## Local models
+
+**Local models** (`provider-local`, provider type `local`) reach an OpenAI-compatible model server on the person's Mac: Ollama (`http://localhost:11434/v1`), LM Studio (`http://localhost:1234/v1`), [mesh-llm](https://github.com/Mesh-LLM/mesh-llm) (`http://localhost:9337/v1`), or any other localhost port. There is no key. A Connection names a paired Mac (`machine-id`) and the endpoint on it (`endpoint`), and it is added on Setup's AI page like any provider (`ConnectLocalModel` in `apps/cloudflare/setup/src/pages/ai.tsx`): choose the Mac, choose the server, and **Test and connect**. The Mac list is `GET /api/machines`, which Setup's reader credential opens; pairing and revoking a Mac stay closed to it. Connecting asks the server for its `/v1/models` through the Mac, so the account comes back ready with its models or failed with the reason (the Mac is offline, nothing is answering on that port, the server has no models yet). **Refresh models** asks again.
+
+The cloud never dials the Mac. The Mac app's device host already holds the machine socket to the User Durable Object, so a model call is sent down that socket as a `relay` frame and the model server's streamed answer comes back up it (`core/machine-protocol/protocol.ts`, `app/machine/model-relay.ts`, `apps/device-host/src/relay.ts`). The Bot names only the Connection; the User Durable Object reads the Mac and the endpoint from it and composes the one URL. Only `localhost`, `127.0.0.1` and `[::1]` are ever relayed: the cloud refuses to send anything else, the device host checks again and refuses redirects, and the host's own Deno permissions admit only those hosts beside the deployment. The relay carries the model call's request id as its relay id, and the device host forwards a relay id once.
+
+A Connection stays ready while its Mac sleeps. A Turn on a local model whose Mac is not connected fails with "Your Mac is offline, so your local model can't answer." and one whose Mac drops mid-answer with "Your Mac went offline before your local model finished answering." Neither ever falls back to Frock AI. A local model is free: its calls are recorded on Spending at no charge and are never refused for want of credit, a plan or a daily limit. The first byte may take up to two minutes while the server loads a model. Structured output uses the kernel's prompt fallback.
 
 ## OAuth sign-in
 

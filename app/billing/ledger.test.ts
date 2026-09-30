@@ -209,6 +209,25 @@ describe("the billing ledger", () => {
     expect(ledger.snapshot().usage[0]).toMatchObject({ status: "released" });
   });
 
+  test("a local model is recorded at no charge on an account that cannot spend", () => {
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
+    expect(ledger.balance().canSpend).toBe(false);
+    expect(() => ledger.reserve(reservation("effect:byo-none", 0))).toThrow(
+      "A paid FrockBot subscription is required",
+    );
+    ledger.reserve({ ...reservation("effect:local", 0), free: true });
+    ledger.settle({
+      id: "effect:local",
+      costMicros: 0,
+      chargeMicros: 0,
+      quantities: { inputTokens: 12, outputTokens: 30 },
+    });
+    expect(ledger.snapshot().usage[0]).toMatchObject({ status: "released" });
+    expect(() =>
+      ledger.reserve({ ...reservation("effect:not-free", 1), free: true }),
+    ).toThrow("Invalid usage reservation");
+  });
+
   test("insufficient credit changes neither balance nor usage history", () => {
     const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
     active(ledger);

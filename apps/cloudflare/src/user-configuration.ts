@@ -127,7 +127,9 @@ import {
 } from "@frockbot/app/flock/quota";
 import {
   DEVICE_CALL_WAIT_MS,
+  MACHINE_RELAY_LIMITS_V1,
   decodeMachineModuleCallResultV1,
+  decodeMachineRelayUpFrameV1,
   decodeMachineModuleEventsV1,
   decodeMachineModuleReportsV1,
   machineTokenClaimsV1,
@@ -145,6 +147,7 @@ import {
   MachineModuleCallsV1,
   type DeviceCallOutcomeV1,
 } from "@frockbot/app/machine/module-calls";
+import { MachineModelRelaysV1 } from "@frockbot/app/machine/model-relay";
 import {
   readPluginModuleReportsV1,
   recordPluginModuleReportsV1,
@@ -1075,6 +1078,7 @@ export class UserConfiguration
         brand: BRAND_V1,
         storage: this.ctx.storage,
         machineSockets: durableObjectMachineSocketsV1(this.ctx),
+        localModelRelay: (request) => this.localModelRelays().open(request),
         readSecret: (name) =>
           name === "MACHINE_TOKEN_SECRET"
             ? this.env.MACHINE_TOKEN_SECRET
@@ -4078,12 +4082,31 @@ export class UserConfiguration
     };
   }
 
-  // The machine socket is server-push only: anything but the auto-answered
-  // keep-alive is a client that does not speak this protocol.
-  webSocketMessage(socket: WebSocket): Promise<void> {
-    return loggedEntryV1("Machine socket message", () =>
-      socket.close(1003, "server-push channel"),
-    );
+  // The machine socket is server-push, with one exception: a Mac streams a
+  // local model's answer back up it (`app/machine/model-relay.ts`). Anything
+  // else but the auto-answered keep-alive is a client that does not speak
+  // this protocol.
+  webSocketMessage(
+    socket: WebSocket,
+    message: string | ArrayBuffer,
+  ): Promise<void> {
+    return loggedEntryV1("Machine socket message", async () => {
+      const attachment =
+        socket.deserializeAttachment() as MachineSocketAttachmentV1 | null;
+      let frame: ReturnType<typeof decodeMachineRelayUpFrameV1> | undefined;
+      try {
+        if (typeof message === "string" && attachment) {
+          frame = decodeMachineRelayUpFrameV1(JSON.parse(message));
+        }
+      } catch {
+        frame = undefined;
+      }
+      if (!frame || !attachment) {
+        socket.close(1003, "server-push channel");
+        return;
+      }
+      this.localModelRelays().receive(attachment.machineId, frame);
+    });
   }
 
   webSocketClose(
@@ -4117,6 +4140,42 @@ export class UserConfiguration
       socket.deserializeAttachment() as MachineSocketAttachmentV1 | null;
     if (!attachment) return;
     await (await this.machineContribution()).disconnected(attachment.machineId);
+    if (
+      !durableObjectMachineSocketsV1(this.ctx).connected(attachment.machineId)
+    ) {
+      this.localModelRelays().closed(attachment.machineId);
+    }
+  }
+
+  private modelRelays: MachineModelRelaysV1 | undefined;
+
+  /** Local model requests in flight to the User's Macs. */
+  private localModelRelays(): MachineModelRelaysV1 {
+    if (!this.modelRelays) {
+      const sockets = durableObjectMachineSocketsV1(this.ctx);
+      this.modelRelays = new MachineModelRelaysV1({
+        connected: (machineId) => sockets.connected(machineId),
+        push: (machineId, frame) => sockets.push(machineId, frame),
+      });
+    }
+    return this.modelRelays;
+  }
+
+  /** One Bot's chat request to a local model, streamed back from its Mac. */
+  async relayLocalModel(input: unknown): Promise<Response> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      connectionId: rpcIdentifier,
+      relayId: rpcString(200),
+      body: rpcString(MACHINE_RELAY_LIMITS_V1.requestBytes),
+    });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    return (await this.contributions()).localModels.relayChat(
+      userId,
+      request.connectionId as string,
+      request.relayId as string,
+      request.body as string,
+    );
   }
 
   async claimMachineCommand(input: unknown) {

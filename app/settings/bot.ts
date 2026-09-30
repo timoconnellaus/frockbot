@@ -481,6 +481,12 @@ export interface UserConfigurationRpcV1 {
     effectId: string,
     connectionGeneration: string,
   ): Promise<CredentialLeaseV1>;
+  relayLocalModel(
+    userId: string,
+    connectionId: string,
+    relayId: string,
+    body: string,
+  ): Promise<Response>;
   leaseToolCredential(
     userId: string,
     connectionId: string,
@@ -795,6 +801,16 @@ export function userConfigurationV1(
           profile,
         }),
       ),
+    // The body is the Mac's model server's own stream; the provider reads it
+    // through the same bounded decoder as any other model response.
+    relayLocalModel: (userId, connectionId, relayId, body) =>
+      rpc.relayLocalModel({
+        schemaVersion: 1,
+        userId,
+        connectionId,
+        relayId,
+        body,
+      }),
     leaseModelCredential: async (
       userId,
       connectionId,

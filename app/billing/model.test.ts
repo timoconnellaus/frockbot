@@ -377,6 +377,25 @@ describe("model billing", () => {
     });
   });
 
+  test("a local model is recorded as free and never asks for credit", async () => {
+    const account = new UsageSpy();
+    const llm = new BilledLlmRegistry(new LoopHookListV1(), billing(account));
+    llm.register({
+      id: "local",
+      async *stream() {
+        yield { type: "usage", usage: { inputTokens: 50, outputTokens: 9 } };
+        yield { type: "finish", reason: "completed" };
+      },
+    });
+    await collect(llm, request("local"));
+    expect(account.reservations[0]).toMatchObject({
+      maximumMicros: 0,
+      free: true,
+      description: "model-a · on your Mac",
+    });
+    expect(account.settlements[0]).toMatchObject({ chargeMicros: 0 });
+  });
+
   test("a completed hosted stream with no usage leaves its reservation pending", async () => {
     const { llm, account } = registry([
       { type: "finish", reason: "completed" },

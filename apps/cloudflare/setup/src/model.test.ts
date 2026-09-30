@@ -2,6 +2,9 @@ import { describe, expect, test } from "bun:test";
 import {
   chatOf,
   jobsOf,
+  localModelEndpoint,
+  localModelPort,
+  macsOf,
   matchProviders,
   needsYouOf,
   providersOf,
@@ -233,5 +236,43 @@ describe("plans", () => {
       { ...billing, canSpend: false },
     );
     expect(needs.map((item) => item.page)).toEqual(["plan"]);
+  });
+});
+
+describe("local models", () => {
+  test("offers only the account's live Macs, connected first", () => {
+    expect(
+      macsOf({
+        machines: [
+          {
+            machineId: "m1",
+            label: "Old",
+            platform: "macos",
+            connected: false,
+          },
+          { machineId: "m2", label: "Box", platform: "linux", connected: true },
+          {
+            machineId: "m3",
+            label: "Gone",
+            platform: "macos",
+            connected: false,
+            revokedAt: "2026-09-01T00:00:00.000Z",
+          },
+          { machineId: "m4", label: "Now", platform: "macos", connected: true },
+        ],
+      }),
+    ).toEqual([
+      { machineId: "m4", label: "Now", connected: true },
+      { machineId: "m1", label: "Old", connected: false },
+    ]);
+    expect(macsOf(null)).toEqual([]);
+  });
+
+  test("an endpoint is always on the Mac's loopback", () => {
+    expect(localModelEndpoint(11434)).toBe("http://localhost:11434/v1");
+    expect(localModelPort(" 8080 ")).toBe(8080);
+    expect(localModelPort("0")).toBeUndefined();
+    expect(localModelPort("70000")).toBeUndefined();
+    expect(localModelPort("localhost")).toBeUndefined();
   });
 });

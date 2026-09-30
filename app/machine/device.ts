@@ -47,6 +47,9 @@ import {
   type MachineModuleCallFrameV1,
   type MachineModuleV1,
   type MachinePlatformV1,
+  type MachineRelayCancelFrameV1,
+  type MachineRelayFrameV1,
+  type MachineRelayUpFrameV1,
 } from "@frockbot/core/machine-protocol";
 
 // ---------------------------------------------------------------------------
@@ -473,6 +476,15 @@ export interface MachineDeviceAgentOptionsV1 {
    * frames behind it; the embedder claims, runs and answers it.
    */
   onCall?(call: MachineModuleCallFrameV1): void;
+  /**
+   * Called with each local model relay the cloud sends, and each cancel. The
+   * embedder answers on `send`, which writes to this connection's socket; a
+   * relay outlives no socket, so a send after it closed is dropped.
+   */
+  onRelay?(
+    frame: MachineRelayFrameV1 | MachineRelayCancelFrameV1,
+    send: (frame: MachineRelayUpFrameV1) => void,
+  ): void;
 }
 
 export class MachineDeviceAgentError extends Error {
@@ -808,6 +820,25 @@ export class MachineDeviceAgentV1 {
         }
         if (frame.type === "call") {
           this.options.onCall?.(frame);
+          continue;
+        }
+        if (frame.type === "relay" || frame.type === "relay-cancel") {
+          const send = (reply: MachineRelayUpFrameV1): void => {
+            try {
+              open.send(JSON.stringify(reply));
+            } catch {
+              // The socket is closing; the cloud fails the relay when it sees
+              // the close.
+            }
+          };
+          if (this.options.onRelay) this.options.onRelay(frame, send);
+          else if (frame.type === "relay") {
+            send({
+              type: "relay-fail",
+              relayId: frame.relayId,
+              error: "this computer does not relay local models",
+            });
+          }
           continue;
         }
         cycle.delivered += frame.commands.length;

@@ -9,6 +9,7 @@ import {
   type NormalizedModelRequest,
 } from "@frockbot/core/contracts";
 import { FROCK_AI_PROVIDER_TYPE } from "@frockbot/providers/frock-ai/catalog";
+import { LOCAL_MODEL_PROVIDER } from "@frockbot/providers/local-model/endpoint";
 import {
   frockAiServedModelV1,
   type FrockAiServedModelV1,
@@ -203,6 +204,9 @@ export class BilledLlmRegistry extends LlmRegistry {
     served: () => FrockAiServedModelV1 | undefined,
   ): AsyncIterable<LlmStreamEvent> {
     const hosted = providerId === FROCK_AI_PROVIDER_TYPE;
+    // A local model runs on the person's own Mac: recorded, never charged,
+    // and never refused for want of credit.
+    const local = providerId === LOCAL_MODEL_PROVIDER;
     // Read once: the reservation and its settlement are priced from the same
     // version, and that version is what the operation records.
     const table = hosted ? await this.hostedRates() : undefined;
@@ -231,13 +235,14 @@ export class BilledLlmRegistry extends LlmRegistry {
         maximumMicros: modelCharge(maximumCost),
         botId: this.billing.botId,
         sessionId: this.billing.sessionId,
-        description: `${request.model}${hosted ? "" : " · own model account"}${
-          this.billing.attribution ? ` · ${this.billing.attribution}` : ""
-        }`,
+        description: `${request.model}${
+          hosted ? "" : local ? " · on your Mac" : " · own model account"
+        }${this.billing.attribution ? ` · ${this.billing.attribution}` : ""}`,
         pricingVersion: table
           ? modelRatesPricingVersionV1(table.version)
           : USAGE_PRICING_VERSION_V1,
         ...(rate ? { unitRates: customerRates(rate) } : {}),
+        ...(local ? { free: true as const } : {}),
         attribution: {
           ...this.billing.spend,
           model: request.model,

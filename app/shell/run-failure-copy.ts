@@ -16,6 +16,10 @@ import {
 
 import { UNSENT_REPLY_REASON_V1 } from "./delivery.js";
 import {
+  LOCAL_MODEL_DROPPED_V1,
+  LOCAL_MODEL_OFFLINE_V1,
+} from "@frockbot/core/machine-protocol";
+import {
   CREDIT_EXHAUSTED_REASON_V1,
   JEV_FAIR_USE_EXHAUSTED_REASON_V1,
   DAILY_LIMIT_REASON_V1,
@@ -60,6 +64,9 @@ export const USER_FACING_FAILURE_REASONS_V1: readonly string[] = [
   TURN_DEADLINE_REASON_V1,
   STEP_LIMIT_REASON_V1,
   UNSENT_REPLY_REASON_V1,
+  // A local model's Mac is the person's own, and only they can bring it back.
+  LOCAL_MODEL_OFFLINE_V1,
+  LOCAL_MODEL_DROPPED_V1,
   // Billing's refusals name what the person can do about them — subscribe,
   // or add credit — which the outcome alone ("model-error") never could. The
   // subscription one names the product, so it is matched by its shape below.

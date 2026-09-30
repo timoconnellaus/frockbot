@@ -25,6 +25,7 @@ import { mcpDefinitionV1 } from "@frockbot/app/mcp/definition";
 import { catalogProviderDefinitionsV1 } from "@frockbot/providers/catalog/definition";
 import { providerFlockAiDefinitionV1 } from "@frockbot/providers/frock-ai/definition";
 import { providerOllamaCloudDefinitionV1 } from "@frockbot/providers/ollama-cloud/definition";
+import { providerLocalModelDefinitionV1 } from "@frockbot/providers/local-model/definition";
 import { routinesDefinitionV1 } from "@frockbot/app/routines/definition";
 import { searchDefinitionV1 } from "@frockbot/app/search/definition";
 import { settingsDefinitionV1 } from "@frockbot/app/settings/definition";
@@ -89,6 +90,7 @@ function buildFoundationPackageCatalogV1(brand: FoundationPackageBrandV1) {
       webDefinitionV1,
       voiceDefinitionV1,
       providerOllamaCloudDefinitionV1,
+      providerLocalModelDefinitionV1,
       providerFlockAiDefinitionV1(brand.builtInModelName),
       ...catalogProviderDefinitionsV1,
       flockDefinitionV1,

@@ -47,8 +47,9 @@ const ACCOUNT_CONNECTION_PACKAGES_V1 = "(connect|mcp)";
 
 /**
  * Every route a reader credential opens: the account's settings and
- * Connections, and its billing. Nothing a Bot owns, no saved secret, no
- * deletion, and not the mint itself.
+ * Connections, its billing, and the list of its paired machines (which a
+ * local model names). Nothing a Bot owns, no saved secret, no deletion, no
+ * pairing or revoking a machine, and not the mint itself.
  */
 export function setupReaderPathV1(pathname: string): boolean {
   return (
@@ -60,6 +61,7 @@ export function setupReaderPathV1(pathname: string): boolean {
     pathname === "/api/billing" ||
     pathname === "/api/billing/spending" ||
     pathname === "/api/web-search" ||
+    pathname === "/api/machines" ||
     /^\/api\/billing\/provider\/(checkout|plan|portal)$/.test(pathname) ||
     new RegExp(
       `^/api/plugins/${ACCOUNT_CONNECTION_PACKAGES_V1}/connections(/[^/]+/(revoke|authorize))?$`,

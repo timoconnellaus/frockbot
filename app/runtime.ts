@@ -63,6 +63,7 @@ import {
   createOllamaCloudFeature,
   ollamaChatBaseUrl,
 } from "@frockbot/providers/ollama-cloud/runtime";
+import { createLocalModelFeature } from "@frockbot/providers/local-model/runtime";
 import {
   createFrockAiFeature,
   createFrockAiSummaryFeature,
@@ -348,6 +349,10 @@ interface ModelRuntimeContributionConfig {
    */
   apiBaseUrl?: string;
   settings?: Record<string, unknown>;
+  relayLocalModel?(request: {
+    relayId: string;
+    body: string;
+  }): Promise<Response>;
 }
 
 interface ModelRuntimeContributionFactory {
@@ -378,6 +383,21 @@ const modelRuntimeContributionFactories = new Map<
           leaseCredential,
           settleCredential,
           chatBaseUrl: ollamaChatBaseUrl(apiBaseUrl),
+        });
+      },
+    },
+  ],
+  [
+    "provider-local",
+    {
+      providerType: "local",
+      create: ({ connectionId, relayLocalModel }) => {
+        if (!relayLocalModel) {
+          throw new Error("Local model relay is unavailable");
+        }
+        return createLocalModelFeature({
+          connectionId,
+          relay: relayLocalModel,
         });
       },
     },

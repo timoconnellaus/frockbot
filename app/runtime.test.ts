@@ -35,6 +35,7 @@ describe("foundation application", () => {
       "web",
       "voice",
       "provider-ollama-cloud",
+      "provider-local",
       "provider-flock-ai",
       ...catalogProviderDefinitionsV1.map((provider) => provider.id),
       "flock",
@@ -387,7 +388,7 @@ describe("foundation application", () => {
       });
     expect(botBackend.contributions).toHaveLength(3);
     expect(userBackend.contributions).toHaveLength(
-      10 + catalogProviderDefinitionsV1.length,
+      11 + catalogProviderDefinitionsV1.length,
     );
     const userSpecifiers = userBackend.contributions.map(
       (contribution) => contribution.specifier,

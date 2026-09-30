@@ -26,6 +26,7 @@ import {
   machineReconnectBackoffV1,
   machineSocketFromWebSocketV1,
   type MachineCommandReportV1,
+  type MachineDeviceAgentOptionsV1,
   type MachineSecretStoreV1,
   type MachineSocketEventV1,
   type MachineSocketV1,
@@ -153,6 +154,7 @@ function agent(options: {
   run?(command: MachineCommandV1): Promise<MachineCommandReportV1>;
   onModules?(modules: MachineModuleV1[]): void;
   onCall?(call: MachineModuleCallFrameV1): void;
+  onRelay?: MachineDeviceAgentOptionsV1["onRelay"];
 }): MachineDeviceAgentV1 {
   return new MachineDeviceAgentV1({
     origin: ORIGIN,
@@ -184,6 +186,7 @@ function agent(options: {
     random: () => 0.5,
     ...(options.onModules ? { onModules: options.onModules } : {}),
     ...(options.onCall ? { onCall: options.onCall } : {}),
+    ...(options.onRelay ? { onRelay: options.onRelay } : {}),
   });
 }
 
@@ -444,6 +447,65 @@ describe("machine device agent connection", () => {
     expect(calls).toEqual([call]);
     expect(cycle.error).toBeUndefined();
     expect(backend.calls).toEqual([]);
+  });
+
+  test("hands a local model relay to its embedder, answering on the socket", async () => {
+    const relay = {
+      type: "relay",
+      relayId: "chat:req-1",
+      method: "GET",
+      url: "http://localhost:11434/v1/models",
+      body: null,
+      deadline: "2026-09-01T00:00:10.000Z",
+      serverTime: "2026-09-01T00:00:00.000Z",
+    };
+    const script = scripted([frame(), relay]);
+    const seen: unknown[] = [];
+    const device = agent({
+      fetch: server(() => CLAIMED).fetch,
+      secrets: pairedStore(),
+      webSocket: () => Promise.resolve(script.socket),
+      onRelay: (received, send) => {
+        seen.push(received);
+        send({ type: "relay-end", relayId: "chat:req-1" });
+      },
+    });
+
+    const cycle = await device.connectOnce({ frames: 2 });
+
+    expect(seen).toEqual([relay]);
+    expect(script.sent).toContain(
+      JSON.stringify({ type: "relay-end", relayId: "chat:req-1" }),
+    );
+    expect(cycle.error).toBeUndefined();
+  });
+
+  test("an agent that relays nothing refuses a relay rather than leaving it waiting", async () => {
+    const script = scripted([
+      frame(),
+      {
+        type: "relay",
+        relayId: "chat:req-1",
+        method: "GET",
+        url: "http://localhost:11434/v1/models",
+        body: null,
+        deadline: "2026-09-01T00:00:10.000Z",
+        serverTime: "2026-09-01T00:00:00.000Z",
+      },
+    ]);
+    const device = agent({
+      fetch: server(() => CLAIMED).fetch,
+      secrets: pairedStore(),
+      webSocket: () => Promise.resolve(script.socket),
+    });
+
+    await device.connectOnce({ frames: 2 });
+
+    expect(script.sent.map((text) => JSON.parse(text))).toContainEqual({
+      type: "relay-fail",
+      relayId: "chat:req-1",
+      error: "this computer does not relay local models",
+    });
   });
 
   test("a claim that lost the race does not run the command", async () => {
