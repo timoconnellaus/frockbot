@@ -1,20 +1,28 @@
 /**
- * A Cloudflare account in memory, answering the REST calls the deploy makes,
- * and a GitHub release beside it. Enough to run a deploy and an update end to
- * end in `bun test` and read back what they left in the account.
+ * A Cloudflare account in memory, answering the REST calls the deploy page and
+ * the bundle's deployer make, a GitHub release beside it carrying a deploy
+ * bundle, and an R2 bucket to stage it in. Enough to run a deploy and an
+ * update end to end in `bun test` and read back what they left.
  */
+import {
+  bundleAssetNamesV1,
+  sha256HexV1,
+  type BundleWorkerKeyV1,
+  type BundleWorkerV1,
+  type DeployBundleManifestV1,
+} from "../../../cloudflare/deployment-config/bundle.ts";
 import { CLOUDFLARE_API_V1 } from "./cloudflare-api";
-import { RELEASE_REPOSITORY_V1, releaseManifestAssetV1 } from "./manifest";
-import { sha256HexV1 } from "./release";
+import { RELEASE_REPOSITORY_V1, type StagingBucketV1 } from "./release";
 
 export interface FakeScriptV1 {
   metadata: Record<string, unknown>;
-  modules: Record<string, string>;
   secrets: Record<string, string>;
   migrationTag?: string;
   workersDev: boolean;
   uploads: number;
 }
+
+type Json = Record<string, any>;
 
 export class FakeCloudflareV1 {
   accountId = "a".repeat(32);
@@ -30,13 +38,7 @@ export class FakeCloudflareV1 {
   aiModels = ["typesafe/jev", "@cf/meta/llama-3.1-8b-instruct"];
   buckets = new Set<string>();
   objects = new Map<string, number>();
-  kv = new Map<string, string>();
-  d1 = new Map<
-    string,
-    { id: string; migrations: string[]; statements: string[] }
-  >();
   indexes = new Map<string, unknown>();
-  queues = new Set<string>();
   accessApps: {
     id: string;
     aud: string;
@@ -45,12 +47,15 @@ export class FakeCloudflareV1 {
     policies: unknown;
   }[] = [];
   scripts = new Map<string, FakeScriptV1>();
+  namespaces: { id: string; script: string; class: string }[] = [];
+  containers: Json[] = [];
   deletedScripts: string[] = [];
   assetHashes = new Set<string>();
-  releases = new Map<string, Record<string, Uint8Array<ArrayBuffer>>>();
+  releases = new Map<string, Record<string, Uint8Array>>();
   /** What `https://<install>/` answers: guarded by Access unless told otherwise. */
   installAnswers: "guarded" | "open" | "down" = "guarded";
   calls: string[] = [];
+  downloads: string[] = [];
 
   private ok(result: unknown, status = 200): Response {
     return Response.json({ success: true, errors: [], result }, { status });
@@ -63,17 +68,8 @@ export class FakeCloudflareV1 {
     );
   }
 
-  async publish(
-    version: string,
-    files: Record<string, Uint8Array<ArrayBuffer>>,
-    manifest: unknown,
-  ) {
-    this.releases.set(version, {
-      ...files,
-      [releaseManifestAssetV1(version)]: new TextEncoder().encode(
-        JSON.stringify(manifest),
-      ),
-    });
+  publish(version: string, files: Record<string, Uint8Array>) {
+    this.releases.set(version, files);
   }
 
   fetch = async (
@@ -85,8 +81,9 @@ export class FakeCloudflareV1 {
     if (url.hostname === "api.github.com") return this.github();
     if (url.hostname === "github.com") return this.download(url);
     if (url.hostname.endsWith(".workers.dev")) return this.install(url);
-    if (!request.url.startsWith(CLOUDFLARE_API_V1))
+    if (!request.url.startsWith(CLOUDFLARE_API_V1)) {
       throw new Error(`Unexpected fetch ${request.url}`);
+    }
     const path = url.pathname.replace("/client/v4", "");
     this.calls.push(`${request.method} ${path}`);
     return this.api(request, path, url);
@@ -107,10 +104,11 @@ export class FakeCloudflareV1 {
     const match = url.pathname.match(
       new RegExp(`^/${RELEASE_REPOSITORY_V1}/releases/download/v([^/]+)/(.+)$`),
     );
-    const file =
-      match && this.releases.get(match[1]!)?.[decodeURIComponent(match[2]!)];
+    const name = match ? decodeURIComponent(match[2]!) : "";
+    const file = match && this.releases.get(match[1]!)?.[name];
+    if (file) this.downloads.push(name);
     return file
-      ? new Response(file)
+      ? new Response(file as Uint8Array<ArrayBuffer>)
       : new Response("Not Found", { status: 404 });
   }
 
@@ -123,8 +121,9 @@ export class FakeCloudflareV1 {
     if (url.pathname.startsWith("/api/")) {
       return Response.json({ error: "unauthenticated" }, { status: 401 });
     }
-    if (this.installAnswers === "open")
+    if (this.installAnswers === "open") {
       return new Response("<!doctype html>", { status: 200 });
+    }
     return new Response(null, {
       status: 302,
       headers: {
@@ -140,10 +139,12 @@ export class FakeCloudflareV1 {
   ): Promise<Response> {
     const a = `/accounts/${this.accountId}`;
     const method = request.method;
-    const body = async () => (await request.json()) as Record<string, any>;
+    const body = async () => (await request.json()) as Json;
+    let m: RegExpMatchArray | null;
 
-    if (path === "/user")
+    if (path === "/user") {
       return this.ok({ id: "user-1", email: "tim@example.com" });
+    }
     if (path === "/accounts") {
       return this.ok([{ id: this.accountId, name: this.accountName }]);
     }
@@ -157,12 +158,9 @@ export class FakeCloudflareV1 {
         : this.error(404, 10007, "This account has no workers.dev subdomain");
     }
     if (path === `${a}/access/organizations`) {
-      if (!this.zeroTrust)
-        return this.error(
-          403,
-          9999,
-          "Zero Trust is not enabled for this account",
-        );
+      if (!this.zeroTrust) {
+        return this.error(403, 9999, "Zero Trust is not enabled");
+      }
       if (method === "POST") {
         const input = await body();
         this.organization = {
@@ -185,7 +183,7 @@ export class FakeCloudflareV1 {
         const input = await body();
         const app = {
           id: `app-${this.accessApps.length + 1}`,
-          aud: await sha256HexV1(new TextEncoder().encode(input.domain)),
+          aud: await sha256HexV1(input.domain),
           name: input.name,
           domain: input.domain,
           policies: input.policies,
@@ -195,102 +193,49 @@ export class FakeCloudflareV1 {
       }
       return this.ok(this.accessApps);
     }
-    const app = path.match(new RegExp(`^${a}/access/apps/([^/]+)$`));
-    if (app && method === "PUT") {
-      const found = this.accessApps.find((x) => x.id === app[1])!;
+    if ((m = path.match(new RegExp(`^${a}/access/apps/([^/]+)$`)))) {
+      const found = this.accessApps.find((x) => x.id === m![1])!;
       Object.assign(found, await body());
       return this.ok(found);
     }
     if (path === `${a}/r2/buckets`) {
-      if (!this.r2Enabled)
+      if (!this.r2Enabled) {
         return this.error(
           403,
           10042,
           "Please enable R2 through the Cloudflare Dashboard.",
         );
+      }
       if (method === "POST") {
         this.buckets.add((await body()).name);
         return this.ok({});
       }
       return this.ok({ buckets: [...this.buckets].map((name) => ({ name })) });
     }
-    const object = path.match(
-      new RegExp(`^${a}/r2/buckets/([^/]+)/objects/(.+)$`),
-    );
-    if (object) {
-      if (!this.buckets.has(object[1]!))
-        return this.error(404, 10006, "no such bucket");
+    if (
+      (m = path.match(new RegExp(`^${a}/r2/buckets/([^/]+)/objects/(.+)$`)))
+    ) {
+      if (!this.buckets.has(m[1]!)) return this.error(404, 10006, "no bucket");
       this.objects.set(
-        `${object[1]}/${decodeURIComponent(object[2]!)}`,
+        `${m[1]}/${decodeURIComponent(m[2]!)}`,
         (await request.arrayBuffer()).byteLength,
       );
       return this.ok({});
     }
-    const bucket = path.match(new RegExp(`^${a}/r2/buckets/([^/]+)$`));
-    if (bucket) {
-      return this.buckets.has(bucket[1]!)
-        ? this.ok({ name: bucket[1] })
-        : this.error(404, 10006, "no such bucket");
-    }
-    if (path === `${a}/storage/kv/namespaces`) {
-      if (method === "POST") {
-        const id = `kv-${this.kv.size + 1}`;
-        this.kv.set(id, (await body()).title);
-        return this.ok({ id });
-      }
-      return this.ok(
-        [...this.kv.entries()].map(([id, title]) => ({ id, title })),
-      );
-    }
-    if (path === `${a}/d1/database`) {
-      if (method === "POST") {
-        const name = (await body()).name;
-        const id = `d1-${this.d1.size + 1}`;
-        this.d1.set(name, { id, migrations: [], statements: [] });
-        return this.ok({ uuid: id, name });
-      }
-      const name = url.searchParams.get("name");
-      return this.ok(
-        [...this.d1.entries()]
-          .filter(([n]) => !name || n === name)
-          .map(([n, db]) => ({ uuid: db.id, name: n })),
-      );
-    }
-    const query = path.match(new RegExp(`^${a}/d1/database/([^/]+)/query$`));
-    if (query) {
-      const db = [...this.d1.values()].find((d) => d.id === query[1])!;
-      const { sql } = (await body()) as { sql: string };
-      db.statements.push(sql);
-      if (sql.startsWith("SELECT name FROM d1_migrations")) {
-        return this.ok([{ results: db.migrations.map((name) => ({ name })) }]);
-      }
-      for (const match of sql.matchAll(
-        /INSERT INTO d1_migrations \(name\) VALUES \('([^']*)'\)/g,
-      )) {
-        db.migrations.push(match[1]!);
-      }
-      return this.ok([{ results: [] }]);
+    if ((m = path.match(new RegExp(`^${a}/r2/buckets/([^/]+)$`)))) {
+      return this.buckets.has(m[1]!)
+        ? this.ok({ name: m[1] })
+        : this.error(404, 10006, "no bucket");
     }
     if (path === `${a}/vectorize/v2/indexes`) {
       const input = await body();
       this.indexes.set(input.name, input.config);
       return this.ok(input);
     }
-    const index = path.match(new RegExp(`^${a}/vectorize/v2/indexes/([^/]+)$`));
-    if (index) {
-      return this.indexes.has(index[1]!)
-        ? this.ok({ name: index[1] })
+    if ((m = path.match(new RegExp(`^${a}/vectorize/v2/indexes/([^/]+)$`)))) {
+      return this.indexes.has(m[1]!)
+        ? this.ok({ name: m[1] })
         : this.error(404, 3000, "not found");
-    }
-    if (path === `${a}/queues`) {
-      if (method === "POST") {
-        const name = (await body()).queue_name;
-        this.queues.add(name);
-        return this.ok({ queue_id: `q-${name}` });
-      }
-      return this.ok(
-        [...this.queues].map((q) => ({ queue_id: `q-${q}`, queue_name: q })),
-      );
     }
     if (path === `${a}/workers/scripts`) {
       return this.ok(
@@ -300,10 +245,24 @@ export class FakeCloudflareV1 {
         })),
       );
     }
-    const session = path.match(
-      new RegExp(`^${a}/workers/scripts/([^/]+)/assets-upload-session$`),
-    );
-    if (session) {
+    if ((m = path.match(new RegExp(`^${a}/workers/services/([^/]+)$`)))) {
+      const script = this.scripts.get(m[1]!);
+      return script
+        ? this.ok({
+            default_environment: {
+              script: { migration_tag: script.migrationTag ?? null },
+            },
+          })
+        : this.error(404, 10090, "no such service");
+    }
+    if (path === `${a}/workers/durable_objects/namespaces`) {
+      return this.ok(this.namespaces);
+    }
+    if (
+      (m = path.match(
+        new RegExp(`^${a}/workers/scripts/([^/]+)/assets-upload-session$`),
+      ))
+    ) {
       const manifest = (await body()).manifest as Record<
         string,
         { hash: string }
@@ -317,17 +276,14 @@ export class FakeCloudflareV1 {
       });
     }
     if (path === `${a}/workers/assets/upload`) {
-      if (request.headers.get("authorization") !== "Bearer upload-jwt")
-        return this.error(401, 10000, "bad jwt");
       const form = await request.formData();
       for (const key of form.keys()) this.assetHashes.add(key);
       return this.ok({ jwt: "complete-jwt" }, 201);
     }
-    const secrets = path.match(
-      new RegExp(`^${a}/workers/scripts/([^/]+)/secrets$`),
-    );
-    if (secrets) {
-      const script = this.scripts.get(secrets[1]!);
+    if (
+      (m = path.match(new RegExp(`^${a}/workers/scripts/([^/]+)/secrets$`)))
+    ) {
+      const script = this.scripts.get(m[1]!);
       if (!script) return this.error(404, 10007, "no such script");
       return this.ok(
         Object.keys(script.secrets).map((name) => ({
@@ -336,23 +292,53 @@ export class FakeCloudflareV1 {
         })),
       );
     }
-    const subdomain = path.match(
-      new RegExp(`^${a}/workers/scripts/([^/]+)/subdomain$`),
-    );
-    if (subdomain) {
-      const script = this.scripts.get(subdomain[1]!);
+    if (
+      (m = path.match(new RegExp(`^${a}/workers/scripts/([^/]+)/subdomain$`)))
+    ) {
+      const script = this.scripts.get(m[1]!);
       if (!script) return this.error(404, 10007, "no such script");
       script.workersDev = (await body()).enabled === true;
       return this.ok({ enabled: script.workersDev });
     }
-    const script = path.match(new RegExp(`^${a}/workers/scripts/([^/]+)$`));
-    if (script && method === "DELETE") {
-      this.scripts.delete(script[1]!);
-      this.deletedScripts.push(script[1]!);
-      return this.ok(null);
+    if (
+      (m = path.match(
+        new RegExp(`^${a}/workers/scripts/([^/]+)/domains/records$`),
+      ))
+    ) {
+      return this.error(400, 100117, "this fake install has no zone");
     }
-    if (script && method === "PUT")
-      return this.upload(script[1]!, await request.formData());
+    if ((m = path.match(new RegExp(`^${a}/workers/scripts/([^/]+)$`)))) {
+      if (method === "DELETE") {
+        this.scripts.delete(m[1]!);
+        this.deletedScripts.push(m[1]!);
+        return this.ok(null);
+      }
+      return this.upload(m[1]!, await request.formData());
+    }
+    if (path === `${a}/containers/applications`) {
+      if (method === "POST") {
+        this.containers.push({
+          ...(await body()),
+          id: `c-${this.containers.length}`,
+        });
+        return this.ok({}, 201);
+      }
+      return this.ok(this.containers);
+    }
+    if (
+      (m = path.match(new RegExp(`^${a}/containers/applications/([^/]+)$`)))
+    ) {
+      Object.assign(
+        this.containers.find((c) => c.id === m![1])!,
+        await body(),
+      );
+      return this.ok({});
+    }
+    if (
+      path.match(new RegExp(`^${a}/containers/applications/[^/]+/rollouts$`))
+    ) {
+      return this.ok({}, 201);
+    }
     if (path.startsWith(`${a}/ai/models/search`)) {
       const search = url.searchParams.get("search");
       return this.ok(
@@ -365,9 +351,10 @@ export class FakeCloudflareV1 {
   }
 
   private async upload(name: string, form: FormData): Promise<Response> {
+    const raw = form.get("metadata") as unknown as Blob | string;
     const metadata = JSON.parse(
-      await (form.get("metadata") as File).text(),
-    ) as Record<string, any>;
+      typeof raw === "string" ? raw : await raw.text(),
+    ) as Json;
     const bindings = metadata.bindings as {
       type: string;
       name: string;
@@ -382,24 +369,18 @@ export class FakeCloudflareV1 {
     }
     const previous = this.scripts.get(name);
     const migrations = metadata.migrations as
-      { old_tag?: string; new_tag: string } | undefined;
+      { old_tag?: string; new_tag: string; steps: Json[] } | undefined;
     if (migrations && migrations.old_tag !== previous?.migrationTag) {
-      return this.error(
-        400,
-        10079,
-        "migration old_tag does not match the script's current tag",
-      );
+      return this.error(400, 10079, "migration old_tag does not match");
     }
-    if (
-      !migrations &&
-      previous === undefined &&
-      bindings.some((b) => b.type === "durable_object_namespace")
-    ) {
-      return this.error(
-        400,
-        10074,
-        "new Durable Object classes need a migration",
-      );
+    for (const step of migrations?.steps ?? []) {
+      for (const className of step.new_sqlite_classes ?? []) {
+        this.namespaces.push({
+          id: `ns-${name}-${className}`,
+          script: name,
+          class: className,
+        });
+      }
     }
     const secrets: Record<string, string> = {};
     for (const binding of bindings) {
@@ -410,15 +391,8 @@ export class FakeCloudflareV1 {
     )
       ? (previous?.secrets ?? {})
       : {};
-    const modules: Record<string, string> = {};
-    for (const [key, value] of form.entries()) {
-      // Every part the deployer sends is a file; the types say a string may be too.
-      const part = value as unknown as Blob;
-      if (key !== "metadata") modules[key] = await part.text();
-    }
     this.scripts.set(name, {
       metadata,
-      modules,
       secrets: { ...kept, ...secrets },
       ...(migrations
         ? { migrationTag: migrations.new_tag }
@@ -432,52 +406,284 @@ export class FakeCloudflareV1 {
   }
 }
 
-/** A stored (uncompressed) zip of these files: what the web client archive is, in miniature. */
-export function storedZipV1(
-  files: Record<string, string>,
-): Uint8Array<ArrayBuffer> {
+/** An R2 bucket in memory, as staging uses it. */
+export class MemoryBucketV1 implements StagingBucketV1 {
+  readonly objects = new Map<string, Uint8Array>();
+  async head(key: string) {
+    return this.objects.has(key) ? {} : null;
+  }
+  async get(key: string) {
+    const bytes = this.objects.get(key);
+    return bytes
+      ? { arrayBuffer: async () => bytes.slice().buffer as ArrayBuffer }
+      : null;
+  }
+  async put(key: string, value: Uint8Array | string) {
+    this.objects.set(
+      key,
+      typeof value === "string"
+        ? new TextEncoder().encode(value)
+        : value.slice(),
+    );
+    return {};
+  }
+}
+
+/** Bun has no `DigestStream`; this collects the bytes and hashes them at the end. */
+export function bufferedDigestSinkV1() {
+  const chunks: Uint8Array[] = [];
+  let resolve!: (digest: ArrayBuffer) => void;
+  const digest = new Promise<ArrayBuffer>((r) => (resolve = r));
+  const writable = new WritableStream<Uint8Array>({
+    write(chunk) {
+      chunks.push(chunk);
+    },
+    async close() {
+      const all = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+      let at = 0;
+      for (const c of chunks) {
+        all.set(c, at);
+        at += c.length;
+      }
+      resolve(await crypto.subtle.digest("SHA-256", all));
+    },
+  });
+  return { writable, digest };
+}
+
+/** A GNU tar of these files, gzipped: a release archive in miniature. */
+export async function tarGzV1(
+  files: Record<string, Uint8Array>,
+): Promise<Uint8Array> {
+  const blocks: Uint8Array[] = [];
   const encoder = new TextEncoder();
-  const locals: Uint8Array[] = [];
-  const centrals: Uint8Array[] = [];
-  let offset = 0;
-  for (const [path, content] of Object.entries(files)) {
-    const name = encoder.encode(path);
-    const data = encoder.encode(content);
-    const local = new Uint8Array(30 + name.length + data.length);
-    const lv = new DataView(local.buffer);
-    lv.setUint32(0, 0x04034b50, true);
-    lv.setUint16(8, 0, true);
-    lv.setUint32(18, data.length, true);
-    lv.setUint32(22, data.length, true);
-    lv.setUint16(26, name.length, true);
-    local.set(name, 30);
-    local.set(data, 30 + name.length);
-    const central = new Uint8Array(46 + name.length);
-    const cv = new DataView(central.buffer);
-    cv.setUint32(0, 0x02014b50, true);
-    cv.setUint16(10, 0, true);
-    cv.setUint32(20, data.length, true);
-    cv.setUint32(24, data.length, true);
-    cv.setUint16(28, name.length, true);
-    cv.setUint32(42, offset, true);
-    central.set(name, 46);
-    locals.push(local);
-    centrals.push(central);
-    offset += local.length;
+  const header = (name: string, size: number, type: string) => {
+    const block = new Uint8Array(512);
+    block.set(encoder.encode(name.slice(0, 100)), 0);
+    block.set(encoder.encode("0000644\0"), 100);
+    block.set(encoder.encode(size.toString(8).padStart(11, "0") + "\0"), 124);
+    block[156] = type.charCodeAt(0);
+    block.set(encoder.encode("ustar  \0"), 257);
+    return block;
+  };
+  const padded = (bytes: Uint8Array) => {
+    const out = new Uint8Array(Math.ceil(bytes.length / 512) * 512);
+    out.set(bytes);
+    return out;
+  };
+  for (const [path, bytes] of Object.entries(files)) {
+    const name = `./${path}`;
+    if (name.length > 100) {
+      const long = encoder.encode(`${name}\0`);
+      blocks.push(header("././@LongLink", long.length, "L"), padded(long));
+    }
+    blocks.push(header(name, bytes.length, "0"), padded(bytes));
   }
-  const centralSize = centrals.reduce((n, c) => n + c.length, 0);
-  const end = new Uint8Array(22);
-  const ev = new DataView(end.buffer);
-  ev.setUint32(0, 0x06054b50, true);
-  ev.setUint16(8, centrals.length, true);
-  ev.setUint16(10, centrals.length, true);
-  ev.setUint32(12, centralSize, true);
-  ev.setUint32(16, offset, true);
-  const out = new Uint8Array(offset + centralSize + 22);
-  let at = 0;
-  for (const part of [...locals, ...centrals, end]) {
-    out.set(part, at);
-    at += part.length;
+  blocks.push(new Uint8Array(1024));
+  const tar = new Blob(blocks as Uint8Array<ArrayBuffer>[]);
+  return new Uint8Array(
+    await new Response(
+      tar.stream().pipeThrough(new CompressionStream("gzip")),
+    ).arrayBuffer(),
+  );
+}
+
+export interface TestBundleOptionsV1 {
+  readonly version: string;
+  /** The app's Durable Object history, in order. */
+  readonly appMigrations: readonly string[];
+  readonly client?: Record<string, string>;
+  readonly installVars?: readonly string[];
+}
+
+/**
+ * A deploy bundle shaped as `build-deploy-bundle.ts` writes one: the app with
+ * a Durable Object per migration, assets and minted secrets; the build
+ * service with its container and the token it shares with the app; and the
+ * optional Computer host. Published to the fake's GitHub.
+ */
+export async function publishTestBundleV1(
+  cf: FakeCloudflareV1,
+  options: TestBundleOptionsV1,
+): Promise<DeployBundleManifestV1> {
+  const encoder = new TextEncoder();
+  const archive: Record<string, Uint8Array> = {};
+  const module = async (key: BundleWorkerKeyV1) => {
+    const path = `workers/${key}/index.js`;
+    const bytes = encoder.encode(
+      `export default {} // ${key} ${options.version}`,
+    );
+    archive[path] = bytes;
+    return {
+      name: "index.js",
+      type: "esm" as const,
+      path,
+      sha256: await sha256HexV1(bytes),
+      size: bytes.length,
+    };
+  };
+  const client = options.client ?? { "index.html": "<!doctype html>" };
+  const assets = [];
+  for (const [path, text] of Object.entries(client)) {
+    const archivePath = `assets/app/${"deep/".repeat(path === "index.html" ? 0 : 20)}${path}`;
+    archive[archivePath] = encoder.encode(text);
+    assets.push({
+      path: `/${path}`,
+      archivePath,
+      hash: (await sha256HexV1(text)).slice(0, 32),
+      size: text.length,
+      contentType: "text/html",
+    });
   }
-  return out;
+  const artifact = encoder.encode("export const application = 1;");
+  archive["application-artifact.mjs"] = artifact;
+  const artifactSha = await sha256HexV1(artifact);
+
+  const base = {
+    optional: false,
+    contentHash: "0".repeat(64),
+    mainModule: "index.js",
+    compatibilityDate: "2026-08-27",
+    compatibilityFlags: ["nodejs_compat"],
+    installVars: [] as string[],
+    containers: [],
+    workersDev: false,
+    customDomains: false,
+  };
+  const classes = options.appMigrations.map(
+    (tag) => `Class${tag.toUpperCase()}`,
+  );
+  const app: BundleWorkerV1 = {
+    ...base,
+    name: "{install}",
+    modules: [await module("app")],
+    bindings: [
+      { type: "ai", name: "AI" },
+      { type: "worker_loader", name: "USER_APPLICATIONS" },
+      {
+        type: "r2_bucket",
+        name: "MEMORY_FILES",
+        bucket_name: "{install}-memory-files",
+      },
+      {
+        type: "vectorize",
+        name: "MEMORY_INDEX",
+        index_name: "{install}-memory",
+      },
+      {
+        type: "service",
+        name: "APPLET_BUILD",
+        service: "{install}-applet-build",
+      },
+      {
+        type: "service",
+        name: "COMPUTER_HOST",
+        service: "{install}-computer-host",
+      },
+      ...classes.map((className) => ({
+        type: "durable_object_namespace",
+        name: className.toUpperCase(),
+        class_name: className,
+      })),
+    ],
+    installVars: [
+      ...(options.installVars ?? ["ACCESS_TEAM_DOMAIN", "ACCESS_AUD"]),
+    ],
+    secrets: [
+      {
+        name: "APPLET_BUILD_TOKEN",
+        required: true,
+        mint: "hex",
+        sharedWith: ["appletBuild"],
+      },
+      {
+        name: "COMPUTER_HOST_TOKEN",
+        required: true,
+        mint: "hex",
+        sharedWith: ["computerHost"],
+        requiredWith: "computerHost",
+      },
+      { name: "CREDENTIAL_KEYRING", required: true, mint: "keyring" },
+      { name: "FROCKBOT_ADMIN_EMAILS", required: false },
+      { name: "SPRITES_TOKEN", required: true, requiredWith: "computerHost" },
+      { name: "WEB_PUSH_VAPID_KEYS", required: true, mint: "vapid" },
+    ],
+    migrations: options.appMigrations.map((tag, i) => ({
+      tag,
+      new_sqlite_classes: [classes[i]!],
+    })),
+    assets: {
+      config: { html_handling: "none", not_found_handling: "none" },
+      files: assets,
+    },
+    customDomains: true,
+  };
+  const appletBuild: BundleWorkerV1 = {
+    ...base,
+    name: "{install}-applet-build",
+    modules: [await module("appletBuild")],
+    bindings: [
+      {
+        type: "durable_object_namespace",
+        name: "BUILDER",
+        class_name: "AppletBuildContainer",
+      },
+    ],
+    secrets: [
+      {
+        name: "APPLET_BUILD_TOKEN",
+        required: true,
+        mint: "hex",
+        sharedWith: ["app"],
+      },
+    ],
+    migrations: [{ tag: "v1", new_sqlite_classes: ["AppletBuildContainer"] }],
+    containers: [
+      {
+        className: "AppletBuildContainer",
+        name: "{install}-applet-build-appletbuildcontainer",
+        image: `docker.io/timoconnellaus/frockbot-applet-build:${options.version}`,
+        instanceType: "standard",
+        maxInstances: 2,
+      },
+    ],
+  };
+  const computerHost: BundleWorkerV1 = {
+    ...base,
+    name: "{install}-computer-host",
+    optional: true,
+    modules: [await module("computerHost")],
+    bindings: [],
+    secrets: [],
+    migrations: [],
+  };
+  const names = bundleAssetNamesV1(options.version);
+  const tarball = await tarGzV1(archive);
+  const manifest: DeployBundleManifestV1 = {
+    schemaVersion: 1,
+    kind: "frockbot-deploy-bundle",
+    version: options.version,
+    profile: "simple",
+    protocol: { min: 1, max: 1 },
+    archive: { file: names.archive, sha256: await sha256HexV1(tarball) },
+    install: { token: "{install}", pattern: "^[a-z0-9][a-z0-9-]{0,40}$" },
+    resources: {
+      r2Buckets: ["{install}-application-artifacts", "{install}-memory-files"],
+      vectorizeIndexes: [
+        { name: "{install}-memory", dimensions: 768, metric: "cosine" },
+      ],
+    },
+    applicationArtifact: {
+      path: "application-artifact.mjs",
+      sha256: artifactSha,
+      bucket: "{install}-application-artifacts",
+      key: `applications/${artifactSha}.mjs`,
+    },
+    workers: { app, computerHost, appletBuild },
+  } as DeployBundleManifestV1;
+  cf.publish(options.version, {
+    [names.manifest]: encoder.encode(JSON.stringify(manifest)),
+    [names.archive]: tarball,
+  });
+  return manifest;
 }

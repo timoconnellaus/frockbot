@@ -26,6 +26,14 @@
       },
     ],
   },
+  // Each release's deploy bundle, staged once for every install `/deploy`
+  // makes. Hosted-only: the marketing site has no other profile.
+  "r2_buckets": [
+    {
+      "binding": "DEPLOY_BUNDLES",
+      "bucket_name": "frockbot-deploy-bundles",
+    },
+  ],
   "migrations": [
     {
       "tag": "v1",

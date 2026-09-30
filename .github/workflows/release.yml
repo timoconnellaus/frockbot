@@ -1706,6 +1706,11 @@ jobs:
           set -euo pipefail
           config=../../.deployment/hosted/marketing/wrangler.jsonc
 
+          # `/deploy` stages each release's bundle here; the Worker cannot
+          # deploy bound to a bucket that does not exist.
+          bunx wrangler r2 bucket info frockbot-deploy-bundles >/dev/null 2>&1 \
+            || bunx wrangler r2 bucket create frockbot-deploy-bundles
+
           if [[ -z "$CLOUDFLARE_OAUTH_CLIENT_ID" && -z "$CLOUDFLARE_OAUTH_CLIENT_SECRET" ]]; then
             bunx wrangler deploy -c "$config"
             exit 0

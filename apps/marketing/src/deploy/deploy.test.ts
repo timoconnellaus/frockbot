@@ -1,162 +1,37 @@
 import { describe, expect, test } from "bun:test";
 import { accountChecksV1 } from "./checks";
 import { CloudflareApiV1 } from "./cloudflare-api";
-import { NotYetV1, STEP_RUNNERS_V1, type InstallRecordV1 } from "./deployer";
-import { FakeCloudflareV1, storedZipV1 } from "./fake-cloudflare.test-support";
-import { decodeReleaseManifestV1, isNewerVersionV1 } from "./manifest";
+import {
+  NotYetV1,
+  STEP_RUNNERS_V1,
+  type DeployContextV1,
+  type InstallRecordV1,
+} from "./deployer";
+import {
+  FakeCloudflareV1,
+  MemoryBucketV1,
+  bufferedDigestSinkV1,
+  publishTestBundleV1,
+  tarGzV1,
+} from "./fake-cloudflare.test-support";
 import { choosePageV1, escapeHtmlV1, progressPageV1 } from "./pages";
 import {
   DEPLOY_STEPS_V1,
-  dueMigrationsV1,
   installNameProblemV1,
+  isNewerVersionV1,
   normalizeInstallNameV1,
   progressPercentV1,
   suggestedInstallNameV1,
 } from "./plan";
 import {
   latestDeployableVersionV1,
+  readTarV1,
   releaseManifestV1,
-  sha256HexV1,
+  stageBundleV1,
 } from "./release";
 import { handleDeployRequestV1 } from "./routes";
-import { readZipV1 } from "./zip";
 
 const encode = (text: string) => new TextEncoder().encode(text);
-
-interface ReleaseOptions {
-  version: string;
-  migrations: { tag: string; newSqliteClasses?: string[] }[];
-  secrets: { name: string; shape: "hex" | "keyring" }[];
-  d1Migrations: string[];
-  client: Record<string, string>;
-}
-
-/** Publishes a release in the fake's GitHub, and returns its manifest. */
-async function publishRelease(cf: FakeCloudflareV1, options: ReleaseOptions) {
-  const files: Record<string, Uint8Array<ArrayBuffer>> = {};
-  const file = async (asset: string, bytes: Uint8Array<ArrayBuffer>) => {
-    files[asset] = bytes;
-    return { asset, sha256: await sha256HexV1(bytes) };
-  };
-  const manifest = {
-    schemaVersion: 1,
-    version: options.version,
-    highlights: `Things in ${options.version}.`,
-    resources: {
-      r2Buckets: ["application-artifacts", "memory-files"],
-      kvNamespaces: ["cache"],
-      d1Databases: [
-        {
-          role: "auth",
-          migrations: await Promise.all(
-            options.d1Migrations.map(async (name) => ({
-              name,
-              ...(await file(
-                `${name}.sql`,
-                encode(
-                  `CREATE TABLE IF NOT EXISTS ${name.replace(/\W/g, "_")} (id TEXT);`,
-                ),
-              )),
-            })),
-          ),
-        },
-      ],
-      vectorizeIndexes: [{ role: "memory", dimensions: 768, metric: "cosine" }],
-      analyticsDatasets: ["events"],
-    },
-    workers: [
-      {
-        role: "app",
-        mainModule: "index.js",
-        modules: [
-          {
-            name: "index.js",
-            type: "esm",
-            ...(await file(
-              `app-${options.version}.js`,
-              encode(`export default {}; // ${options.version}`),
-            )),
-          },
-        ],
-        compatibilityDate: "2026-08-27",
-        compatibilityFlags: ["nodejs_compat"],
-        bindings: [
-          { type: "ai", name: "AI" },
-          { type: "worker_loader", name: "USER_APPLICATIONS" },
-          { type: "assets", name: "ASSETS" },
-          {
-            type: "durable_object_namespace",
-            name: "BOT_STATES",
-            className: "BotState",
-          },
-          { type: "r2_bucket", name: "MEMORY_FILES", bucket: "memory-files" },
-          {
-            type: "r2_bucket",
-            name: "APPLICATION_ARTIFACTS",
-            bucket: "application-artifacts",
-          },
-          { type: "kv_namespace", name: "CACHE", namespace: "cache" },
-          { type: "d1", name: "AUTH_DB", database: "auth" },
-          { type: "vectorize", name: "MEMORY_INDEX", index: "memory" },
-          { type: "analytics_engine", name: "ANALYTICS", dataset: "events" },
-          { type: "access_team_domain", name: "ACCESS_TEAM_DOMAIN" },
-          { type: "access_aud", name: "ACCESS_AUD" },
-          { type: "owner_email", name: "FROCKBOT_ADMIN_EMAILS" },
-          { type: "install_origin", name: "PUBLIC_ORIGIN" },
-          { type: "plain_text", name: "DEFAULT_APPLICATION_HASH", text: "abc" },
-        ],
-        migrations: options.migrations,
-        secrets: options.secrets,
-        assets: {
-          ...(await file(
-            `web-${options.version}.zip`,
-            storedZipV1(options.client),
-          )),
-          htmlHandling: "none",
-          notFoundHandling: "none",
-        },
-        r2Objects: [
-          {
-            bucket: "application-artifacts",
-            key: "applications/abc.mjs",
-            contentType: "application/javascript",
-            ...(await file(
-              `artifact-${options.version}.mjs`,
-              encode("export const app = 1;"),
-            )),
-          },
-        ],
-      },
-    ],
-  };
-  await cf.publish(options.version, files, manifest);
-  return decodeReleaseManifestV1(manifest);
-}
-
-const FIRST: ReleaseOptions = {
-  version: "0.48.2",
-  migrations: [
-    { tag: "v1", newSqliteClasses: ["BotState"] },
-    { tag: "v2", newSqliteClasses: ["UserConfiguration"] },
-  ],
-  secrets: [
-    { name: "CREDENTIAL_KEYRING", shape: "keyring" },
-    { name: "ROUTINE_HOOK_SECRET", shape: "hex" },
-  ],
-  d1Migrations: ["0001_init"],
-  client: { "index.html": "<!doctype html>", "main.dart.js": "main()" },
-};
-
-const SECOND: ReleaseOptions = {
-  version: "0.49.0",
-  migrations: [
-    ...FIRST.migrations,
-    { tag: "v3", newSqliteClasses: ["GroupChat"] },
-  ],
-  secrets: [...FIRST.secrets, { name: "MACHINE_TOKEN_SECRET", shape: "hex" }],
-  d1Migrations: ["0001_init", "0002_more"],
-  client: { "index.html": "<!doctype html>", "main.dart.js": "main(2)" },
-};
 
 function newInstall(cf: FakeCloudflareV1): InstallRecordV1 {
   return {
@@ -170,108 +45,35 @@ function newInstall(cf: FakeCloudflareV1): InstallRecordV1 {
   };
 }
 
+async function contextFor(
+  cf: FakeCloudflareV1,
+  version: string,
+  bundles = new MemoryBucketV1(),
+): Promise<DeployContextV1> {
+  return {
+    api: new CloudflareApiV1("token", cf.fetch),
+    token: "token",
+    manifest: await releaseManifestV1(version, cf.fetch as typeof fetch),
+    bundles,
+    fetcher: cf.fetch as typeof fetch,
+    now: () => new Date("2026-09-30T00:00:00Z"),
+    digestSink: bufferedDigestSinkV1,
+  };
+}
+
 async function runAll(
   cf: FakeCloudflareV1,
   version: string,
   install: InstallRecordV1,
+  bundles = new MemoryBucketV1(),
 ) {
-  const manifest = await releaseManifestV1(version, cf.fetch as typeof fetch);
-  const context = {
-    api: new CloudflareApiV1("token", cf.fetch),
-    manifest,
-    fetcher: cf.fetch as typeof fetch,
-    now: () => new Date("2026-09-30T00:00:00Z"),
-  };
+  const context = await contextFor(cf, version, bundles);
   let current = install;
-  for (const step of DEPLOY_STEPS_V1)
+  for (const step of DEPLOY_STEPS_V1) {
     current = await STEP_RUNNERS_V1[step](context, current);
+  }
   return current;
 }
-
-describe("release manifest", () => {
-  test("names every resource a binding points at", () => {
-    expect(() =>
-      decodeReleaseManifestV1({
-        schemaVersion: 1,
-        version: "1.0.0",
-        resources: {},
-        workers: [
-          {
-            role: "app",
-            mainModule: "index.js",
-            modules: [
-              {
-                name: "index.js",
-                type: "esm",
-                asset: "a.js",
-                sha256: "0".repeat(64),
-              },
-            ],
-            compatibilityDate: "2026-08-27",
-            bindings: [{ type: "r2_bucket", name: "FILES", bucket: "files" }],
-          },
-        ],
-      }),
-    ).toThrow(/resources.r2Buckets does not declare/);
-  });
-
-  test("refuses a binding type it doesn't know rather than deploying without it", () => {
-    expect(() =>
-      decodeReleaseManifestV1({
-        schemaVersion: 1,
-        version: "1.0.0",
-        resources: {},
-        workers: [
-          {
-            role: "app",
-            mainModule: "index.js",
-            modules: [
-              {
-                name: "index.js",
-                type: "esm",
-                asset: "a.js",
-                sha256: "0".repeat(64),
-              },
-            ],
-            compatibilityDate: "2026-08-27",
-            bindings: [{ type: "hyperdrive", name: "DB" }],
-          },
-        ],
-      }),
-    ).toThrow(/not a binding this deployer knows/);
-  });
-
-  test("keeps asset names inside the release", () => {
-    expect(() =>
-      decodeReleaseManifestV1({
-        schemaVersion: 1,
-        version: "1.0.0",
-        resources: {},
-        workers: [
-          {
-            role: "app",
-            mainModule: "index.js",
-            modules: [
-              {
-                name: "index.js",
-                type: "esm",
-                asset: "../../evil.js",
-                sha256: "0".repeat(64),
-              },
-            ],
-            compatibilityDate: "2026-08-27",
-          },
-        ],
-      }),
-    ).toThrow(/malformed/);
-  });
-
-  test("compares versions numerically", () => {
-    expect(isNewerVersionV1("0.10.0", "0.9.9")).toBe(true);
-    expect(isNewerVersionV1("0.9.9", "0.10.0")).toBe(false);
-    expect(isNewerVersionV1("1.0.0", "1.0.0")).toBe(false);
-  });
-});
 
 describe("plan", () => {
   test("install names fit every resource and a DNS label", () => {
@@ -283,23 +85,10 @@ describe("plan", () => {
     expect(suggestedInstallNameV1("tim@example.com")).toBe("tim-frockbot");
   });
 
-  test("sends only the Durable Object migrations still due", () => {
-    const migrations = SECOND.migrations;
-    expect(dueMigrationsV1(migrations, undefined)).toEqual({
-      new_tag: "v3",
-      steps: [
-        { new_sqlite_classes: ["BotState"] },
-        { new_sqlite_classes: ["UserConfiguration"] },
-        { new_sqlite_classes: ["GroupChat"] },
-      ],
-    });
-    expect(dueMigrationsV1(migrations, "v2")).toEqual({
-      old_tag: "v2",
-      new_tag: "v3",
-      steps: [{ new_sqlite_classes: ["GroupChat"] }],
-    });
-    expect(dueMigrationsV1(migrations, "v3")).toBeUndefined();
-    expect(() => dueMigrationsV1(migrations, "v9")).toThrow(/could lose data/);
+  test("compares versions numerically", () => {
+    expect(isNewerVersionV1("0.10.0", "0.9.9")).toBe(true);
+    expect(isNewerVersionV1("0.9.9", "0.10.0")).toBe(false);
+    expect(isNewerVersionV1("1.0.0", "1.0.0")).toBe(false);
   });
 
   test("the bar counts a running step as half", () => {
@@ -314,27 +103,69 @@ describe("plan", () => {
   });
 });
 
-describe("zip", () => {
-  test("reads the files of a stored archive", async () => {
-    const entries = await readZipV1(
-      storedZipV1({ "index.html": "hi", "assets/a.js": "x" }),
+describe("staging a release", () => {
+  test("reads GNU tar: ./ paths, long names, and nothing that climbs out", async () => {
+    const long = `assets/${"deep/".repeat(30)}main.js`;
+    const seen: string[] = [];
+    const archive = await tarGzV1({
+      "a.txt": encode("a"),
+      [long]: encode("b"),
+    });
+    await readTarV1(
+      new Blob([archive as Uint8Array<ArrayBuffer>])
+        .stream()
+        .pipeThrough(new DecompressionStream("gzip")),
+      async (path, bytes) => {
+        seen.push(`${path}=${new TextDecoder().decode(bytes)}`);
+      },
     );
-    const read = await Promise.all(
-      entries.map(async (e) => [
-        e.path,
-        new TextDecoder().decode(await e.read()),
-      ]),
-    );
-    expect(read).toEqual([
-      ["index.html", "hi"],
-      ["assets/a.js", "x"],
-    ]);
+    expect(seen).toEqual(["a.txt=a", `${long}=b`]);
+    const evil = await tarGzV1({ "../evil": encode("x") });
+    await expect(
+      readTarV1(
+        new Blob([evil as Uint8Array<ArrayBuffer>])
+          .stream()
+          .pipeThrough(new DecompressionStream("gzip")),
+        async () => {},
+      ),
+    ).rejects.toThrow(/unsafe path/);
   });
 
-  test("refuses a path that climbs out", async () => {
-    await expect(readZipV1(storedZipV1({ "../evil": "x" }))).rejects.toThrow(
-      /unsafe path/,
+  test("streams a release into the bucket once, and refuses one whose archive isn't the manifest's", async () => {
+    const cf = new FakeCloudflareV1();
+    const manifest = await publishTestBundleV1(cf, {
+      version: "0.9.3",
+      appMigrations: ["v1"],
+    });
+    expect(await latestDeployableVersionV1(cf.fetch as typeof fetch)).toBe(
+      "0.9.3",
     );
+    const bucket = new MemoryBucketV1();
+    const options = {
+      fetcher: cf.fetch as typeof fetch,
+      digestSink: bufferedDigestSinkV1,
+    };
+    await stageBundleV1(bucket, manifest, options);
+    await stageBundleV1(bucket, manifest, options);
+    expect(cf.downloads.filter((d) => d.endsWith(".tar.gz"))).toHaveLength(1);
+    expect(
+      bucket.objects.has("bundles/0.9.3/files/application-artifact.mjs"),
+    ).toBe(true);
+
+    const tampered = new MemoryBucketV1();
+    await expect(
+      stageBundleV1(
+        tampered,
+        {
+          ...manifest,
+          archive: { ...manifest.archive, sha256: "0".repeat(64) },
+        },
+        options,
+      ),
+    ).rejects.toThrow(/doesn't match/);
+    expect(
+      [...tampered.objects.keys()].some((k) => k.includes("complete")),
+    ).toBe(false);
   });
 });
 
@@ -388,15 +219,15 @@ describe("account checks", () => {
 });
 
 describe("deploy and update", () => {
-  test("a first deploy creates the install behind Access, reachable only once guarded", async () => {
+  test("a first deploy puts the install on workers.dev behind Access, through the bundle's deployer", async () => {
     const cf = new FakeCloudflareV1();
     cf.organization = null;
-    await publishRelease(cf, FIRST);
-    expect(await latestDeployableVersionV1(cf.fetch as typeof fetch)).toBe(
-      "0.48.2",
-    );
-
-    const install = await runAll(cf, "0.48.2", newInstall(cf));
+    await publishTestBundleV1(cf, {
+      version: "0.9.3",
+      appMigrations: ["v1", "v2"],
+      installVars: ["ACCESS_TEAM_DOMAIN", "ACCESS_AUD", "APP_ORIGIN"],
+    });
+    const install = await runAll(cf, "0.9.3", newInstall(cf));
 
     expect([...cf.buckets].sort()).toEqual([
       "tims-frockbot-application-artifacts",
@@ -406,45 +237,35 @@ describe("deploy and update", () => {
       dimensions: 768,
       metric: "cosine",
     });
-    expect(cf.d1.get("tims-frockbot-auth")!.migrations).toEqual(["0001_init"]);
-    expect(
-      cf.objects.has(
-        "tims-frockbot-application-artifacts/applications/abc.mjs",
-      ),
-    ).toBe(true);
-
-    // The organization was made, and the two applications: Allow for the owner, Bypass for /api.
+    // The organization was made, and the applications: Allow for the owner, Bypass for /api and discovery.
     expect(cf.organization!.auth_domain).toMatch(/\.cloudflareaccess\.com$/);
     expect(cf.accessApps.map((a) => a.domain)).toEqual([
       "tims-frockbot.tim-oconnell.workers.dev",
       "tims-frockbot.tim-oconnell.workers.dev/api",
+      "tims-frockbot.tim-oconnell.workers.dev/.well-known/frockbot.json",
     ]);
     expect(JSON.stringify(cf.accessApps[0]!.policies)).toContain(
       "tim@example.com",
     );
-    expect(JSON.stringify(cf.accessApps[1]!.policies)).toContain("bypass");
 
-    // Access existed before the Worker was uploaded, and workers.dev came last.
+    // Access existed before anything was uploaded; workers.dev, no domain, no Computer host.
     const createApp = cf.calls.indexOf(
       `POST /accounts/${cf.accountId}/access/apps`,
     );
-    const upload = cf.calls.indexOf(
-      `PUT /accounts/${cf.accountId}/workers/scripts/tims-frockbot`,
-    );
-    const enable = cf.calls.indexOf(
-      `POST /accounts/${cf.accountId}/workers/scripts/tims-frockbot/subdomain`,
+    const firstUpload = cf.calls.findIndex((c) =>
+      c.startsWith(`PUT /accounts/${cf.accountId}/workers/scripts/`),
     );
     expect(createApp).toBeGreaterThan(-1);
-    expect(createApp).toBeLessThan(upload);
-    expect(upload).toBeLessThan(enable);
-
-    const script = cf.scripts.get("tims-frockbot")!;
-    expect(script.migrationTag).toBe("v2");
-    expect(Object.keys(script.secrets).sort()).toEqual([
-      "CREDENTIAL_KEYRING",
-      "ROUTINE_HOOK_SECRET",
+    expect(createApp).toBeLessThan(firstUpload);
+    expect([...cf.scripts.keys()].sort()).toEqual([
+      "tims-frockbot",
+      "tims-frockbot-applet-build",
     ]);
-    const bindings = script.metadata.bindings as {
+    expect(cf.calls.some((c) => c.includes("/domains/records"))).toBe(false);
+    const app = cf.scripts.get("tims-frockbot")!;
+    expect(app.workersDev).toBe(true);
+    expect(app.migrationTag).toBe("v2");
+    const bindings = app.metadata.bindings as {
       type: string;
       name: string;
       text?: string;
@@ -452,75 +273,89 @@ describe("deploy and update", () => {
     const text = (name: string) => bindings.find((b) => b.name === name)?.text;
     expect(text("ACCESS_AUD")).toBe(install.accessAud!);
     expect(text("ACCESS_TEAM_DOMAIN")).toBe(cf.organization!.auth_domain);
-    expect(text("FROCKBOT_ADMIN_EMAILS")).toBe("tim@example.com");
-    expect(text("PUBLIC_ORIGIN")).toBe(
+    expect(text("APP_ORIGIN")).toBe(
       "https://tims-frockbot.tim-oconnell.workers.dev",
     );
-    expect(bindings.find((b) => b.name === "AUTH_DB")).toMatchObject({
-      type: "d1",
-      id: "d1-1",
-    });
-    expect((script.metadata.assets as { jwt: string }).jwt).toBe(
-      "complete-jwt",
+    expect(bindings.some((b) => b.name === "COMPUTER_HOST")).toBe(false);
+
+    // Minted once, shared where the bundle says, and the owner is the admin.
+    expect(Object.keys(app.secrets).sort()).toEqual([
+      "APPLET_BUILD_TOKEN",
+      "CREDENTIAL_KEYRING",
+      "FROCKBOT_ADMIN_EMAILS",
+      "WEB_PUSH_VAPID_KEYS",
+    ]);
+    expect(app.secrets.FROCKBOT_ADMIN_EMAILS).toBe("tim@example.com");
+    expect(
+      cf.scripts.get("tims-frockbot-applet-build")!.secrets.APPLET_BUILD_TOKEN,
+    ).toBe(app.secrets.APPLET_BUILD_TOKEN!);
+    expect(JSON.parse(app.secrets.WEB_PUSH_VAPID_KEYS!).subject).toBe(
+      "https://tims-frockbot.tim-oconnell.workers.dev",
     );
-    expect(script.workersDev).toBe(true);
+    expect(cf.containers.map((c) => c.name)).toEqual([
+      "tims-frockbot-applet-build-appletbuildcontainer",
+    ]);
   });
 
-  test("an update keeps the data: same names, due migrations, secrets never re-minted", async () => {
+  test("an update keeps the data: the same install, the next migrations, secrets never re-minted", async () => {
     const cf = new FakeCloudflareV1();
-    await publishRelease(cf, FIRST);
-    const install = await runAll(cf, "0.48.2", newInstall(cf));
-    const firstSecrets = { ...cf.scripts.get("tims-frockbot")!.secrets };
-    const firstAssets = cf.assetHashes.size;
+    const bundles = new MemoryBucketV1();
+    await publishTestBundleV1(cf, { version: "0.9.3", appMigrations: ["v1"] });
+    const install = await runAll(cf, "0.9.3", newInstall(cf), bundles);
+    const first = { ...cf.scripts.get("tims-frockbot")!.secrets };
 
-    await publishRelease(cf, SECOND);
+    await publishTestBundleV1(cf, {
+      version: "0.9.4",
+      appMigrations: ["v1", "v2"],
+      client: { "index.html": "<!doctype html>", "main.js": "main(2)" },
+    });
     expect(await latestDeployableVersionV1(cf.fetch as typeof fetch)).toBe(
-      "0.49.0",
+      "0.9.4",
     );
-    const before = cf.calls.length;
-    await runAll(cf, "0.49.0", { ...install, version: "0.48.2" });
+    await runAll(cf, "0.9.4", { ...install, version: "0.9.3" }, bundles);
 
-    const script = cf.scripts.get("tims-frockbot")!;
-    expect(script.uploads).toBe(2);
-    expect(script.migrationTag).toBe("v3");
-    expect((script.metadata.migrations as { old_tag: string }).old_tag).toBe(
-      "v2",
-    );
-    expect(script.secrets.CREDENTIAL_KEYRING).toBe(
-      firstSecrets.CREDENTIAL_KEYRING!,
-    );
-    expect(script.secrets.ROUTINE_HOOK_SECRET).toBe(
-      firstSecrets.ROUTINE_HOOK_SECRET!,
-    );
-    expect(script.secrets.MACHINE_TOKEN_SECRET).toMatch(/^[0-9a-f]{64}$/);
-    expect(cf.d1.get("tims-frockbot-auth")!.migrations).toEqual([
-      "0001_init",
-      "0002_more",
-    ]);
-    // Converged rather than stacked: the same two Access applications, the same stores.
-    expect(cf.accessApps).toHaveLength(2);
+    const app = cf.scripts.get("tims-frockbot")!;
+    expect(app.uploads).toBe(2);
+    expect(app.migrationTag).toBe("v2");
+    expect((app.metadata.migrations as { old_tag: string }).old_tag).toBe("v1");
+    expect(app.secrets).toEqual(first);
+    const sent = (app.metadata.bindings as { type: string; name: string }[])
+      .filter((b) => b.type === "secret_text")
+      .map((b) => b.name);
+    expect(sent).toEqual(["FROCKBOT_ADMIN_EMAILS"]);
+    expect(cf.accessApps).toHaveLength(3);
     expect(cf.buckets.size).toBe(2);
-    expect(cf.kv.size).toBe(1);
-    expect(cf.d1.size).toBe(1);
+  });
+
+  test("a first deploy that stopped between Workers converges on retry", async () => {
+    const cf = new FakeCloudflareV1();
+    await publishTestBundleV1(cf, { version: "0.9.3", appMigrations: ["v1"] });
+    // The build service took a token, and the app upload never happened.
+    cf.scripts.set("tims-frockbot-applet-build", {
+      metadata: {},
+      secrets: { APPLET_BUILD_TOKEN: "orphaned" },
+      migrationTag: "v1",
+      workersDev: false,
+      uploads: 1,
+    });
+    cf.namespaces.push({
+      id: "ns-b",
+      script: "tims-frockbot-applet-build",
+      class: "AppletBuildContainer",
+    });
+    await runAll(cf, "0.9.3", newInstall(cf));
+    const token = cf.scripts.get("tims-frockbot")!.secrets.APPLET_BUILD_TOKEN;
+    expect(token).not.toBe("orphaned");
     expect(
-      cf.calls
-        .slice(before)
-        .some((c) => c.startsWith("POST") && c.endsWith("/r2/buckets")),
-    ).toBe(false);
-    // Only the changed client file was uploaded again.
-    expect(cf.assetHashes.size).toBe(firstAssets + 1);
+      cf.scripts.get("tims-frockbot-applet-build")!.secrets.APPLET_BUILD_TOKEN,
+    ).toBe(token!);
   });
 
   test("the first check waits for workers.dev, and fails an install Access isn't guarding", async () => {
     const cf = new FakeCloudflareV1();
-    await publishRelease(cf, FIRST);
-    await runAll(cf, "0.48.2", newInstall(cf));
-    const context = {
-      api: new CloudflareApiV1("token", cf.fetch),
-      manifest: await releaseManifestV1("0.48.2", cf.fetch as typeof fetch),
-      fetcher: cf.fetch as typeof fetch,
-      now: () => new Date(),
-    };
+    await publishTestBundleV1(cf, { version: "0.9.3", appMigrations: ["v1"] });
+    await runAll(cf, "0.9.3", newInstall(cf));
+    const context = await contextFor(cf, "0.9.3");
     const install = {
       ...newInstall(cf),
       accessAud: "x",
@@ -539,20 +374,25 @@ describe("deploy and update", () => {
   test("Jev missing from Workers AI stops the deploy with the fix", async () => {
     const cf = new FakeCloudflareV1();
     cf.aiModels = ["@cf/meta/llama-3.1-8b-instruct"];
-    await publishRelease(cf, FIRST);
-    await expect(runAll(cf, "0.48.2", newInstall(cf))).rejects.toThrow(
+    await publishTestBundleV1(cf, { version: "0.9.3", appMigrations: ["v1"] });
+    await expect(runAll(cf, "0.9.3", newInstall(cf))).rejects.toThrow(
       /Open Workers AI/,
     );
   });
 
-  test("a tampered release file is refused", async () => {
+  test("a module whose staged bytes aren't the manifest's is refused before upload", async () => {
     const cf = new FakeCloudflareV1();
-    await publishRelease(cf, FIRST);
-    cf.releases.get("0.48.2")!["app-0.48.2.js"] = encode(
-      "export default { evil: true };",
+    await publishTestBundleV1(cf, { version: "0.9.3", appMigrations: ["v1"] });
+    const bundles = new MemoryBucketV1();
+    const context = await contextFor(cf, "0.9.3", bundles);
+    let install = await STEP_RUNNERS_V1.storage(context, newInstall(cf));
+    install = await STEP_RUNNERS_V1["sign-in"](context, install);
+    bundles.objects.set(
+      "bundles/0.9.3/files/workers/app/index.js",
+      encode("export default { evil: true };"),
     );
-    await expect(runAll(cf, "0.48.2", newInstall(cf))).rejects.toThrow(
-      /doesn't match its manifest/,
+    await expect(STEP_RUNNERS_V1.release(context, install)).rejects.toThrow(
+      /hashes to/,
     );
     expect(cf.scripts.has("tims-frockbot")).toBe(false);
   });

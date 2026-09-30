@@ -1,5 +1,10 @@
 import { afterEach, beforeAll, describe, expect, mock, test } from "bun:test";
-import { FakeCloudflareV1 } from "./fake-cloudflare.test-support";
+import {
+  FakeCloudflareV1,
+  MemoryBucketV1,
+  bufferedDigestSinkV1,
+  publishTestBundleV1,
+} from "./fake-cloudflare.test-support";
 import { CLOUDFLARE_REVOKE_URL_V1, CLOUDFLARE_TOKEN_URL_V1 } from "./oauth";
 
 // The object's base class is the runtime's; a stand-in holding `ctx` and `env`
@@ -12,6 +17,14 @@ mock.module("cloudflare:workers", () => ({
     ) {}
   },
 }));
+
+// Workers' streaming digest, which staging takes the archive's sha256 with.
+(crypto as unknown as { DigestStream: unknown }).DigestStream = class {
+  constructor() {
+    const sink = bufferedDigestSinkV1();
+    return Object.assign(sink.writable, { digest: sink.digest });
+  }
+};
 
 let DeployAccount: typeof import("./account-object").DeployAccount;
 beforeAll(async () => {
@@ -86,6 +99,7 @@ function world() {
   const storage = new MemoryStorage();
   const object = new DeployAccount({ storage } as never, {
     DEPLOY_ACCOUNTS: {} as never,
+    DEPLOY_BUNDLES: new MemoryBucketV1() as unknown as R2Bucket,
     CLOUDFLARE_OAUTH_CLIENT_ID: "id",
     CLOUDFLARE_OAUTH_CLIENT_SECRET: "secret",
   });
@@ -98,36 +112,7 @@ function world() {
 }
 
 async function publishMinimalRelease(cf: FakeCloudflareV1) {
-  const js = new TextEncoder().encode("export default {};");
-  const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", js))]
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-  await cf.publish(
-    "1.0.0",
-    { "app.js": js },
-    {
-      schemaVersion: 1,
-      version: "1.0.0",
-      resources: { r2Buckets: ["files"] },
-      workers: [
-        {
-          role: "app",
-          mainModule: "index.js",
-          modules: [
-            { name: "index.js", type: "esm", asset: "app.js", sha256: digest },
-          ],
-          compatibilityDate: "2026-08-27",
-          bindings: [
-            { type: "r2_bucket", name: "FILES", bucket: "files" },
-            { type: "access_aud", name: "ACCESS_AUD" },
-            { type: "access_team_domain", name: "ACCESS_TEAM_DOMAIN" },
-          ],
-          migrations: [{ tag: "v1", newSqliteClasses: ["BotState"] }],
-          secrets: [{ name: "ROUTINE_HOOK_SECRET", shape: "hex" }],
-        },
-      ],
-    },
-  );
+  await publishTestBundleV1(cf, { version: "1.0.0", appMigrations: ["v1"] });
 }
 
 async function runAlarms(

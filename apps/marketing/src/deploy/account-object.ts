@@ -26,7 +26,8 @@ import {
   isTransientV1,
   type InstallRecordV1,
 } from "./deployer";
-import { releaseManifestV1, sha256HexV1 } from "./release";
+import { sha256HexV1 } from "../../../cloudflare/deployment-config/bundle.ts";
+import { releaseManifestV1 } from "./release";
 import {
   checksPassV1,
   initialStepsV1,
@@ -485,12 +486,17 @@ export class DeployAccount extends DurableObject<DeployEnvV1> {
           "This deploy has no Cloudflare sign-in to continue with",
         );
       }
+      if (!this.env.DEPLOY_BUNDLES) {
+        throw new Error("This page has nowhere to stage a release");
+      }
       const token = await this.token(job.grantId);
       const manifest = await releaseManifestV1(job.version);
       const updated = await STEP_RUNNERS_V1[step.id](
         {
           api: new CloudflareApiV1(token),
+          token,
           manifest,
+          bundles: this.env.DEPLOY_BUNDLES,
           fetcher: fetch,
           now: () => new Date(),
         },

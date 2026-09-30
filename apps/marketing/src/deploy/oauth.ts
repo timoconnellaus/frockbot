@@ -38,6 +38,9 @@ export const DEPLOY_SCOPES_V1 = [
   "access-app.write",
   "access-policy.write",
   "teams.read",
+  // The Plugin build service runs in a container the bundle's deployer
+  // creates and rolls to each release's image.
+  "containers.write",
 ] as const;
 
 export interface OAuthClientV1 {

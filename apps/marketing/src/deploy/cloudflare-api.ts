@@ -282,69 +282,6 @@ export class CloudflareApiV1 {
     return found.buckets ?? [];
   }
 
-  async putR2Object(
-    accountId: string,
-    bucket: string,
-    key: string,
-    body: Uint8Array<ArrayBuffer>,
-    contentType = "application/octet-stream",
-  ): Promise<void> {
-    await this.call(
-      "PUT",
-      `/accounts/${accountId}/r2/buckets/${bucket}/objects/${key.split("/").map(encodeURIComponent).join("/")}`,
-      undefined,
-      { headers: { "content-type": contentType }, raw: body },
-    );
-  }
-
-  async ensureKvNamespace(accountId: string, title: string): Promise<string> {
-    const found = (
-      await this.all<{ id: string; title: string }>(
-        `/accounts/${accountId}/storage/kv/namespaces`,
-      )
-    ).find((ns) => ns.title === title);
-    if (found) return found.id;
-    return (
-      await this.result<{ id: string }>(
-        "POST",
-        `/accounts/${accountId}/storage/kv/namespaces`,
-        {
-          title,
-        },
-      )
-    ).id;
-  }
-
-  async ensureD1Database(accountId: string, name: string): Promise<string> {
-    const found = (
-      await this.all<{ uuid: string; name: string }>(
-        `/accounts/${accountId}/d1/database?name=${encodeURIComponent(name)}`,
-      )
-    ).find((db) => db.name === name);
-    if (found) return found.uuid;
-    return (
-      await this.result<{ uuid: string }>(
-        "POST",
-        `/accounts/${accountId}/d1/database`,
-        { name },
-      )
-    ).uuid;
-  }
-
-  async d1Query<T = Record<string, unknown>>(
-    accountId: string,
-    databaseId: string,
-    sql: string,
-    params: readonly unknown[] = [],
-  ): Promise<T[]> {
-    const results = await this.result<{ results: T[] }[]>(
-      "POST",
-      `/accounts/${accountId}/d1/database/${databaseId}/query`,
-      { sql, params },
-    );
-    return results.flatMap((r) => r.results ?? []);
-  }
-
   async ensureVectorizeIndex(
     accountId: string,
     name: string,
@@ -360,24 +297,6 @@ export class CloudflareApiV1 {
         config,
       });
     }
-  }
-
-  async ensureQueue(accountId: string, name: string): Promise<string> {
-    const found = (
-      await this.all<{ queue_id: string; queue_name: string }>(
-        `/accounts/${accountId}/queues`,
-      )
-    ).find((q) => q.queue_name === name);
-    if (found) return found.queue_id;
-    return (
-      await this.result<{ queue_id: string }>(
-        "POST",
-        `/accounts/${accountId}/queues`,
-        {
-          queue_name: name,
-        },
-      )
-    ).queue_id;
   }
 
   async script(
@@ -397,58 +316,6 @@ export class CloudflareApiV1 {
       `/accounts/${accountId}/workers/scripts/${name}/secrets`,
     );
     return (found ?? []).map((s) => s.name);
-  }
-
-  async assetsUploadSession(
-    accountId: string,
-    scriptName: string,
-    manifest: Record<string, { hash: string; size: number }>,
-  ): Promise<{ jwt: string; buckets: string[][] }> {
-    const session = await this.result<{ jwt: string; buckets?: string[][] }>(
-      "POST",
-      `/accounts/${accountId}/workers/scripts/${scriptName}/assets-upload-session`,
-      { manifest },
-    );
-    return { jwt: session.jwt, buckets: session.buckets ?? [] };
-  }
-
-  /**
-   * One bucket of asset files, authorized by the upload session's token rather
-   * than the person's. The last bucket's answer carries the completion token.
-   */
-  async uploadAssetBucket(
-    accountId: string,
-    uploadJwt: string,
-    files: readonly { hash: string; base64: string; contentType: string }[],
-  ): Promise<string | undefined> {
-    const form = new FormData();
-    for (const file of files) {
-      form.append(
-        file.hash,
-        new File([file.base64], file.hash, { type: file.contentType }),
-      );
-    }
-    const response = await this.fetcher(
-      `${CLOUDFLARE_API_V1}/accounts/${accountId}/workers/assets/upload?base64=true`,
-      {
-        method: "POST",
-        headers: { authorization: `Bearer ${uploadJwt}` },
-        body: form,
-      },
-    );
-    const envelope = (await response.json().catch(() => null)) as EnvelopeV1<{
-      jwt?: string;
-    }> | null;
-    if (!response.ok || !envelope?.success) {
-      throw new CloudflareApiErrorV1(
-        response.status,
-        envelope?.errors?.map((e) => e.code) ?? [],
-        envelope?.errors?.map((e) => e.message).join("; ") ||
-          "Asset upload failed",
-        "/workers/assets/upload",
-      );
-    }
-    return envelope.result?.jwt;
   }
 
   async uploadScript(
@@ -476,16 +343,6 @@ export class CloudflareApiV1 {
       {
         raw: form,
       },
-    );
-  }
-
-  async enableWorkersDev(accountId: string, name: string): Promise<void> {
-    await this.call(
-      "POST",
-      `/accounts/${accountId}/workers/scripts/${name}/subdomain`,
-      { enabled: true, previews_enabled: false },
-      // The date wrangler pins for this route's current request shape.
-      { headers: { "cloudflare-workers-script-api-date": "2025-08-01" } },
     );
   }
 

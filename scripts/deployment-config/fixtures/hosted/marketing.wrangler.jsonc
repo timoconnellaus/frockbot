@@ -29,6 +29,12 @@
       },
     ],
   },
+  "r2_buckets": [
+    {
+      "binding": "DEPLOY_BUNDLES",
+      "bucket_name": "frockbot-deploy-bundles",
+    },
+  ],
   "migrations": [
     {
       "tag": "v1",

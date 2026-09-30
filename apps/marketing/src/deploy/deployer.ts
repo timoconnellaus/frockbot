@@ -1,31 +1,46 @@
 /**
  * The deploy's steps, run against the person's account.
  *
+ * The release itself goes in through the deploy bundle's own deployer,
+ * `deployBundleV1` ([docs/deploy-bundles.md](../../../../docs/deploy-bundles.md)),
+ * the same one `bun run setup` runs, so an install made here and one made
+ * from the repository are the same install. What is this page's own is around
+ * it: staging the release, Access, the secrets a first install mints, and the
+ * checks.
+ *
  * Every step converges: it finds what a previous run made and keeps it, so a
  * step retried after an eviction, a failure or a closed page does the same
  * thing twice without making anything twice. An update is the same steps over
- * the same install record, which is how the install keeps its data: the same
- * names, the Durable Object migrations that are still due, and the secrets it
- * was minted on its first deploy.
+ * the same install record, which is how the install keeps its data.
  */
-import { CloudflareApiErrorV1, type CloudflareApiV1 } from "./cloudflare-api";
-import type { ReleaseBundleManifestV1 } from "./manifest";
 import {
-  MODULE_CONTENT_TYPES_V1,
-  appWorkerV1,
-  assetContentTypeV1,
+  installNameOfV1,
+  installWorkersV1,
+  type BundleWorkerKeyV1,
+  type DeployBundleManifestV1,
+  type InstallV1,
+} from "../../../cloudflare/deployment-config/bundle.ts";
+import {
+  createCloudflareApiV1,
+  deployBundleV1,
+} from "../../../cloudflare/deployment-config/deploy.ts";
+import { generateVapidKeysV1 } from "../../../cloudflare/src/web-push.ts";
+import { CloudflareApiErrorV1, type CloudflareApiV1 } from "./cloudflare-api";
+import {
+  credentialKeyringV1,
   installHostnameV1,
   installOriginV1,
-  mintSecretV1,
-  resourceNameV1,
-  scriptMetadataV1,
-  secretsToMintV1,
+  randomHexV1,
   suggestedTeamNameV1,
   type DeployStepIdV1,
 } from "./plan";
-import { releaseFileV1, sha256HexV1 } from "./release";
+import {
+  stageBundleV1,
+  stagedFilesV1,
+  type DigestSinkV1,
+  type StagingBucketV1,
+} from "./release";
 import { randomSuffixV1 } from "./oauth";
-import { readZipV1, type ZipEntryV1 } from "./zip";
 
 /** Jev's model on Workers AI, which the install's `AI` binding calls. */
 export const JEV_MODEL_V1 = "typesafe/jev";
@@ -43,15 +58,18 @@ export interface InstallRecordV1 {
   readonly updatedAt: string;
   readonly accessTeamDomain?: string;
   readonly accessAud?: string;
-  readonly kvNamespaceIds?: Readonly<Record<string, string>>;
-  readonly d1DatabaseIds?: Readonly<Record<string, string>>;
 }
 
 export interface DeployContextV1 {
   readonly api: CloudflareApiV1;
-  readonly manifest: ReleaseBundleManifestV1;
+  /** The person's token, for the bundle's deployer. */
+  readonly token: string;
+  readonly manifest: DeployBundleManifestV1;
+  /** frockbot.com's own bucket, where releases are staged. */
+  readonly bundles: StagingBucketV1;
   readonly fetcher: typeof fetch;
   readonly now: () => Date;
+  readonly digestSink?: () => DigestSinkV1;
 }
 
 /** Thrown by a step that isn't finished yet and should be tried again shortly. */
@@ -62,99 +80,43 @@ export type StepRunnerV1 = (
   install: InstallRecordV1,
 ) => Promise<InstallRecordV1>;
 
+/**
+ * The release staged, and the install's buckets and search index. The bundle's
+ * deployer would create these too; they are made here so the page can say so,
+ * and it finds them present.
+ */
 async function storage(
   context: DeployContextV1,
   install: InstallRecordV1,
 ): Promise<InstallRecordV1> {
   const { api, manifest } = context;
-  const { accountId, name } = install;
-  const resources = manifest.resources;
-  for (const role of resources.r2Buckets ?? []) {
-    await api.ensureR2Bucket(accountId, resourceNameV1(name, role));
+  await stageBundleV1(context.bundles, manifest, {
+    fetcher: context.fetcher,
+    ...(context.digestSink ? { digestSink: context.digestSink } : {}),
+  });
+  for (const template of manifest.resources.r2Buckets) {
+    await api.ensureR2Bucket(
+      install.accountId,
+      installNameOfV1(template, install.name),
+    );
   }
-  for (const index of resources.vectorizeIndexes ?? []) {
+  for (const index of manifest.resources.vectorizeIndexes) {
     await api.ensureVectorizeIndex(
-      accountId,
-      resourceNameV1(name, index.role),
-      {
-        dimensions: index.dimensions,
-        metric: index.metric,
-      },
+      install.accountId,
+      installNameOfV1(index.name, install.name),
+      { dimensions: index.dimensions, metric: index.metric },
     );
   }
-  for (const role of resources.queues ?? []) {
-    await api.ensureQueue(accountId, resourceNameV1(name, role));
-  }
-  const kvNamespaceIds: Record<string, string> = { ...install.kvNamespaceIds };
-  for (const role of resources.kvNamespaces ?? []) {
-    kvNamespaceIds[role] = await api.ensureKvNamespace(
-      accountId,
-      resourceNameV1(name, role),
-    );
-  }
-  const d1DatabaseIds: Record<string, string> = { ...install.d1DatabaseIds };
-  for (const database of resources.d1Databases ?? []) {
-    const id = await api.ensureD1Database(
-      accountId,
-      resourceNameV1(name, database.role),
-    );
-    d1DatabaseIds[database.role] = id;
-    await applyD1Migrations(context, accountId, id, database.migrations);
-  }
-  return { ...install, kvNamespaceIds, d1DatabaseIds };
-}
-
-/**
- * The release's D1 migrations, each applied once, recorded in the same
- * `d1_migrations` table wrangler keeps, so an install moved to the repository
- * path later sees the same history.
- */
-async function applyD1Migrations(
-  context: DeployContextV1,
-  accountId: string,
-  databaseId: string,
-  migrations: NonNullable<
-    ReleaseBundleManifestV1["resources"]["d1Databases"]
-  >[number]["migrations"],
-): Promise<void> {
-  if (migrations.length === 0) return;
-  const { api } = context;
-  await api.d1Query(
-    accountId,
-    databaseId,
-    "CREATE TABLE IF NOT EXISTS d1_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)",
-  );
-  const applied = new Set(
-    (
-      await api.d1Query<{ name: string }>(
-        accountId,
-        databaseId,
-        "SELECT name FROM d1_migrations",
-      )
-    ).map((row) => row.name),
-  );
-  for (const migration of migrations) {
-    if (applied.has(migration.name)) continue;
-    const sql = new TextDecoder().decode(
-      await releaseFileV1(context.manifest.version, migration, context.fetcher),
-    );
-    // One request, so the migration and its record land together: two would
-    // leave a window where a retry replays a migration already applied.
-    const name = migration.name.replaceAll("'", "''");
-    await api.d1Query(
-      accountId,
-      databaseId,
-      `${sql.trim().replace(/;?$/, ";")}\nINSERT INTO d1_migrations (name) VALUES ('${name}');`,
-    );
-  }
+  return install;
 }
 
 /**
  * The Access organization, created when Zero Trust is on but has none, and
- * the install's two applications (ADR 0028): Allow on the hostname for the
- * owner alone, which covers the document, the client and the native sign-in
- * flow; Bypass on `/api`, which reaches the Worker, which authenticates every
- * one of those requests itself.
+ * the install's applications (ADR 0028): Allow on the hostname for the owner
+ * alone, which covers the document, the client and the native sign-in flow;
+ * Bypass on `/api`, which reaches the Worker, which authenticates every one
+ * of those requests itself; and Bypass on the discovery file the apps read
+ * before anyone has signed in.
  */
 async function signIn(
   context: DeployContextV1,
@@ -202,6 +164,15 @@ async function signIn(
     },
     existing,
   );
+  await api.putAccessApplication(
+    accountId,
+    {
+      name: `FrockBot ${install.name} discovery`,
+      domain: `${hostname}/.well-known/frockbot.json`,
+      decision: "bypass",
+    },
+    existing,
+  );
   return {
     ...install,
     accessTeamDomain: organization.auth_domain,
@@ -209,123 +180,95 @@ async function signIn(
   };
 }
 
-/** The web client as static assets: only the files Cloudflare doesn't already hold are sent. */
-async function uploadAssets(
+/**
+ * The secrets this deploy sets, by name.
+ *
+ * A minted secret is established once the app Worker holds it: the app is
+ * what encrypts and signs stored state with it, and it is uploaded last. Until
+ * then a fresh value is minted and set on every Worker that shares it, which
+ * is safe because nothing durable depends on it yet — and is how a first
+ * deploy that stopped between two Workers converges. Once established it is
+ * never sent again: the upload keeps it. The owner's email is set every time,
+ * as the one admin.
+ */
+async function secretsFor(
   context: DeployContextV1,
   install: InstallRecordV1,
-  archive: Uint8Array<ArrayBuffer>,
-): Promise<string> {
-  const { api } = context;
-  const entries = await readZipV1(archive);
-  const byHash = new Map<string, ZipEntryV1>();
-  const manifest: Record<string, { hash: string; size: number }> = {};
-  for (const entry of entries) {
-    const bytes = await entry.read();
-    const extension = new TextEncoder().encode(
-      entry.path.split(".").pop() ?? "",
-    );
-    const keyed = new Uint8Array(bytes.length + extension.length);
-    keyed.set(bytes);
-    keyed.set(extension, bytes.length);
-    // Any stable 32-hex content key does; this is the content and its
-    // extension, so the same bytes served as another type are another asset.
-    const hash = (await sha256HexV1(keyed)).slice(0, 32);
-    manifest[`/${entry.path}`] = { hash, size: bytes.length };
-    byHash.set(hash, entry);
-  }
-  const session = await api.assetsUploadSession(
-    install.accountId,
-    install.name,
-    manifest,
+  bundleInstall: Omit<InstallV1, "secrets">,
+): Promise<Record<string, string>> {
+  const { api, manifest } = context;
+  const app = installNameOfV1(manifest.workers.app.name, install.name);
+  const appHolds = new Set(
+    (await api.script(install.accountId, app))
+      ? await api.scriptSecretNames(install.accountId, app)
+      : [],
   );
-  let completion = session.jwt;
-  // Only the files Cloudflare doesn't already hold, one bucket at a time.
-  for (const bucket of session.buckets) {
-    const files = [];
-    for (const hash of bucket) {
-      const entry = byHash.get(hash)!;
-      files.push({
-        hash,
-        base64: base64V1(await entry.read()),
-        contentType: assetContentTypeV1(entry.path),
-      });
+  const origin = installOriginV1(install.name, install.workersSubdomain);
+  const secrets: Record<string, string> = {
+    FROCKBOT_ADMIN_EMAILS: install.ownerEmail,
+  };
+  const workers: readonly BundleWorkerKeyV1[] = installWorkersV1({
+    ...bundleInstall,
+    secrets: {},
+  });
+  for (const key of workers) {
+    for (const secret of manifest.workers[key].secrets) {
+      if (!secret.mint || secret.name in secrets) continue;
+      // A secret for a Worker this install doesn't run is left to whoever
+      // deploys that Worker, who then sets it on both sides.
+      if (secret.requiredWith && !workers.includes(secret.requiredWith)) {
+        continue;
+      }
+      if (appHolds.has(secret.name)) continue;
+      secrets[secret.name] =
+        secret.mint === "keyring"
+          ? credentialKeyringV1(context.now())
+          : secret.mint === "vapid"
+            ? JSON.stringify(await generateVapidKeysV1(origin))
+            : randomHexV1();
     }
-    completion =
-      (await api.uploadAssetBucket(install.accountId, session.jwt, files)) ??
-      completion;
   }
-  return completion;
+  return secrets;
 }
 
-function base64V1(bytes: Uint8Array): string {
-  let binary = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  }
-  return btoa(binary);
-}
-
+/**
+ * The release, through the bundle's deployer, on `workers.dev`: the install
+ * names no hostname, so the app answers at its own address, which Access
+ * already stands in front of.
+ */
 async function release(
   context: DeployContextV1,
   install: InstallRecordV1,
 ): Promise<InstallRecordV1> {
-  const { api, manifest, fetcher } = context;
   if (!install.accessTeamDomain || !install.accessAud) {
     throw new Error(
       "Sign-in wasn't set up before the release, so it wasn't deployed",
     );
   }
-  const worker = appWorkerV1(manifest);
-  const script = await api.script(install.accountId, install.name);
-  const existingSecrets = script
-    ? await api.scriptSecretNames(install.accountId, install.name)
-    : [];
-  const mintedSecrets: Record<string, string> = {};
-  for (const secret of secretsToMintV1(worker, existingSecrets)) {
-    mintedSecrets[secret.name] = mintSecretV1(secret.shape, context.now());
-  }
-  const modules = [];
-  for (const module of worker.modules) {
-    modules.push({
-      name: module.name,
-      contentType: MODULE_CONTENT_TYPES_V1[module.type],
-      body: await releaseFileV1(manifest.version, module, fetcher),
-    });
-  }
-  const assetsJwt = worker.assets
-    ? await uploadAssets(
-        context,
-        install,
-        await releaseFileV1(manifest.version, worker.assets, fetcher),
-      )
-    : undefined;
-  for (const object of worker.r2Objects ?? []) {
-    await api.putR2Object(
-      install.accountId,
-      resourceNameV1(install.name, object.bucket),
-      object.key,
-      await releaseFileV1(manifest.version, object, fetcher),
-      object.contentType,
-    );
-  }
-  await api.uploadScript(install.accountId, install.name, {
-    metadata: scriptMetadataV1(
-      worker,
-      {
-        installName: install.name,
-        origin: installOriginV1(install.name, install.workersSubdomain),
-        ownerEmail: install.ownerEmail,
-        accessTeamDomain: install.accessTeamDomain,
-        accessAud: install.accessAud,
-        kvNamespaceIds: install.kvNamespaceIds ?? {},
-        d1DatabaseIds: install.d1DatabaseIds ?? {},
-      },
-      { currentMigrationTag: script?.migration_tag, mintedSecrets, assetsJwt },
-    ),
-    modules,
+  const bundleInstall = {
+    accountId: install.accountId,
+    name: install.name,
+    hostnames: [],
+    computerHost: false,
+    // Only the names the bundle asks for are used.
+    vars: {
+      ACCESS_TEAM_DOMAIN: install.accessTeamDomain,
+      ACCESS_AUD: install.accessAud,
+      APP_ORIGIN: installOriginV1(install.name, install.workersSubdomain),
+    },
+  };
+  await deployBundleV1({
+    api: createCloudflareApiV1({
+      token: context.token,
+      fetch: context.fetcher,
+    }),
+    manifest: context.manifest,
+    files: stagedFilesV1(context.bundles, context.manifest.version),
+    install: {
+      ...bundleInstall,
+      secrets: await secretsFor(context, install, bundleInstall),
+    },
   });
-  // Only now, with Access in front of it, is the install reachable at all.
-  await api.enableWorkersDev(install.accountId, install.name);
   return install;
 }
 

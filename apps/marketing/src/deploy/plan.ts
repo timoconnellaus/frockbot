@@ -5,12 +5,6 @@
  * metadata and which migrations are due: functions over values, so the tests
  * can check every judgement without a Cloudflare account.
  */
-import type {
-  BundleBindingV1,
-  BundleMigrationV1,
-  BundleWorkerV1,
-  ReleaseBundleManifestV1,
-} from "./manifest";
 
 /**
  * Short enough that `<name>-<role>` fits every resource's name limit (R2's 63
@@ -70,11 +64,6 @@ export function installOriginV1(
   workersSubdomain: string,
 ): string {
   return `https://${installHostnameV1(name, workersSubdomain)}`;
-}
-
-/** The name the install gives a resource the release declares by role. */
-export function resourceNameV1(installName: string, role: string): string {
-  return `${installName}-${role}`;
 }
 
 /** A Zero Trust team name for an account that has never had one. */
@@ -253,9 +242,9 @@ export function stepTitleV1(id: DeployStepIdV1, version: string): string {
 export function stepWaitingTextV1(id: DeployStepIdV1, email: string): string {
   switch (id) {
     case "storage":
-      return "Creating the database, file storage and search index.";
+      return "Fetching the release, and creating file storage and the search index.";
     case "release":
-      return "Deploying the app and its web client.";
+      return "Deploying the app, its web client and the Plugin build service.";
     case "sign-in":
       return `Creating the Cloudflare Access application for ${email}.`;
     case "workers-ai":
@@ -268,9 +257,9 @@ export function stepWaitingTextV1(id: DeployStepIdV1, email: string): string {
 export function stepDoneTextV1(id: DeployStepIdV1, email: string): string {
   switch (id) {
     case "storage":
-      return "Created the database, file storage and search index.";
+      return "Fetched the release, and created file storage and the search index.";
     case "release":
-      return "Deployed the app and its web client.";
+      return "Deployed the app, its web client and the Plugin build service.";
     case "sign-in":
       return `Only ${email} can sign in.`;
     case "workers-ai":
@@ -295,245 +284,16 @@ export function progressPercentV1(steps: readonly DeployStepV1[]): number {
   return Math.round((units / steps.length) * 100);
 }
 
-// --- The Worker upload ------------------------------------------------------
+// --- Releases and secrets ---------------------------------------------------
 
-/** What the deployer created for this install, that bindings resolve to. */
-export interface ResolvedResourcesV1 {
-  readonly installName: string;
-  readonly origin: string;
-  readonly ownerEmail: string;
-  readonly accessTeamDomain: string;
-  readonly accessAud: string;
-  readonly kvNamespaceIds: Readonly<Record<string, string>>;
-  readonly d1DatabaseIds: Readonly<Record<string, string>>;
-}
-
-function missing(kind: string, role: string): never {
-  throw new Error(
-    `The deploy did not create the ${kind} "${role}" this release binds`,
-  );
-}
-
-/** One binding as the Workers script upload API spells it. */
-export function uploadBindingV1(
-  binding: BundleBindingV1,
-  resources: ResolvedResourcesV1,
-): Record<string, unknown> {
-  const named = (role: string) => resourceNameV1(resources.installName, role);
-  switch (binding.type) {
-    case "ai":
-    case "worker_loader":
-    case "assets":
-    case "version_metadata":
-      return { type: binding.type, name: binding.name };
-    case "durable_object_namespace":
-      return {
-        type: binding.type,
-        name: binding.name,
-        class_name: binding.className,
-      };
-    case "r2_bucket":
-      return {
-        type: binding.type,
-        name: binding.name,
-        bucket_name: named(binding.bucket),
-      };
-    case "kv_namespace":
-      return {
-        type: binding.type,
-        name: binding.name,
-        namespace_id:
-          resources.kvNamespaceIds[binding.namespace] ??
-          missing("KV namespace", binding.namespace),
-      };
-    case "d1":
-      return {
-        type: binding.type,
-        name: binding.name,
-        id:
-          resources.d1DatabaseIds[binding.database] ??
-          missing("database", binding.database),
-      };
-    case "vectorize":
-      return {
-        type: binding.type,
-        name: binding.name,
-        index_name: named(binding.index),
-      };
-    case "queue":
-      return {
-        type: binding.type,
-        name: binding.name,
-        queue_name: named(binding.queue),
-      };
-    case "analytics_engine":
-      return {
-        type: binding.type,
-        name: binding.name,
-        dataset: named(binding.dataset),
-      };
-    case "plain_text":
-      return { type: binding.type, name: binding.name, text: binding.text };
-    case "install_origin":
-      return { type: "plain_text", name: binding.name, text: resources.origin };
-    case "access_team_domain":
-      return {
-        type: "plain_text",
-        name: binding.name,
-        text: resources.accessTeamDomain,
-      };
-    case "access_aud":
-      return {
-        type: "plain_text",
-        name: binding.name,
-        text: resources.accessAud,
-      };
-    case "owner_email":
-      return {
-        type: "plain_text",
-        name: binding.name,
-        text: resources.ownerEmail,
-      };
+/** `a` is newer than `b`, by semantic version. */
+export function isNewerVersionV1(a: string, b: string): boolean {
+  const parse = (v: string) => v.split(".").map((n) => Number.parseInt(n, 10));
+  const [x, y] = [parse(a), parse(b)];
+  for (let i = 0; i < 3; i += 1) {
+    if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) > (y[i] ?? 0);
   }
-}
-
-/**
- * The Durable Object migrations still due, as the upload API takes them.
- *
- * Only the ones after the tag the Worker already carries: replaying an applied
- * migration is refused, and skipping one is a class with no storage. A tag the
- * release no longer lists means the install is on a history this release does
- * not continue, and deploying over it could lose Durable Object data, so it
- * stops rather than guesses.
- */
-export function dueMigrationsV1(
-  migrations: readonly BundleMigrationV1[],
-  currentTag: string | undefined,
-): Record<string, unknown> | undefined {
-  let start = 0;
-  if (currentTag) {
-    const index = migrations.findIndex((m) => m.tag === currentTag);
-    if (index < 0) {
-      throw new Error(
-        `This install's Durable Objects are at migration ${currentTag}, which this release doesn't continue from. Updating could lose data, so nothing was changed.`,
-      );
-    }
-    start = index + 1;
-  }
-  const due = migrations.slice(start);
-  if (due.length === 0) return undefined;
-  return {
-    ...(currentTag ? { old_tag: currentTag } : {}),
-    new_tag: due[due.length - 1]!.tag,
-    steps: due.map((m) => ({
-      ...(m.newSqliteClasses?.length
-        ? { new_sqlite_classes: m.newSqliteClasses }
-        : {}),
-      ...(m.deletedClasses?.length
-        ? { deleted_classes: m.deletedClasses }
-        : {}),
-      ...(m.renamedClasses?.length
-        ? { renamed_classes: m.renamedClasses }
-        : {}),
-    })),
-  };
-}
-
-/** The `metadata` part of the script upload. */
-export function scriptMetadataV1(
-  worker: BundleWorkerV1,
-  resources: ResolvedResourcesV1,
-  options: {
-    readonly currentMigrationTag: string | undefined;
-    readonly mintedSecrets: Readonly<Record<string, string>>;
-    readonly assetsJwt: string | undefined;
-  },
-): Record<string, unknown> {
-  const bindings: Record<string, unknown>[] = worker.bindings.map((b) =>
-    uploadBindingV1(b, resources),
-  );
-  for (const [name, text] of Object.entries(options.mintedSecrets)) {
-    bindings.push({ type: "secret_text", name, text });
-  }
-  const migrations = dueMigrationsV1(
-    worker.migrations,
-    options.currentMigrationTag,
-  );
-  return {
-    main_module: worker.mainModule,
-    compatibility_date: worker.compatibilityDate,
-    compatibility_flags: worker.compatibilityFlags,
-    bindings,
-    // The secrets minted on the first deploy stay; they sign and encrypt what
-    // the install has stored, and nobody but the Worker ever reads them back.
-    keep_bindings: ["secret_text"],
-    observability: { enabled: true },
-    ...(migrations ? { migrations } : {}),
-    ...(worker.assets && options.assetsJwt
-      ? {
-          assets: {
-            jwt: options.assetsJwt,
-            config: {
-              ...(worker.assets.htmlHandling
-                ? { html_handling: worker.assets.htmlHandling }
-                : {}),
-              ...(worker.assets.notFoundHandling
-                ? { not_found_handling: worker.assets.notFoundHandling }
-                : {}),
-              ...(worker.assets.runWorkerFirst !== undefined
-                ? { run_worker_first: worker.assets.runWorkerFirst }
-                : {}),
-            },
-          },
-        }
-      : {}),
-  };
-}
-
-export const MODULE_CONTENT_TYPES_V1 = {
-  esm: "application/javascript+module",
-  commonjs: "application/javascript",
-  wasm: "application/wasm",
-  text: "text/plain",
-  data: "application/octet-stream",
-} as const;
-
-const ASSET_TYPES: Readonly<Record<string, string>> = {
-  html: "text/html",
-  js: "application/javascript",
-  mjs: "application/javascript",
-  css: "text/css",
-  json: "application/json",
-  wasm: "application/wasm",
-  png: "image/png",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  gif: "image/gif",
-  webp: "image/webp",
-  svg: "image/svg+xml",
-  ico: "image/x-icon",
-  woff: "font/woff",
-  woff2: "font/woff2",
-  ttf: "font/ttf",
-  otf: "font/otf",
-  txt: "text/plain",
-  map: "application/json",
-  riv: "application/octet-stream",
-  bin: "application/octet-stream",
-  frag: "text/plain",
-};
-
-export function assetContentTypeV1(path: string): string {
-  const extension = path.split(".").pop()?.toLowerCase() ?? "";
-  return ASSET_TYPES[extension] ?? "application/octet-stream";
-}
-
-/** Secrets the release wants that this Worker doesn't hold yet. */
-export function secretsToMintV1(
-  worker: BundleWorkerV1,
-  existing: readonly string[],
-): BundleWorkerV1["secrets"] {
-  return worker.secrets.filter((secret) => !existing.includes(secret.name));
+  return false;
 }
 
 export function randomHexV1(
@@ -559,14 +319,4 @@ export function credentialKeyringV1(
     currentKeyId: keyId,
     keys: { [keyId]: key },
   });
-}
-
-export function mintSecretV1(shape: "hex" | "keyring", now: Date): string {
-  return shape === "keyring" ? credentialKeyringV1(now) : randomHexV1();
-}
-
-export function appWorkerV1(manifest: ReleaseBundleManifestV1): BundleWorkerV1 {
-  const worker = manifest.workers.find((w) => w.role === "app");
-  if (!worker) throw new Error("This release has no app Worker");
-  return worker;
 }

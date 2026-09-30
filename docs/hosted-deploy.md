@@ -3,7 +3,10 @@
 The hosted way to self-host: someone signs in with Cloudflare, picks a name,
 and `/deploy` installs a pinned FrockBot release into the account they signed
 in with, then updates it in place when a newer release is out. Nothing is
-cloned or built on their machine. The repository path, `bun run setup`, stays
+cloned or built on their machine: the release is its
+[deploy bundle](deploy-bundles.md), installed by the same deployer,
+`deployBundleV1`, that `bun run setup` runs, so an install made here and one
+made from the repository are the same install. The repository path, `bun run setup`, stays
 for a custom domain or changed code ([ADR 0028](adr/0028-open-deployment.md)).
 
 The code is `apps/marketing/src/deploy/`, served by the marketing Worker under
@@ -36,21 +39,32 @@ The code is `apps/marketing/src/deploy/`, served by the marketing Worker under
    closing the page, an eviction or a failure leaves the deploy resumable.
    "Try again" picks up at the step that stopped. Every step converges, so a
    repeat makes nothing twice.
-   1. **Storage.** The R2 buckets, KV namespaces, queues and Vectorize
-      indexes, plus the D1 databases with their migrations. Each migration
-      and its row in `d1_migrations` (the table wrangler keeps) go in one
-      request, so a retry never replays one.
+   1. **Storage.** The release's bundle is staged in frockbot.com's own R2
+      (`DEPLOY_BUNDLES`), once per release for every install: its archive is
+      streamed from GitHub through gunzip and a tar reader, its sha256 taken
+      on the way, and it counts as staged only if that is the manifest's. No
+      Durable Object could hold it unpacked. Then the install's buckets and
+      search index.
    2. **Sign-in.** The Access organization, if Zero Trust is on without one,
-      then two applications ([ADR 0028](adr/0028-open-deployment.md) step 4):
+      then three applications ([ADR 0028](adr/0028-open-deployment.md) step 4):
       - Allow on the hostname, for the deployer's email only;
-      - Bypass on `/api`, which the Worker authenticates itself.
-   3. **Release.** Runs after Sign-in so the install is never reachable
-      without Access in front of it. In order:
-      1. Upload the web client as static assets (only the files Cloudflare
-         lacks).
-      2. Put the release's R2 objects.
-      3. Upload the Worker with the audience Access issued.
-      4. Switch on `workers.dev` last.
+      - Bypass on `/api`, which the Worker authenticates itself;
+      - Bypass on `/.well-known/frockbot.json`, which the apps read before
+        anyone signs in.
+   3. **Release.** `deployBundleV1`, reading from the staged bundle, with an
+      install that names no hostname, so the app answers on `workers.dev`, and
+      no Computer host, which the install's own first-run Computer step adds
+      if its owner chooses Your Sprites. It runs after Sign-in, so the install
+      is never reachable without Access in front of it. The install's vars are
+      the Access team and audience and its own origin. Its secrets:
+      - The minted ones (`hex`, `keyring`, `vapid`), counted as set once the
+        app Worker holds them, because the app is what encrypts and signs
+        stored state with them. Until then they are minted afresh and set on
+        every Worker that shares them, so a first deploy that stopped between
+        two Workers converges. After that they are never sent again, and the
+        upload keeps them.
+      - Ones only an optional Worker needs are left to whoever deploys it.
+      - `FROCKBOT_ADMIN_EMAILS`, the deployer's email, every time.
    4. **Jev and Workers AI.** Looks for Jev in the catalog again, now as the
       deploy's own step.
    5. **First check.** `/` must redirect to Access. `/api/identity` must be
@@ -59,14 +73,10 @@ The code is `apps/marketing/src/deploy/`, served by the marketing Worker under
 4. **Ready.** The address, Open FrockBot, and how to add the install in the
    apps.
 5. **Your installs.** Every install deployed from here, the release it runs,
-   and Update when a newer release has a manifest.
-   - An update runs the same steps over the same record, so it keeps the
-     same resource names.
-   - It sends only the Durable Object migrations after the Worker's current
-     tag. It refuses a tag the release doesn't continue from rather than
-     risk the data.
-   - It uploads with `keep_bindings: ["secret_text"]`, so the minted secrets
-     that encrypt and sign stored state are never regenerated.
+   and Update when a newer release has a bundle. An update runs the same
+   steps over the same record. The bundle's deployer keeps the install's
+   names, sends only the Durable Object migrations after the deployed tag,
+   refuses an install it would orphan, and keeps every secret already set.
 
 ## What is kept, and where
 
@@ -76,101 +86,13 @@ cookie or the page, per "Secrets stay server-side".
 - **Session.** The cookie is `<cloudflare user id>.<secret>`, and only the
   secret's hash is stored. The grant expires with the session after twelve
   hours.
-- **Running deploy.** A deploy holds its own copy of the grant while it runs,
-  so it survives the session ending, and drops it when it finishes or fails.
-- **Refresh tokens.** They rotate, and the new one is written before it is
-  used.
+- **Running deploy.** A deploy runs on its session's grant, which outlives the
+  session while the deploy runs and goes when it finishes or fails. There is
+  one grant, not a copy each, because Cloudflare rotates the refresh token on
+  every use, and each copy would invalidate the other.
 - **Install record.** It holds names and ids so an update redeploys over the
   same ones. It holds no secret: the minted ones are written to the Worker
   and never read back.
-
-## The release manifest
-
-A release that `/deploy` can install attaches `frockbot-deploy-<version>.json`
-and every file it names. The newest non-draft release with a manifest is the
-one offered. `manifest.ts` is the contract, decoded strictly: an unknown
-binding type, a role no resource declares, an asset name with a path in it,
-or a digest mismatch stops the deploy rather than shipping a Worker missing
-something.
-
-```jsonc
-{
-  "schemaVersion": 1,
-  "version": "0.49.0",
-  "highlights": "One line for Your installs.",
-  "resources": {
-    "r2Buckets": ["application-artifacts", "memory-files"],
-    "kvNamespaces": [],
-    "queues": [],
-    "analyticsDatasets": ["events"],
-    "d1Databases": [
-      {
-        "role": "auth",
-        "migrations": [{ "name": "0001_init", "asset": "…sql", "sha256": "…" }],
-      },
-    ],
-    "vectorizeIndexes": [
-      { "role": "memory", "dimensions": 768, "metric": "cosine" },
-    ],
-  },
-  "workers": [
-    {
-      "role": "app",
-      "mainModule": "index.js",
-      "modules": [
-        { "name": "index.js", "type": "esm", "asset": "…js", "sha256": "…" },
-      ],
-      "compatibilityDate": "2026-08-27",
-      "compatibilityFlags": ["nodejs_compat"],
-      "bindings": [
-        { "type": "ai", "name": "AI" },
-        {
-          "type": "r2_bucket",
-          "name": "MEMORY_FILES",
-          "bucket": "memory-files",
-        },
-        {
-          "type": "durable_object_namespace",
-          "name": "BOT_STATES",
-          "className": "BotState",
-        },
-        { "type": "access_aud", "name": "ACCESS_AUD" },
-      ],
-      "migrations": [{ "tag": "v1", "newSqliteClasses": ["BotState"] }],
-      "secrets": [{ "name": "CREDENTIAL_KEYRING", "shape": "keyring" }],
-      "assets": {
-        "asset": "frockbot-web-client-0.49.0.zip",
-        "sha256": "…",
-        "htmlHandling": "none",
-      },
-      "r2Objects": [
-        {
-          "bucket": "application-artifacts",
-          "key": "applications/<sha256>.mjs",
-          "asset": "…mjs",
-          "sha256": "…",
-        },
-      ],
-    },
-  ],
-}
-```
-
-Resources are named by role, and the deployer names each one
-`<install>-<role>`.
-
-Bindings take the upload API's types plus five the deployer fills itself:
-
-- `install_origin`: the `https://…workers.dev` origin;
-- `access_team_domain` and `access_aud`: what the Sign-in step created;
-- `owner_email`: the deployer's email, the single-user allowlist and admin.
-
-Durable Object migrations are the whole history, in order. Secrets are minted
-once, as `hex` (32 random bytes) or `keyring` (the app's credential keyring),
-and only when the Worker doesn't already hold one by that name.
-
-The app Worker is the only Worker. The Computer host is deployed from inside
-the install, only if its owner chooses Your Sprites.
 
 ## Setting it up
 
@@ -180,7 +102,9 @@ these:
 - `CLOUDFLARE_OAUTH_CLIENT_ID`: the production environment variable;
 - `CLOUDFLARE_OAUTH_CLIENT_SECRET`: the production environment secret.
 
-`release.yml` passes both to the deploy. To create them:
+`release.yml` passes both to the deploy, and creates the
+`frockbot-deploy-bundles` bucket releases are staged in if it is missing. To
+create them:
 
 1. On the frockbot.com account, go to **Manage Account → OAuth clients** (or
    `POST /accounts/{id}/oauth_clients`). Create a client with:

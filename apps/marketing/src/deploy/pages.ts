@@ -17,10 +17,10 @@ import {
   stepDoneTextV1,
   stepTitleV1,
   stepWaitingTextV1,
+  isNewerVersionV1,
   type AccountCheckV1,
   type DeployStepV1,
 } from "./plan";
-import { isNewerVersionV1 } from "./manifest";
 
 const REPOSITORY_URL = "https://github.com/timoconnellaus/frockbot";
 
@@ -574,7 +574,7 @@ export function readyPageV1(install: InstallRecordV1): Response {
 
 export function installsPageV1(
   installs: readonly InstallRecordV1[],
-  latest: { version: string; highlights?: string } | null,
+  latest: { version: string } | null,
   running: boolean,
   problem?: string,
 ): Response {
@@ -644,18 +644,12 @@ export function installsPageV1(
                     }
                   </div>
                   ${
-                    behind && latest?.highlights
+                    behind
                       ? html`<p class="deploy-small deploy-muted">
-                          <strong>What’s new in ${latest.version}:</strong>
-                          ${latest.highlights} Updating keeps your bots, memory
-                          and conversations; it takes about a minute.
+                          Updating keeps your bots, memory and conversations; it
+                          takes about a minute.
                         </p>`
-                      : behind
-                        ? html`<p class="deploy-small deploy-muted">
-                            Updating keeps your bots, memory and conversations;
-                            it takes about a minute.
-                          </p>`
-                        : ""
+                      : ""
                   }
                 </li>`;
               })}

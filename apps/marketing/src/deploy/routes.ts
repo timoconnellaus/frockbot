@@ -25,7 +25,7 @@ import {
   normalizeInstallNameV1,
   suggestedInstallNameV1,
 } from "./plan";
-import { latestDeployableVersionV1, releaseManifestV1 } from "./release";
+import { latestDeployableVersionV1 } from "./release";
 
 export const DEPLOY_PATH_V1 = "/deploy";
 const SESSION_COOKIE = "__Host-frockbot_deploy";
@@ -85,18 +85,10 @@ function sameOrigin(request: Request, env: DeployEnvV1): boolean {
   );
 }
 
-async function latestRelease(): Promise<{
-  version: string;
-  highlights?: string;
-} | null> {
+async function latestRelease(): Promise<{ version: string } | null> {
   try {
     const version = await latestDeployableVersionV1();
-    if (!version) return null;
-    const manifest = await releaseManifestV1(version);
-    return {
-      version,
-      ...(manifest.highlights ? { highlights: manifest.highlights } : {}),
-    };
+    return version ? { version } : null;
   } catch {
     return null;
   }

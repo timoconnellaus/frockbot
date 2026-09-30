@@ -3,6 +3,8 @@ import type { OAuthClientV1 } from "./oauth";
 
 export interface DeployEnvV1 {
   DEPLOY_ACCOUNTS: DurableObjectNamespace<DeployAccount>;
+  /** Where each release's deploy bundle is staged, once, for every install. */
+  DEPLOY_BUNDLES?: R2Bucket;
   CLOUDFLARE_OAUTH_CLIENT_ID?: string;
   CLOUDFLARE_OAUTH_CLIENT_SECRET?: string;
   /** Where `/deploy` is served; `https://frockbot.com` unless a local run says otherwise. */
