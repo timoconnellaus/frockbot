@@ -10,12 +10,13 @@ name: CLA
 # so a fork's pull request can be commented on. It never checks out the pull
 # request's code, and must not: nothing here may run what a contributor wrote.
 #
-# Exemption is by who opened the pull request, which GitHub authenticates,
-# never by commit author: the action matches an unlinked commit on its bare
-# git author name, so any name on a commit can be forged. Pull requests opened
-# by an account in EXEMPT pass, and so do ones changing fewer than five lines,
-# too small to carry much copyright. On everyone else's, every commit author
-# must have signed, so a commit authored as someone else never passes.
+# Pull requests opened by Tim or Dependabot, which GitHub authenticates, are
+# not checked, and nor are ones changing fewer than five lines of text and no
+# binary or generated file. On every other pull request the action matches
+# each commit to the GitHub account of its author, or of its committer when
+# the author's email is linked to no account, and that account must have
+# signed. Commit identities can be forged, so the account that opened the
+# pull request must also have signed.
 #
 # A contributor signs by commenting the exact sentence below; `recheck` asks
 # again. The sentence and the signatures file carry CLA.md's version: a new
@@ -33,14 +34,9 @@ permissions:
   pull-requests: write
   statuses: write
 
-# Every signature is written to one file, so runs take turns.
-concurrency:
-  group: cla-signatures
-  cancel-in-progress: false
-
 jobs:
-  cla:
-    name: CLA
+  scope:
+    name: CLA scope
     if: >-
       github.event_name == 'pull_request_target' ||
       (github.event.issue.pull_request &&
@@ -48,13 +44,8 @@ jobs:
          startsWith(github.event.comment.body, 'I have read the FrockBot CLA version 1.0 and I hereby sign it.')))
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    env:
-      OPENED_BY: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
-      # Tim, Dependabot, and each GitHub username listed in Schedule A of a
-      # countersigned Corporate CLA (CCLA.md), one per line.
-      EXEMPT: >-
-        timoconnellaus
-        dependabot[bot]
+    outputs:
+      needed: ${{ steps.scope.outputs.needed }}
     steps:
       - name: Decide whether this pull request needs a signature
         id: scope
@@ -62,21 +53,40 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          OPENED_BY: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
         run: |
-          case " $EXEMPT " in
-            *" $OPENED_BY "*)
+          case "$OPENED_BY" in
+            timoconnellaus | "dependabot[bot]")
               echo "needed=false" >> "$GITHUB_OUTPUT"
               exit 0
               ;;
           esac
           changed=$(gh api "repos/$REPO/pulls/$NUMBER" --jq '.additions + .deletions')
-          if [ "$changed" -lt 5 ]; then
+          # A binary or rename-only file has no patch, and a long patch means
+          # generated or minified text: neither is a typo fix.
+          opaque=$(gh api --paginate "repos/$REPO/pulls/$NUMBER/files" \
+            --jq '.[] | select(.patch == null or (.patch | length) > 1000) | .filename' | wc -l)
+          if [ "$changed" -lt 5 ] && [ "$opaque" -eq 0 ]; then
             echo "needed=false" >> "$GITHUB_OUTPUT"
           else
             echo "needed=true" >> "$GITHUB_OUTPUT"
           fi
-      - name: Create the signatures branch if it is missing
-        if: steps.scope.outputs.needed == 'true'
+
+  cla:
+    name: CLA
+    needs: scope
+    if: needs.scope.outputs.needed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Every signature is written to one file, so the runs that write take
+    # turns. Only these queue: a skipped job never joins the group.
+    concurrency:
+      group: cla-signatures
+      cancel-in-progress: false
+    steps:
+      - name: Create the signatures file if it is missing
+        # The pinned action compares a 404 with a string, so it never creates
+        # the file itself.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -86,8 +96,14 @@ jobs:
             gh api "repos/$REPO/git/refs" -f ref=refs/heads/cla-signatures -f sha="$sha" --silent ||
               gh api "repos/$REPO/branches/cla-signatures" --silent
           fi
+          file="repos/$REPO/contents/signatures/cla-v1.0.json"
+          if ! gh api "$file?ref=cla-signatures" --silent 2>/dev/null; then
+            gh api -X PUT "$file" -f branch=cla-signatures \
+              -f message="Start recording CLA v1.0 signatures" \
+              -f content="$(printf '{"signedContributors": []}\n' | base64 -w0)" --silent ||
+              gh api "$file?ref=cla-signatures" --silent
+          fi
       - name: CLA Assistant
-        if: steps.scope.outputs.needed == 'true'
         uses: contributor-assistant/github-action@ca4a40a7d1004f18d9960b404b97e5f30a505a08 # v2.6.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -104,8 +120,18 @@ jobs:
             once. It lets FrockBot keep the core MIT while offering commercial
             licences for add-ons; [CONTRIBUTING.md](https://github.com/${{ github.repository }}/blob/main/CONTRIBUTING.md)
             explains why and what to do if your commits are not linked to your
-            GitHub account. To sign, reply on this pull request with exactly the
-            sentence below.
+            GitHub account. To sign, reply on this pull request with a comment
+            consisting of only the sentence below.
           custom-allsigned-prcomment: Every author of this pull request has signed the FrockBot CLA.
           signed-commit-message: $contributorName signed the FrockBot CLA v1.0 in $owner/$repo
-          create-file-commit-message: Start recording CLA v1.0 signatures
+      - name: Check that whoever opened the pull request has signed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          OPENER_ID: ${{ github.event.pull_request.user.id || github.event.issue.user.id }}
+        run: |
+          if ! gh api "repos/$REPO/contents/signatures/cla-v1.0.json?ref=cla-signatures" --jq .content |
+            base64 -d | jq -e --argjson id "$OPENER_ID" '.signedContributors | any(.id == $id)' >/dev/null; then
+            echo "::error::The account that opened this pull request has not signed the CLA. Author a commit on it from your own GitHub account, then comment the signing sentence."
+            exit 1
+          fi
