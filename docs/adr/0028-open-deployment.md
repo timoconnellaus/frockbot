@@ -326,10 +326,9 @@ an APK, if the deployer wants the phone app.
 `docker.io/timoconnellaus/frockbot-computer-host` and
 `docker.io/timoconnellaus/frockbot-applet-build` from the repository root context
 for `linux/amd64`. `timoconnellaus` is that Docker Hub account's own username; no
-organisation was created. `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` are still
-unset, so the job skips with a warning on every tag and `deploy-backend` does not
-name it in `needs` — adding it there is what makes a tag production runs always a
-tag an installer can install.
+organisation was created. `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` are set, the
+job fails without them, and `deploy-backend` names it in `needs`, so a tag
+production runs is always a tag an installer can install.
 
 **Built later, as deploy bundles.** What an installer pulls besides the images is
 a deploy bundle per release, built by `release-assets` and attached by

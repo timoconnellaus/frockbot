@@ -174,11 +174,9 @@ jobs:
     # configured in the pulling account
     # (https://developers.cloudflare.com/containers/image-management/).
     #
-    # Skips loudly while the Docker Hub secrets are unset, and production does
-    # not wait on it: the hosted deployment still builds its images from the
-    # Dockerfiles, so a missing publish costs the simple profile a tag, not
-    # frockbot.com a release. Once the simple profile is announced, make this
-    # job required by adding it to `deploy-backend`'s `needs`.
+    # Required: `deploy-backend` waits on it, so a tag production runs is always
+    # a tag whose deploy bundle can pull its images. The hosted deployment still
+    # builds its own images from the Dockerfiles.
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -201,9 +199,8 @@ jobs:
           set -euo pipefail
           for name in DOCKERHUB_USERNAME DOCKERHUB_TOKEN; do
             if [[ -z "${!name}" ]]; then
-              printf '::warning::%s is unset: this tag publishes no container images, so an installer cannot pull it.\n' "$name"
-              echo "publish=false" >> "$GITHUB_OUTPUT"
-              exit 0
+              printf '::error::%s is unset: this tag would publish no container images, so no install could pull it.\n' "$name"
+              exit 1
             fi
           done
           printf '%s' "$DOCKERHUB_TOKEN" |
@@ -1759,12 +1756,10 @@ jobs:
 
   deploy-backend:
     name: Deploy FrockBot app
-    # Does not wait on `publish-images` yet: the hosted deploy builds its own
-    # images from the Dockerfiles, and a tag must keep shipping frockbot.com
-    # while the Docker Hub secrets are unset. Once the simple profile is
-    # announced, add `publish-images` here so a tag production runs is always a
-    # tag an installer can install (ADR 0028 step 5).
-    needs: verify
+    # Waits on `publish-images`, so a tag production runs is always a tag an
+    # install can pull (ADR 0028 step 5), though this deploy still builds its own
+    # images from the Dockerfiles.
+    needs: [verify, publish-images]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

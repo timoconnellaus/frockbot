@@ -325,11 +325,9 @@ consequences worth knowing:
 Publishing needs the repository secrets `DOCKERHUB_USERNAME` and
 `DOCKERHUB_TOKEN` (a Docker Hub personal access token with write access to the
 `timoconnellaus` namespace, which is that account's username; no organisation
-is needed). While they are unset, `publish-images` skips with a warning and
-`deploy-backend` does not wait on it, so the hosted deployment keeps shipping.
-Once the simple profile is announced, `deploy-backend` gains `publish-images`
-in its `needs`, so a tag production is running is always a tag an installer can
-install.
+is needed). Both are set, `publish-images` fails without them, and
+`deploy-backend` waits on it, so a tag production is running is always a tag an
+installer can install.
 
 **The deploy bundle**, built by `release-assets` and attached by
 `github-release`: `frockbot-deploy-<version>.json`, the manifest, and
