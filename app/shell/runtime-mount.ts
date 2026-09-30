@@ -478,11 +478,13 @@ export async function agentRuntime(
               // allowance; every other plan covers it.
               supervisor: state.turnSupervisor(
                 turnBilling
-                  ? createPlatformJevFetchV1({
-                      account: turnBilling.account,
-                      botId: identity.botId,
-                      sessionId: turn.sessionId,
-                    })
+                  ? (send) =>
+                      createPlatformJevFetchV1({
+                        account: turnBilling.account,
+                        botId: identity.botId,
+                        sessionId: turn.sessionId,
+                        fetch: send,
+                      })
                   : undefined,
               ),
               origin: turn.inputOrigin ?? "user",

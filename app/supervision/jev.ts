@@ -438,12 +438,22 @@ export function workersAiJevFetchV1(ai: JevAiBindingV1): Fetch {
   };
 }
 
+/**
+ * Wraps the transport a hosted Jev client sends through, whichever one the
+ * deployment uses; this is how an account's plan meters Turn supervision.
+ */
+export type JevFetchMeterV1 = (send: Fetch) => Fetch;
+
 /** A Jev client over the `AI` binding: billed to the account, no key. */
-export function createWorkersAiJevClientV1(ai: JevAiBindingV1): TypeSafeClient {
+export function createWorkersAiJevClientV1(
+  ai: JevAiBindingV1,
+  meter?: JevFetchMeterV1,
+): TypeSafeClient {
+  const send = workersAiJevFetchV1(ai);
   return createJevClientV1({
     // The client refuses to construct without one; nothing sends it.
     apiKey: WORKERS_AI_JEV_TRANSPORT_V1,
-    fetch: workersAiJevFetchV1(ai),
+    fetch: meter ? meter(send) : send,
   });
 }
 
@@ -463,13 +473,20 @@ export interface HostedJevEnvV1 {
 export function hostedJevClientV1(
   env: HostedJevEnvV1,
   fetch?: Fetch,
+  meter?: JevFetchMeterV1,
 ): TypeSafeClient | undefined {
   const baseURL = (env.JEV_BASE_URL ?? "").trim();
   if (baseURL) {
-    return createJevClientV1({ apiKey: "stand-in", fetch, baseURL });
+    const send: Fetch =
+      fetch ?? ((input, init) => globalThis.fetch(input, init));
+    return createJevClientV1({
+      apiKey: "stand-in",
+      fetch: meter ? meter(send) : fetch,
+      baseURL,
+    });
   }
   return isJevAiBinding(env.AI)
-    ? createWorkersAiJevClientV1(env.AI)
+    ? createWorkersAiJevClientV1(env.AI, meter)
     : undefined;
 }
 
@@ -481,8 +498,9 @@ export function createHostedTurnSupervisorV1(
   env: HostedJevEnvV1,
   productName: string,
   fetch?: Fetch,
+  meter?: JevFetchMeterV1,
 ): TurnSupervisor {
-  const client = hostedJevClientV1(env, fetch);
+  const client = hostedJevClientV1(env, fetch, meter);
   if (!client) {
     return createUnavailableTurnSupervisorV1(
       "Turn supervision is unavailable: no Workers AI binding is configured.",

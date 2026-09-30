@@ -9,7 +9,11 @@ import {
 } from "../billing/ledger.js";
 import type { AccountUsage } from "../billing/model.js";
 import { runFailureCopyV1 } from "../shell/run-failure-copy.js";
-import { createJevClientV1 } from "./jev.js";
+import {
+  createJevClientV1,
+  hostedJevClientV1,
+  type JevAiBindingV1,
+} from "./jev.js";
 import { RESPONSE_REVIEW_MODEL_V1 } from "./response-review.js";
 
 // Turn supervision's Jev, through the real client, against a ledger: metered
@@ -152,6 +156,47 @@ describe("Turn supervision's Jev", () => {
     expect(ledger.jevFairUse()?.remainingMicros).toBe(
       2_000_000 - jevChargeMicrosV1(100),
     );
+  });
+
+  test("on BYO, is metered on the deployment's Workers AI binding", async () => {
+    const { ledger, usage } = account("byo");
+    let runs = 0;
+    const AI: JevAiBindingV1 = {
+      async run() {
+        runs += 1;
+        return {
+          model: "jev-1.13.0",
+          answers: { pick: { type: "choice", choice: "a" } },
+          usage: { input_tokens: 100, output_tokens: 0 },
+        };
+      },
+    };
+    const client = hostedJevClientV1({ AI }, undefined, (send) =>
+      createPlatformJevFetchV1({
+        account: usage,
+        botId: "bot-1",
+        sessionId: "session-1",
+        fetch: send,
+        requestId: () => "r1",
+      }),
+    );
+    await client!.systemOne(
+      {
+        state: { said: "hello" },
+        questions: {
+          pick: {
+            type: "choice",
+            instructions: "Which?",
+            criteria: { a: null, b: null },
+          },
+        },
+      } as never,
+      { retry: { maxRetries: 0 } },
+    );
+    expect(runs).toBe(1);
+    expect(ledger.snapshot().usage).toMatchObject([
+      { id: "jev:turn:r1", kind: "jev", status: "settled" },
+    ]);
   });
 
   test("on a plan that covers Jev, is sent without a charge or a record", async () => {

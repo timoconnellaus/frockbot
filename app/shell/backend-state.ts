@@ -1,4 +1,3 @@
-import type { Fetch } from "@typesafe-ai/sdk";
 import type { ProductEventSinkV1 } from "../analytics/events.js";
 import type { UsageAttributionV1 } from "../billing/ledger.js";
 import type { ModelBilling } from "../billing/model.js";
@@ -10,6 +9,7 @@ import {
 import {
   createHostedRoutineEventJudgeV1,
   createHostedTurnSupervisorV1,
+  type JevFetchMeterV1,
 } from "@frockbot/app/supervision";
 import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
 import {
@@ -420,11 +420,11 @@ export class ShellBotStateV1 {
    */
   readonly routineEventJudge: RoutineEventJudgeV1;
   /**
-   * A Turn's supervisor. Given a `fetch`, the hosted one sends its Jev
+   * A Turn's supervisor. Given a meter, the hosted one sends its Jev
    * requests through it, which is how the account's plan meters them; a
    * supervisor the host injected is used as it is.
    */
-  readonly turnSupervisor: (fetch?: Fetch) => TurnSupervisor;
+  readonly turnSupervisor: (meter?: JevFetchMeterV1) => TurnSupervisor;
   readonly routineReportJudge: RoutineReportJudgeV1 | undefined;
   readonly compactionChooser: CompactionChooserV1 | undefined;
   readonly toolResultPruner: ToolResultPrunerV1 | undefined;
@@ -509,16 +509,17 @@ export class ShellBotStateV1 {
       },
       host.brand.productName,
     );
-    this.turnSupervisor = (fetch) =>
+    this.turnSupervisor = (meter) =>
       host.turnSupervisor ??
-      (fetch
+      (meter
         ? createHostedTurnSupervisorV1(
             {
               AI: host.env.AI,
               JEV_BASE_URL: host.env.JEV_BASE_URL,
             },
             host.brand.productName,
-            fetch,
+            undefined,
+            meter,
           )
         : hostedSupervisor);
     this.now = host.now ?? (() => new Date());
