@@ -803,7 +803,11 @@ export function createGateway(
     // The account's web search: FrockBot's, or a provider the person brings.
     // A key or address goes in once, sealed, and never comes back out.
     if (url.pathname === "/api/web-search") {
+      if (request.method !== "GET" && request.method !== "PUT") {
+        return jsonError(405, "method not allowed");
+      }
       const owner = dependencies.userConfigurationFor(userId);
+      let answer;
       if (request.method === "PUT") {
         let choice;
         try {
@@ -811,35 +815,19 @@ export function createGateway(
         } catch (error) {
           return jsonError(
             400,
-            error instanceof SyntaxError
-              ? "Invalid web search choice"
-              : error instanceof Error
-                ? error.message
-                : "Invalid web search choice",
+            error instanceof Error && !(error instanceof SyntaxError)
+              ? error.message
+              : "Invalid web search choice",
           );
         }
-        try {
-          return Response.json(
-            await owner.setWebSearchChoice({
-              schemaVersion: 1,
-              userId,
-              choice,
-            }),
-            { headers: { "cache-control": "no-store" } },
-          );
-        } catch {
-          return jsonError(
-            503,
-            "Web search settings are temporarily unavailable.",
-          );
-        }
+        answer = owner.setWebSearchChoice({ schemaVersion: 1, userId, choice });
+      } else {
+        answer = owner.readWebSearchChoice({ schemaVersion: 1, userId });
       }
-      if (request.method !== "GET") return jsonError(405, "method not allowed");
       try {
-        return Response.json(
-          await owner.readWebSearchChoice({ schemaVersion: 1, userId }),
-          { headers: { "cache-control": "no-store" } },
-        );
+        return Response.json(await answer, {
+          headers: { "cache-control": "no-store" },
+        });
       } catch {
         return jsonError(
           503,

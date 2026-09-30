@@ -39,20 +39,35 @@ function fetcherFor(config: AccountSearchProviderConfigV1): WebFetchFn {
   return config.fetch ?? ((input, init) => globalThis.fetch(input, init));
 }
 
-/** The `results` rows a provider sent, or a plain reason it sent none. */
-function resultRows(body: unknown, providerName: string): unknown[] {
+/**
+ * What every one of these providers does with its answer: a refusal becomes
+ * the person-facing error, and each `results` row is mapped to the contract's
+ * shape by the provider's own snippet field before the seam decodes it.
+ */
+async function decodeAnswer(
+  response: Response,
+  providerName: string,
+  request: WebSearchRequestV1,
+  snippetOf: (row: Record<string, unknown>) => unknown,
+): Promise<WebSearchResponseV1> {
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new Error(accountSearchRefusalV1(providerName, response.status));
+  }
+  const body = await readSearchJsonV1(response, providerName);
   if (!isRecord(body) || !Array.isArray(body.results)) {
     throw new Error(`${providerName} returned an unexpected response`);
   }
-  return body.results;
-}
-
-async function refuse(
-  response: Response,
-  providerName: string,
-): Promise<never> {
-  await response.body?.cancel().catch(() => undefined);
-  throw new Error(accountSearchRefusalV1(providerName, response.status));
+  return decodeWebSearchResponseV1(
+    {
+      results: body.results.map((row) =>
+        isRecord(row)
+          ? { title: row.title, url: row.url, snippet: snippetOf(row) }
+          : row,
+      ),
+    },
+    request,
+  );
 }
 
 export class ExaWebSearchV1 implements WebSearchV1 {
@@ -78,21 +93,8 @@ export class ExaWebSearchV1 implements WebSearchV1 {
       }),
       signal: execution.signal,
     });
-    if (!response.ok) return refuse(response, "Exa");
-    const rows = resultRows(await readSearchJsonV1(response, "Exa"), "Exa");
-    return decodeWebSearchResponseV1(
-      {
-        results: rows.map((row) =>
-          isRecord(row)
-            ? {
-                title: row.title,
-                url: row.url,
-                snippet: typeof row.text === "string" ? row.text : row.summary,
-              }
-            : row,
-        ),
-      },
-      request,
+    return decodeAnswer(response, "Exa", request, (row) =>
+      typeof row.text === "string" ? row.text : row.summary,
     );
   }
 }
@@ -120,21 +122,7 @@ export class TavilyWebSearchV1 implements WebSearchV1 {
       }),
       signal: execution.signal,
     });
-    if (!response.ok) return refuse(response, "Tavily");
-    const rows = resultRows(
-      await readSearchJsonV1(response, "Tavily"),
-      "Tavily",
-    );
-    return decodeWebSearchResponseV1(
-      {
-        results: rows.map((row) =>
-          isRecord(row)
-            ? { title: row.title, url: row.url, snippet: row.content }
-            : row,
-        ),
-      },
-      request,
-    );
+    return decodeAnswer(response, "Tavily", request, (row) => row.content);
   }
 }
 
@@ -168,21 +156,7 @@ export class SearxngWebSearchV1 implements WebSearchV1 {
         "Your SearXNG instance refused the JSON format (HTTP 403). Add json to search.formats in its settings.yml.",
       );
     }
-    if (!response.ok) return refuse(response, "SearXNG");
-    const rows = resultRows(
-      await readSearchJsonV1(response, "SearXNG"),
-      "SearXNG",
-    );
     // SearXNG has no result-count parameter; the decoder trims to the ask.
-    return decodeWebSearchResponseV1(
-      {
-        results: rows.map((row) =>
-          isRecord(row)
-            ? { title: row.title, url: row.url, snippet: row.content }
-            : row,
-        ),
-      },
-      request,
-    );
+    return decodeAnswer(response, "SearXNG", request, (row) => row.content);
   }
 }

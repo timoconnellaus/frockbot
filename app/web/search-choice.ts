@@ -5,6 +5,7 @@
 // under {@link WEB_SEARCH_CREDENTIAL_ID_V1}, and only the generation that
 // names it crosses this seam.
 import { classifyOutboundUrlV1 } from "./ssrf.js";
+import { isSearchRecordV1 as isRecord } from "./search-http.js";
 
 /** FrockBot's Brave on the deployment's key, billed per search. */
 export const PLATFORM_WEB_SEARCH_PROVIDER_V1 = "frockbot";
@@ -42,6 +43,9 @@ export const WEB_SEARCH_PROVIDER_NAMES_V1: Record<
 export const WEB_SEARCH_CREDENTIAL_PACKAGE_ID_V1 = "web-search";
 export const WEB_SEARCH_CREDENTIAL_ID_V1 = "web-search-provider";
 
+/** A sealed generation's id, as `mintSecretGenerationV1` makes it. */
+export const WEB_SEARCH_GENERATION_PATTERN_V1 = /^g[0-9a-f]{24}$/;
+
 /** One search holds the secret for no longer than it could take. */
 export const WEB_SEARCH_LEASE_MS_V1 = 60_000;
 
@@ -68,10 +72,6 @@ export type WebSearchChoiceInputV1 =
   | { provider: "searxng"; url: string };
 
 const MAX_API_KEY_LENGTH = 512;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 export function isAccountWebSearchProviderV1(
   value: unknown,
@@ -148,7 +148,7 @@ export function decodeWebSearchChoiceViewV1(
   if (
     !isAccountWebSearchProviderV1(value.provider) ||
     typeof value.generation !== "string" ||
-    !/^g[0-9a-f]{24}$/.test(value.generation) ||
+    !WEB_SEARCH_GENERATION_PATTERN_V1.test(value.generation) ||
     typeof value.updatedAt !== "string"
   ) {
     throw new Error("Web search choice is invalid");

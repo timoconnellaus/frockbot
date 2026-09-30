@@ -310,18 +310,16 @@ const enabledRuntimeContributionFactories = new Map<
         capability,
         ...(outbound ? { fetch: outbound } : {}),
       }) ??
-      (capability.capabilityId === "web-search"
-        ? createConfiguredWebSearchRuntimeContribution({
-            capability,
-            apiKey: readSecret(BRAVE_SEARCH_API_KEY_SECRET_V1),
-            // FrockBot's search is the platform's to pay for, so where the
-            // deployment bills the account is charged per search. A person's
-            // own provider is never metered.
-            ...(billing ? { meter: createSearchMeterV1(billing) } : {}),
-            ...(webSearchAccount ? { account: await webSearchAccount() } : {}),
-            ...(outbound ? { fetch: outbound } : {}),
-          })
-        : undefined),
+      createConfiguredWebSearchRuntimeContribution({
+        capability,
+        apiKey: readSecret(BRAVE_SEARCH_API_KEY_SECRET_V1),
+        // FrockBot's search is the platform's to pay for, so where the
+        // deployment bills the account is charged per search. A person's
+        // own provider is never metered.
+        ...(billing ? { meter: createSearchMeterV1(billing) } : {}),
+        ...(webSearchAccount ? { account: webSearchAccount } : {}),
+        ...(outbound ? { fetch: outbound } : {}),
+      }),
   ],
 ]);
 

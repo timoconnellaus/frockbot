@@ -106,11 +106,7 @@ function accountProvider(
   const config = { secret, ...(fetch ? { fetch } : {}) };
   switch (provider) {
     case "brave":
-      return new BraveWebSearchV1({
-        apiKey: secret,
-        ownKey: true,
-        ...(fetch ? { fetch } : {}),
-      });
+      return new BraveWebSearchV1({ ...config, apiKey: secret, ownKey: true });
     case "exa":
       return new ExaWebSearchV1(config);
     case "tavily":
@@ -120,29 +116,12 @@ function accountProvider(
   }
 }
 
-/** The person's own provider, with its secret leased per search. */
-export function accountWebSearchProviderV1(
-  account: AccountWebSearchV1,
-  fetch?: WebFetchFn,
-): WebSearchV1 {
-  const provider = account.choice.provider;
-  if (provider === "frockbot") {
-    throw new Error("FrockBot's web search is not an account provider");
-  }
-  return {
-    search: (request, execution) =>
-      account.withSecret(execution.effectId, (secret) =>
-        accountProvider(provider, secret, fetch).search(request, execution),
-      ),
-  };
-}
-
 /**
  * The enablement fence. A Bot holds `web_search` only through this Package's
  * enabled `web-search` Capability, and only while its account's provider can
  * run: its own, or FrockBot's where the deployment holds a key.
  */
-export function createConfiguredWebSearchRuntimeContribution(config: {
+export async function createConfiguredWebSearchRuntimeContribution(config: {
   capability: {
     packageId: string;
     capabilityId: string;
@@ -152,19 +131,27 @@ export function createConfiguredWebSearchRuntimeContribution(config: {
   apiKey: string | undefined;
   /** Charges FrockBot's search only; a person's own provider is never metered. */
   meter?: SearchMeterV1;
-  /** The account's choice. Absent means FrockBot's. */
-  account?: AccountWebSearchV1;
+  /** Reads the account's choice, only once the fence has passed. Absent means FrockBot's. */
+  account?: () => Promise<AccountWebSearchV1>;
   fetch?: WebFetchFn;
-}): RuntimeFeatureV1<AgentRuntimeV1> | undefined {
+}): Promise<RuntimeFeatureV1<AgentRuntimeV1> | undefined> {
   if (
     config.capability.packageId !== "web" ||
     config.capability.capabilityId !== "web-search"
   ) {
     return undefined;
   }
+  const account = await config.account?.();
+  const own = account?.choice.provider;
   let provider: WebSearchV1;
-  if (config.account && config.account.choice.provider !== "frockbot") {
-    provider = accountWebSearchProviderV1(config.account, config.fetch);
+  if (account && own && own !== "frockbot") {
+    // The person's own provider, with its secret leased per search.
+    provider = {
+      search: (request, execution) =>
+        account.withSecret(execution.effectId, (secret) =>
+          accountProvider(own, secret, config.fetch).search(request, execution),
+        ),
+    };
   } else if (config.apiKey) {
     provider = new BraveWebSearchV1({
       apiKey: config.apiKey,

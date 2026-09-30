@@ -296,7 +296,10 @@ import {
   createWebSearchChoiceStoreV1,
   type WebSearchChoiceStoreV1,
 } from "@frockbot/app/web/search-choice-user";
-import { decodeWebSearchChoiceInputV1 } from "@frockbot/app/web/search-choice";
+import {
+  decodeWebSearchChoiceInputV1,
+  WEB_SEARCH_GENERATION_PATTERN_V1,
+} from "@frockbot/app/web/search-choice";
 import {
   isSecretIdV1,
   isSecretRequestIdV1,
@@ -2474,7 +2477,7 @@ export class UserConfiguration
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
       effectId: rpcString(256),
-      generation: rpcPattern(/^g[0-9a-f]{24}$/, 32),
+      generation: rpcPattern(WEB_SEARCH_GENERATION_PATTERN_V1, 32),
     });
     const userId = await this.assertUserIdentity(request.userId as string);
     await this.assertAccountOpen();

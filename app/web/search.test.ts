@@ -108,11 +108,11 @@ async function mount(options: {
   }
   const { meter, reserved } = refusingMeter();
   const recorded: Recorded[] = [];
-  const feature = createConfiguredWebSearchRuntimeContribution({
+  const feature = await createConfiguredWebSearchRuntimeContribution({
     capability: CAPABILITY,
     apiKey: options.platformKey,
     meter,
-    account: await held.mountAccount(),
+    account: () => held.mountAccount(),
     fetch: (input, init) => {
       const entry = { url: new URL(input), init };
       recorded.push(entry);
@@ -349,10 +349,10 @@ describe("web_search on the person's own provider", () => {
     const mounted = await held.mountAccount();
     await held.store.set(ACCOUNT, { provider: "tavily", apiKey: "tvly-key" });
     const recorded: string[] = [];
-    const feature = createConfiguredWebSearchRuntimeContribution({
+    const feature = await createConfiguredWebSearchRuntimeContribution({
       capability: CAPABILITY,
       apiKey: PLATFORM_KEY,
-      account: mounted,
+      account: () => Promise.resolve(mounted),
       fetch: (input) => {
         recorded.push(String(input));
         return Promise.resolve(Response.json({ results: [] }));

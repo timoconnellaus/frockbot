@@ -9,6 +9,7 @@ import type {
   CredentialStorage,
   CredentialUserBackendContribution,
 } from "@frockbot/app/credentials/user";
+import { mintSecretGenerationV1 } from "@frockbot/app/secrets/shared";
 import {
   decodeWebSearchChoiceViewV1,
   PLATFORM_WEB_SEARCH_CHOICE_V1,
@@ -48,9 +49,13 @@ export interface WebSearchChoiceStoreV1 {
   settle(input: { accountId: string; effectId: string }): Promise<void>;
 }
 
-function mintGeneration(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(12));
-  return `g${[...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+/** The account's one search credential, as the store addresses it. */
+function credentialOf(accountId: string) {
+  return {
+    accountId,
+    connectionId: WEB_SEARCH_CREDENTIAL_ID_V1,
+    packageId: WEB_SEARCH_CREDENTIAL_PACKAGE_ID_V1,
+  };
 }
 
 export function createWebSearchChoiceStoreV1(
@@ -65,9 +70,7 @@ export function createWebSearchChoiceStoreV1(
   };
   const settle = (accountId: string, effectId: string) =>
     host.credentials.settle({
-      accountId,
-      connectionId: WEB_SEARCH_CREDENTIAL_ID_V1,
-      packageId: WEB_SEARCH_CREDENTIAL_PACKAGE_ID_V1,
+      ...credentialOf(accountId),
       effectId: webSearchLeaseEffectIdV1(effectId),
     });
   return {
@@ -80,13 +83,11 @@ export function createWebSearchChoiceStoreV1(
         await host.storage.delete(CHOICE_KEY);
         return PLATFORM_WEB_SEARCH_CHOICE_V1;
       }
-      const generation = mintGeneration();
+      const generation = mintSecretGenerationV1();
       // Sealed before the transaction: the store's crypto is asynchronous,
       // and the write it leads to is the one that has to be atomic.
       const prepared = await host.credentials.prepareApiKey({
-        accountId,
-        connectionId: WEB_SEARCH_CREDENTIAL_ID_V1,
-        packageId: WEB_SEARCH_CREDENTIAL_PACKAGE_ID_V1,
+        ...credentialOf(accountId),
         generation,
         apiKey: input.provider === "searxng" ? input.url : input.apiKey,
       });
@@ -99,12 +100,7 @@ export function createWebSearchChoiceStoreV1(
       await host.storage.transaction(async (transaction) => {
         await host.credentials.stagePreparedApiKey(prepared, transaction);
         await host.credentials.activate(
-          {
-            accountId,
-            connectionId: WEB_SEARCH_CREDENTIAL_ID_V1,
-            packageId: WEB_SEARCH_CREDENTIAL_PACKAGE_ID_V1,
-            generation,
-          },
+          { ...credentialOf(accountId), generation },
           transaction,
         );
         await transaction.put(CHOICE_KEY, choice);
@@ -117,9 +113,7 @@ export function createWebSearchChoiceStoreV1(
       // clears that attempt's lease, or its tombstone if it expired.
       await settle(input.accountId, input.effectId);
       return host.credentials.lease({
-        accountId: input.accountId,
-        connectionId: WEB_SEARCH_CREDENTIAL_ID_V1,
-        packageId: WEB_SEARCH_CREDENTIAL_PACKAGE_ID_V1,
+        ...credentialOf(input.accountId),
         effectId: webSearchLeaseEffectIdV1(input.effectId),
         expiresAt: new Date(now() + WEB_SEARCH_LEASE_MS_V1).toISOString(),
         expectedGeneration: input.generation,
