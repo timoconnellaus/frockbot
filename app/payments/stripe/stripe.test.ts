@@ -1214,6 +1214,17 @@ describe("the marketing page's prices", () => {
         expect(page).toContain(`or ${usd(plan.monthlyCents)} with your own AI`);
   });
 
+  test("the setup chooser suggests plans at these prices", async () => {
+    const { PLANS } = await import(
+      new URL("../../../apps/marketing/public/setup/result.js", import.meta.url)
+        .href
+    );
+    for (const plan of PLAN.subscriptions) {
+      if (plan.id in PLANS)
+        expect(PLANS[plan.id].price).toBe(`${usd(plan.monthlyCents)} a month`);
+    }
+  });
+
   test("states the trial, who has none, and the top-ups", () => {
     expect(section).toContain(
       `${PLAN.trial.days}-day trial that includes ${usd(PLAN.trial.creditMicros / 10_000)} of credit`,

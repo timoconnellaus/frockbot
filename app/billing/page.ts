@@ -81,5 +81,7 @@ async function load(append=false){try{const data=await api('/api/billing'+(appen
 function allowed(url,action){const target=new URL(url,location.origin);return target.origin===location.origin||(target.protocol==='https:'&&action.hosts.includes(target.hostname));}
 async function take(purpose,cents){const action=act(purpose);if(busy||!action)return;busy=true;buttons();const key='frockbot-checkout-'+purpose+'-'+(cents||0);let id=sessionStorage.getItem(key)||crypto.randomUUID();sessionStorage.setItem(key,id);try{const url=action.target.kind==='url'?action.target.url:(await api(action.target.path,{id,...(action.target.body||{}),...(cents?{cents}:{})})).url;if(typeof url!=='string'||!allowed(url,action))throw new Error('The payment page is not one this account can open.');sessionStorage.removeItem(key);location.assign(url);}catch(error){notice(error.message);busy=false;buttons();}}
 if(el('subscribe'))el('subscribe').onclick=()=>take('subscribe');if(el('manage'))el('manage').onclick=()=>take('manage');document.querySelectorAll('[data-topup]').forEach(button=>button.onclick=()=>take('top-up',Number(button.dataset.topup)));
+// A setup chosen on frockbot.com waits at /setup through checkout.
+try{if(new URLSearchParams(location.search).get('checkout')==='success'&&localStorage.getItem('frockbot-setup-pending-v1'))location.replace('/setup/apply');}catch{}
 el('refresh').onclick=()=>load();el('more').onclick=()=>load(true);load();
 `;

@@ -750,6 +750,24 @@ describe("hosted or self-hosted", () => {
   });
 });
 
+describe("homepage setup teaser", () => {
+  test("each starting point opens the chooser on a preset it knows", async () => {
+    const homepage = await publicFile("index.html");
+    const options = await Bun.file(
+      new URL("../content/setup-options.json", import.meta.url),
+    ).json();
+    const presets = [
+      ...homepage.matchAll(/href="\/setup\/#preset=([a-z-]+)"/g),
+    ].map((match) => match[1]);
+    expect(presets).toEqual(["just-works", "bring-my-keys", "all-mine"]);
+    for (const preset of presets)
+      expect(
+        options.presets.map((entry: { id: string }) => entry.id),
+      ).toContain(preset);
+    expect(homepage).toContain('href="/setup/"');
+  });
+});
+
 describe("homepage pricing", () => {
   // The plans, trial and top-ups are the Stripe Package's to state; its own
   // tests hold this section to them. The Computer rate is billing's.

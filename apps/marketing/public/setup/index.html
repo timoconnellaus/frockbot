@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Let FrockBot run everything, or bring your own computer, keys and models. Choose how you’d like it set up and see what you get, what it costs and how to start."
+    />
+    <meta name="theme-color" content="#1e1d27" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Set up FrockBot your way" />
+    <meta
+      property="og:description"
+      content="Ready to wear, or dressed up with your own computer, keys and models."
+    />
+    <meta property="og:image" content="https://frockbot.com/assets/hero.png" />
+    <meta property="og:url" content="https://frockbot.com/setup/" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="canonical" href="https://frockbot.com/setup/" />
+    <link rel="icon" href="/assets/favicon.png" />
+    <link rel="apple-touch-icon" href="/assets/app-icon.png" />
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/setup/setup.css" />
+    <script src="/script.js" defer></script>
+    <script src="/setup/setup.js" type="module"></script>
+    <title>Set it up · FrockBot</title>
+  </head>
+  <body class="setup-page">
+    <svg class="svg-sprite" aria-hidden="true">
+      <symbol id="github-mark" viewBox="0 0 24 24">
+        <path
+          d="M12 .7C5.73.7.65 5.78.65 12.05c0 5.02 3.25 9.28 7.76 10.78.57.1.78-.25.78-.55v-2.16c-3.16.69-3.83-1.34-3.83-1.34-.52-1.31-1.26-1.66-1.26-1.66-1.03-.7.08-.69.08-.69 1.14.08 1.74 1.17 1.74 1.17 1.01 1.74 2.66 1.24 3.31.95.1-.73.4-1.24.72-1.53-2.52-.29-5.17-1.26-5.17-5.62 0-1.24.44-2.25 1.17-3.05-.12-.29-.51-1.44.11-3 0 0 .95-.3 3.12 1.16a10.8 10.8 0 0 1 5.68 0c2.17-1.47 3.12-1.16 3.12-1.16.62 1.56.23 2.71.11 3 .73.8 1.17 1.81 1.17 3.05 0 4.37-2.65 5.32-5.18 5.61.41.35.77 1.05.77 2.12v3.14c0 .3.21.66.78.55a11.4 11.4 0 0 0 7.75-10.78C23.35 5.78 18.27.7 12 .7Z"
+        />
+      </symbol>
+    </svg>
+    <header class="site-header">
+      <div class="container nav-shell">
+        <a class="brand" href="/" aria-label="FrockBot home">
+          <img src="/assets/app-icon.png" alt="" width="48" height="48" />
+          <span class="brand-name"
+            >Frock<span class="brand-accent">Bot</span></span
+          >
+        </a>
+        <button
+          class="menu-button"
+          type="button"
+          aria-expanded="false"
+          aria-controls="site-nav"
+        >
+          <span></span><span></span><span></span
+          ><span class="sr-only">Toggle navigation</span>
+        </button>
+        <nav id="site-nav" class="site-nav" aria-label="Primary navigation">
+          <a href="/#why">Why FrockBot</a>
+          <a href="/how-it-works/">How it works</a>
+          <a href="/#pricing">Pricing</a>
+          <a href="/open/">Open source</a>
+          <a
+            class="github-logo-link"
+            href="https://github.com/timoconnellaus/frockbot"
+            aria-label="FrockBot source code on GitHub"
+          >
+            <svg aria-hidden="true">
+              <use href="#github-mark" />
+            </svg>
+          </a>
+          <a class="button button-small" href="https://bot.frockbot.com"
+            >Start free trial <span aria-hidden="true">→</span></a
+          >
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="setup-hero" aria-labelledby="setup-title">
+        <div class="container setup-hero-shell">
+          <div>
+            <p class="section-label">Set it up</p>
+            <h1 id="setup-title">FrockBot, <em>your way.</em></h1>
+            <p class="setup-intro">
+              Let FrockBot run everything, or bring your own computer, keys and
+              models. Choose how you’d like it set up and see what you get, what
+              it costs and how to start.
+            </p>
+          </div>
+          <div class="setup-hero-art" aria-hidden="true">
+            <img src="/assets/characters/sunny.png" alt="" />
+            <img src="/assets/characters/pixel.png" alt="" />
+          </div>
+        </div>
+      </section>
+
+      <section class="setup-section" aria-label="Setup chooser">
+        <div class="container">
+          <!-- setup:start -->
+          <!-- prettier-ignore -->
+          <div class="setup-app" data-setup><div class="setup-toolbar"><span class="setup-toolbar-label">Start from</span><div class="setup-presets" data-setup-presets><button type="button" class="setup-preset is-on" aria-pressed="true" data-action="preset" data-value="just-works" data-focus="preset-just-works">Just works</button><button type="button" class="setup-preset" aria-pressed="false" data-action="preset" data-value="bring-my-keys" data-focus="preset-bring-my-keys">Bring my keys</button><button type="button" class="setup-preset" aria-pressed="false" data-action="preset" data-value="all-mine" data-focus="preset-all-mine">All mine</button><button type="button" class="setup-preset" aria-pressed="false" data-action="preset" data-value="self-hosted" data-focus="preset-self-hosted">Self-hosted</button></div><p class="setup-saved" data-setup-saved hidden></p><p class="setup-nojs" data-setup-nojs>Turn on JavaScript to change these choices. This is FrockBot’s own setup.</p></div><div class="setup-layout"><div class="setup-questions" data-setup-questions><section class="setup-question" aria-labelledby="setup-q-host"><div class="setup-question-head"><span class="setup-number" aria-hidden="true">1</span><div><h2 id="setup-q-host">Where FrockBot runs</h2><p>The app itself: your bots, their memory and their conversations.</p></div></div><div class="setup-top"><button type="button" class="setup-chip is-on" aria-pressed="true" data-action="top" data-part="host" data-value="ours" data-focus="top-host-ours"><span class="setup-radio" aria-hidden="true"></span><span class="setup-chip-body"><span class="setup-chip-label">Ready to wear</span><span class="setup-chip-name">frockbot.com</span><span class="setup-chip-description">We run it for you. Sign in and go.</span></span></button><button type="button" class="setup-chip" aria-pressed="false" data-action="top" data-part="host" data-value="custom" data-focus="top-host-custom"><span class="setup-radio" aria-hidden="true"></span><span class="setup-chip-body"><span class="setup-chip-label">Dress it up</span><span class="setup-chip-name">Your own</span><span class="setup-chip-description">Run FrockBot yourself.</span></span></button></div></section><section class="setup-question" aria-labelledby="setup-q-computer"><div class="setup-question-head"><span class="setup-number" aria-hidden="true">2</span><div><h2 id="setup-q-computer">Where your computer runs</h2><p>Every bot shares one computer. It browses, runs code and downloads things.</p></div></div><div class="setup-top"><button type="button" class="setup-chip is-on" aria-pressed="true" data-action="top" data-part="computer" data-value="ours" data-focus="top-computer-ours"><span class="setup-radio" aria-hidden="true"></span><span class="setup-chip-body"><span class="setup-chip-label">Ready to wear</span><span class="setup-chip-name">FrockBot’s computer</span><span class="setup-chip-description">A cloud Linux desktop we run for you. Always on.</span></span></button><button type="button" class="setup-chip" aria-pressed="false" data-action="top" data-part="computer" data-value="custom" data-focus="top-computer-custom"><span class="setup-radio" aria-hidden="true"></span><span class="setup-chip-body"><span class="setup-chip-label">Dress it up</span><span class="setup-chip-name">Your own</span><span class="setup-chip-description">Run the computer on your own account or machine.</span></span></button></div></section><section class="setup-question" aria-labelledby="setup-q-ai"><div class="setup-question-head"><span class="setup-number" aria-hidden="true">3</span><div><h2 id="setup-q-ai">AI</h2><p>Let Frock AI handle it, or choose the provider and model for each job.</p></div></div><div class="setup-top"><button type="button" class="setup-chip is-on" aria-pressed="true" data-action="top" data-part="ai" data-value="ours" data-focus="top-ai-ours"><span class="setup-radio" aria-hidden="true"></span><span class="setup-chip-body"><span class="setup-chip-label">Ready to wear</span><span class="setup-chip-name">Frock AI</span><span class="setup-chip-description">We pick and run the right model for every job. Nothing to set up.</span></span></button><button type="button" class="setup-chip" aria-pressed="false" data-action="top" data-part="ai" data-value="custom" data-focus="top-ai-custom"><span class="setup-radio" aria-hidden="true"></span><span class="setup-chip-body"><span class="setup-chip-label">Dress it up</span><span class="setup-chip-name">Your providers</span><span class="setup-chip-description">Choose the provider and model for each job.</span></span></button></div></section><section class="setup-question" aria-labelledby="setup-q-search"><div class="setup-question-head"><span class="setup-number" aria-hidden="true">4</span><div><h2 id="setup-q-search">Web search</h2><p>How your bots search the web.</p></div></div><div class="setup-top"><button type="button" class="setup-chip is-on" aria-pressed="true" data-action="top" data-part="search" data-value="ours" data-focus="top-search-ours"><span class="setup-radio" aria-hidden="true"></span><span class="setup-chip-body"><span class="setup-chip-label">Ready to wear</span><span class="setup-chip-name">FrockBot’s search</span><span class="setup-chip-description">Brave, on our account. Ready to use.</span></span></button><button type="button" class="setup-chip" aria-pressed="false" data-action="top" data-part="search" data-value="custom" data-focus="top-search-custom"><span class="setup-radio" aria-hidden="true"></span><span class="setup-chip-body"><span class="setup-chip-label">Dress it up</span><span class="setup-chip-name">Your own</span><span class="setup-chip-description">Use your own search service.</span></span></button></div></section><section class="setup-question" aria-labelledby="setup-q-apps"><div class="setup-question-head"><span class="setup-number" aria-hidden="true">5</span><div><h2 id="setup-q-apps">Connected apps</h2><p>Gmail, Calendar, Notion and the rest.</p></div></div><div class="setup-top"><button type="button" class="setup-chip is-on" aria-pressed="true" data-action="top" data-part="apps" data-value="ours" data-focus="top-apps-ours"><span class="setup-radio" aria-hidden="true"></span><span class="setup-chip-body"><span class="setup-chip-label">Ready to wear</span><span class="setup-chip-name">FrockBot’s connected apps</span><span class="setup-chip-description">Gmail, Calendar, Notion and 200 more. Needs at least the BYO plan.</span></span></button><button type="button" class="setup-chip" aria-pressed="false" data-action="top" data-part="apps" data-value="custom" data-focus="top-apps-custom"><span class="setup-radio" aria-hidden="true"></span><span class="setup-chip-body"><span class="setup-chip-label">Dress it up</span><span class="setup-chip-name">Your own</span><span class="setup-chip-description">Use your own connected-apps account.</span></span></button></div></section></div><aside class="setup-result" aria-labelledby="setup-result-title" aria-live="polite" data-setup-result><div class="setup-result-head"><p class="section-label">Your setup</p><h2 id="setup-result-title">FrockBot runs everything.</h2><p>Nothing to install or look after. Your bots are ready when you sign in.</p></div><div class="setup-plan"><div><span class="setup-plan-label">Suggested plan</span><span class="setup-plan-name">Standard</span><span class="setup-plan-note">Includes US$20 of credit for our computer and models. 7-day trial.</span></div><span class="setup-plan-price">US$20 a month</span></div><figure class="setup-diagram" aria-label="Who runs what"><div class="setup-diagram-top"><div class="setup-node"><span class="setup-node-title">Your apps</span><span class="setup-node-where">Phone, Mac or browser</span></div><span class="setup-wire" aria-hidden="true"></span><div class="setup-node"><span class="setup-node-title">FrockBot</span><span class="setup-node-where">frockbot.com</span><span class="setup-node-who">FrockBot’s</span></div></div><span class="setup-wire setup-wire-down" aria-hidden="true"></span><div class="setup-diagram-grid"><div class="setup-node"><span class="setup-node-title">Computer</span><span class="setup-node-where">FrockBot’s cloud</span><span class="setup-node-who">FrockBot’s</span></div><div class="setup-node"><span class="setup-node-title">Chat and jobs</span><span class="setup-node-where">Frock AI</span><span class="setup-node-who">FrockBot’s</span></div><div class="setup-node"><span class="setup-node-title">Jev</span><span class="setup-node-where">Frock AI</span><span class="setup-node-who">FrockBot’s</span></div><div class="setup-node"><span class="setup-node-title">Voice and dictation</span><span class="setup-node-where">Frock AI · Frock AI</span><span class="setup-node-who">FrockBot’s</span></div><div class="setup-node"><span class="setup-node-title">Images</span><span class="setup-node-where">Frock AI</span><span class="setup-node-who">FrockBot’s</span></div><div class="setup-node"><span class="setup-node-title">Search and apps</span><span class="setup-node-where">FrockBot’s · FrockBot’s</span><span class="setup-node-who">FrockBot’s</span></div></div><figcaption class="setup-legend"><span class="setup-legend-ours">FrockBot’s</span><span class="setup-legend-yours">Yours</span></figcaption></figure><div class="setup-block"><h3>What it costs</h3><dl class="setup-costs"><div><dt>From credit</dt><dd>Computer time at US$2.75 per active hour, Frock AI for chat, writing, coding, thinking, vision and summaries, voice calls, dictation, images and web search, from your included credit first.</dd></div></dl></div><div class="setup-block"><h3>What you get, and what to know</h3><ul class="setup-gains"><li class="is-plus"><span aria-hidden="true">+</span><span class="sr-only">You get: </span>Nothing to install, update or keep running.</li><li class="is-plus"><span aria-hidden="true">+</span><span class="sr-only">You get: </span>The computer stays on, even when your devices are off.</li></ul></div><div class="setup-block"><h3>How to start</h3><ol class="setup-steps"><li>Sign up at bot.frockbot.com on the Standard plan, or download the app.</li><li>Nothing to do for the computer. It starts the first time a bot needs it.</li></ol></div><p class="setup-cta-note">Standard, with a 7-day trial. Your choices come with you, so you won’t set them up twice.</p><div class="setup-cta"><a class="button" href="https://bot.frockbot.com/setup/apply" data-cta="primary">Start with this setup <span aria-hidden="true">→</span></a><a class="button button-outline" href="https://frockbot.com/download/mac" data-cta="secondary">Download for Mac</a></div></aside></div></div>
+          <!-- setup:end -->
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container footer-shell">
+        <a class="brand" href="/" aria-label="FrockBot home">
+          <img src="/assets/app-icon.png" alt="" width="44" height="44" />
+          <span class="brand-name"
+            >Frock<span class="brand-accent">Bot</span></span
+          >
+        </a>
+        <div class="footer-links">
+          <span>© <span id="year">2026</span> FrockBot</span>
+          <a href="mailto:hello@frockbot.com">Contact</a>
+          <a href="/privacy/">Privacy</a>
+          <a href="/terms/">Terms</a>
+          <a href="https://bot.frockbot.com">Open app</a>
+          <a
+            class="github-logo-link"
+            href="https://github.com/timoconnellaus/frockbot"
+            aria-label="FrockBot source code on GitHub"
+          >
+            <svg aria-hidden="true">
+              <use href="#github-mark" />
+            </svg>
+          </a>
+          <span>Open source.</span>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>
