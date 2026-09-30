@@ -1,11 +1,13 @@
 // The account-wide voice session: one Durable Object per User.
 //
-// Since ADR 0031 a call is one Gemini Live session and nothing else. The
-// phone's PCM goes up as `realtimeInput`, the model's own audio comes back
-// down the same socket, and the model calls our functions while it carries on
-// talking. This object is the bridge and the bookkeeper — who may connect,
-// what costs money, what a Bot was asked to do — and it records each of those
-// in the ledger before anything external runs.
+// Since ADR 0031 a call is one speech-to-speech session and nothing else:
+// Gemini Live by default, OpenAI Realtime when the deployment chooses it
+// (`app/voice/provider.ts`). The phone's PCM goes up, the model's own audio
+// comes back down the same socket, and the model calls our functions while it
+// carries on talking. Only the provider's codec knows either wire. This
+// object is the bridge and the bookkeeper — who may connect, what costs
+// money, what a Bot was asked to do — and it records each of those in the
+// ledger before anything external runs.
 //
 // The client wire did not change with the model behind it: everything the
 // Cloudflare voice SDK used to write is written here instead, frame for frame
@@ -49,24 +51,26 @@ import {
   type VoiceTimingV1,
 } from "@frockbot/app/voice/diagnostics";
 import {
-  buildGeminiLiveSetupV1,
-  decodeGeminiServerFrameV1,
-  encodeGeminiAudioFrameV1,
-  encodeGeminiTextTurnV1,
-  encodeGeminiToolResponseV1,
-  geminiLiveUrlV1,
-  GEMINI_LIVE_ENDPOINT_V1,
-  GEMINI_LIVE_MODEL_V1,
-  GEMINI_LIVE_UNKNOWN_HANDLE_CLOSE_V1,
-  type GeminiFunctionCallV1,
-  type GeminiServerEventV1,
-} from "@frockbot/app/voice/gemini-live";
+  voiceProviderDailyAudioSecondsV1,
+  type VoiceFunctionCallV1,
+  type VoiceProviderEndpointV1,
+  type VoiceProviderV1,
+  type VoiceSessionCodecV1,
+  type VoiceSessionEventV1,
+  type VoiceSessionSetupV1,
+  type VoiceToolAnswerV1,
+} from "@frockbot/app/voice/provider";
+import {
+  chooseVoiceProviderV1,
+  type VoiceProviderChoiceV1,
+} from "@frockbot/app/voice/providers";
 import {
   resolveBotVoiceV1,
   type BotVoiceAppearanceV1,
 } from "@frockbot/app/voice/appearance";
 import {
   VoiceLedgerV1,
+  VOICE_METER_CAPS_V1,
   voiceCallIsStaleV1,
   voiceCallRejoinWindowMsV1,
   voiceTurnOrdinalV1,
@@ -290,11 +294,18 @@ export interface VoiceAssistantEnv {
   /** Product events (app/analytics/events.ts); absent writes none. */
   ANALYTICS?: AnalyticsEngineDataset;
   AI?: Ai;
+  /** Dictation's key, and the call's when it runs on OpenAI Realtime. */
   OPENAI_API_KEY?: string;
-  /** The Live session's key. Without it there is no voice session at all. */
+  /** The Gemini Live session's key. */
   GEMINI_API_KEY?: string;
   /**
-   * A stand-in Live endpoint, for tests only. Production never sets it, and
+   * Which provider a call runs on: `gemini-live` (the default) or
+   * `openai-realtime`. A `vars` entry from the profile's `voice.provider`,
+   * whose schema admits only those two; any other value runs the default.
+   */
+  VOICE_PROVIDER?: string;
+  /**
+   * A stand-in endpoint for the chosen provider, for tests only. Production never sets it, and
    * `production-secrets.ts` refuses a deployment that does.
    */
   VOICE_ASSISTANT_UPSTREAM_URL?: string;
@@ -317,19 +328,38 @@ export interface VoiceAssistantEnv {
   FLOCK_AI_GATEWAY_TOKEN?: string;
 }
 
+/** The provider this deployment's calls run on, and the key that opens it. */
+export function voiceAssistantProviderV1(env: {
+  GEMINI_API_KEY?: string;
+  OPENAI_API_KEY?: string;
+  VOICE_PROVIDER?: string;
+}): VoiceProviderChoiceV1 {
+  return chooseVoiceProviderV1({
+    deployment: env.VOICE_PROVIDER,
+    keys: {
+      GEMINI_API_KEY: env.GEMINI_API_KEY,
+      OPENAI_API_KEY: env.OPENAI_API_KEY,
+    },
+  });
+}
+
 /**
  * True when the deployment can run the assistant at all.
  *
- * One key now: the session is the model, the ears and the mouth. The `AI`
- * binding is still wanted for the end-of-call memory update, but a deployment
- * without it can hold a conversation, so it does not gate the control.
+ * One key: the chosen provider's, because the session is the model, the ears
+ * and the mouth. The `AI` binding is still wanted for the end-of-call memory
+ * update, but a deployment without it can hold a conversation, so it does not
+ * gate the control.
  */
 export function voiceAssistantConfiguredV1(env: {
   GEMINI_API_KEY?: string;
+  OPENAI_API_KEY?: string;
+  VOICE_PROVIDER?: string;
   VOICE_ASSISTANT_UPSTREAM_URL?: string;
 }): boolean {
   return Boolean(
-    env.GEMINI_API_KEY?.trim() || env.VOICE_ASSISTANT_UPSTREAM_URL?.trim(),
+    voiceAssistantProviderV1(env).key ||
+    env.VOICE_ASSISTANT_UPSTREAM_URL?.trim(),
   );
 }
 
@@ -381,7 +411,7 @@ interface LiveCall {
    */
   sequence: number;
   promptContext: Promise<Omit<VoiceAssistantPromptInputV1, "now">>;
-  session?: GeminiSessionV1;
+  session?: VoiceSessionV1;
   /**
    * The newest resumption handle the session was given. Sleep keeps it, and
    * wake offers it back when it may be offered; otherwise, and when the server
@@ -547,7 +577,7 @@ class OpeningAttempt {
   phase: VoiceOpeningPhaseV1 = "admitting";
   cancelled = false;
   owningCallId?: string;
-  session?: GeminiSessionV1;
+  session?: VoiceSessionV1;
   lastControlSequence = 0;
   lastControl?: { action: VoiceControlActionV1; muted?: boolean };
   readonly abort = new AbortController();
@@ -596,13 +626,15 @@ class OpeningAttempt {
 }
 
 /**
- * One Gemini Live session, as the object drives it.
+ * One provider session, as the object drives it.
  *
- * It owns exactly one socket and the audio waiting for it to be ready. Every
- * decision — what the setup says, what to do with a frame, when to sleep —
- * belongs to the call above; this is the transport and the buffer.
+ * It owns exactly one socket, that socket's codec, and the audio waiting for
+ * it to be ready. Every decision — what the setup says, what to do with an
+ * event, when to sleep — belongs to the call above; this is the transport and
+ * the buffer. What a provider's protocol owes the server by itself (OpenAI's
+ * `response.create` after a response ends, say) the codec answers here.
  */
-class GeminiSessionV1 {
+class VoiceSessionV1 {
   state: VoiceAssistantUpstreamStateV1 = "starting";
   private socket: WebSocket | undefined;
   private ready = false;
@@ -622,21 +654,29 @@ class GeminiSessionV1 {
    * never settle.
    */
   private chain: Promise<void> = Promise.resolve();
+  private readonly codec: VoiceSessionCodecV1;
 
   constructor(
     private readonly options: {
-      url: string;
-      onEvent: (event: GeminiServerEventV1) => void | Promise<void>;
+      provider: VoiceProviderV1;
+      endpoint: VoiceProviderEndpointV1;
+      onEvent: (event: VoiceSessionEventV1) => void | Promise<void>;
       onClosed: (code: number, reason: string) => void;
-      open: (url: string, signal?: AbortSignal) => Promise<WebSocket>;
+      open: (
+        endpoint: VoiceProviderEndpointV1,
+        signal?: AbortSignal,
+      ) => Promise<WebSocket>;
       signal?: AbortSignal;
       /**
        * Lifecycle milestones for an opt-in diagnostic trace, or absent —
-       * which is every ordinary call. Never the url, which carries the key.
+       * which is every ordinary call. Never the endpoint, which carries the
+       * key.
        */
       timing?: (event: string, fields?: Record<string, unknown>) => void;
     },
-  ) {}
+  ) {
+    this.codec = options.provider.codec();
+  }
 
   /**
    * Transport only. Error and close handlers attach immediately; setup is
@@ -645,7 +685,7 @@ class GeminiSessionV1 {
   async connect(): Promise<void> {
     this.options.timing?.("upstream-open-start");
     const socket = await this.options.open(
-      this.options.url,
+      this.options.endpoint,
       this.options.signal,
     );
     this.options.timing?.("upstream-socket-open");
@@ -665,7 +705,9 @@ class GeminiSessionV1 {
         typeof event.data === "string"
           ? event.data
           : new TextDecoder().decode(event.data as ArrayBuffer);
-      for (const decoded of decodeGeminiServerFrameV1(raw)) {
+      const { events, replies } = this.codec.decode(raw);
+      this.write(replies);
+      for (const decoded of events) {
         if (decoded.kind === "setup-complete") {
           this.ready = true;
           this.state = "awake";
@@ -706,11 +748,11 @@ class GeminiSessionV1 {
    * Sends setup once the prompt is ready and waits for the acknowledgement.
    * Audio, text and tool responses stay gated on `ready`.
    */
-  async configure(setup: Record<string, unknown>): Promise<void> {
+  async configure(setup: VoiceSessionSetupV1): Promise<void> {
     if (!this.socket || this.closedByUs) {
       throw new Error("the voice service connection closed");
     }
-    this.send(setup);
+    this.write(this.codec.setup(setup));
     this.options.timing?.("upstream-setup-sent");
     if (this.closedByUs) {
       this.openedAck();
@@ -726,12 +768,24 @@ class GeminiSessionV1 {
     this.openedFail = (error) => reject(error);
   });
 
-  send(frame: Record<string, unknown>): void {
+  /** A whole turn in text, answered as if it had been said. */
+  sendText(text: string): void {
+    this.write(this.codec.textTurn(text));
+  }
+
+  sendToolAnswers(answers: readonly VoiceToolAnswerV1[]): void {
+    this.write(this.codec.toolAnswers(answers));
+  }
+
+  private write(frames: readonly string[]): void {
     if (!this.socket) return;
-    try {
-      this.socket.send(JSON.stringify(frame));
-    } catch {
-      // A socket that has gone is handled by its own close event.
+    for (const frame of frames) {
+      try {
+        this.socket.send(frame);
+      } catch {
+        // A socket that has gone is handled by its own close event.
+        return;
+      }
     }
   }
 
@@ -760,7 +814,7 @@ class GeminiSessionV1 {
       return;
     }
     this.sent(false);
-    this.send(encodeGeminiAudioFrameV1(pcm));
+    this.write(this.codec.audio(pcm));
   }
 
   /** The first frame this session put on the wire, and whether it waited. */
@@ -775,7 +829,7 @@ class GeminiSessionV1 {
     this.pending = [];
     this.pendingBytes = 0;
     if (held.length > 0) this.sent(true);
-    for (const chunk of held) this.send(encodeGeminiAudioFrameV1(chunk));
+    for (const chunk of held) this.write(this.codec.audio(chunk));
   }
 
   isOpen(): boolean {
@@ -918,26 +972,37 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   // -- seams a test subclass overrides ---------------------------------------
 
   /**
-   * The Live endpoint, with this deployment's key on it.
+   * The provider a call runs on and the key that opens it. The deployment's
+   * today; the place an account's own choice and key will be read.
+   */
+  protected voiceChoice(): VoiceProviderChoiceV1 {
+    return voiceAssistantProviderV1(this.env);
+  }
+
+  private voiceProvider(): VoiceProviderV1 {
+    return this.voiceChoice().provider;
+  }
+
+  /**
+   * Where a session connects, with the provider's key on it.
    *
    * `VOICE_ASSISTANT_UPSTREAM_URL` points the session at a fake, which is what
    * the workerd suite drives: the object's own behaviour is the thing under
-   * test, and Google answering is not.
+   * test, and the provider answering is not.
    */
-  protected geminiUrl(): string | undefined {
+  private voiceEndpoint(): VoiceProviderEndpointV1 | undefined {
+    const { provider, key } = this.voiceChoice();
     const stand = this.env.VOICE_ASSISTANT_UPSTREAM_URL?.trim();
-    if (stand)
-      return geminiLiveUrlV1(this.env.GEMINI_API_KEY?.trim() ?? "", stand);
-    const key = this.env.GEMINI_API_KEY?.trim();
-    return key ? geminiLiveUrlV1(key, GEMINI_LIVE_ENDPOINT_V1) : undefined;
+    if (stand) return provider.endpoint(key ?? "", stand);
+    return key ? provider.endpoint(key) : undefined;
   }
 
   /** Opens the upstream socket. One seam, so a test can refuse or script it. */
-  protected openGeminiSocket(
-    url: string,
+  protected openVoiceSocket(
+    endpoint: VoiceProviderEndpointV1,
     signal?: AbortSignal,
   ): Promise<WebSocket> {
-    return fetchVoiceUpstreamSocketV1(url, {}, signal);
+    return fetchVoiceUpstreamSocketV1(endpoint.url, endpoint.headers, signal);
   }
 
   protected async chatCompletion(
@@ -1006,7 +1071,16 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   // -- ledger ---------------------------------------------------------------
 
   protected ledger(): VoiceLedgerV1 {
-    return new VoiceLedgerV1(this.voiceStorage(), this.name);
+    // The day's audio is capped in money, so a provider whose seconds cost
+    // more is given fewer of them.
+    return new VoiceLedgerV1(
+      this.voiceStorage(),
+      this.name,
+      voiceProviderDailyAudioSecondsV1(this.voiceProvider().rates, {
+        audioInSeconds: VOICE_METER_CAPS_V1.audioInSeconds,
+        audioOutSeconds: VOICE_METER_CAPS_V1.audioOutSeconds,
+      }),
+    );
   }
 
   private voiceStorage(): VoiceLedgerStorageV1 {
@@ -1734,7 +1808,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         const call = this.#calls.get(connection.id);
         if (!call?.session?.isOpen()) return;
         call.transcript = frame.text;
-        call.session.send(encodeGeminiTextTurnV1(frame.text));
+        call.session.sendText(frame.text);
         return;
       }
       case "start_call":
@@ -1978,7 +2052,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     return { paused, muted };
   }
 
-  private finishWithoutGemini(
+  private finishWithoutSession(
     connection: Connection,
     call: LiveCall,
     attempt: OpeningAttempt,
@@ -2159,7 +2233,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       muted: call.muted,
     });
     if (call.muted || call.exhausted) {
-      this.finishWithoutGemini(connection, call, attempt);
+      this.finishWithoutSession(connection, call, attempt);
       return;
     }
     await this.openSession(connection, call, attempt, { resume: true });
@@ -2258,7 +2332,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         muted: live.muted,
       });
       if (live.paused || live.muted || live.exhausted) {
-        this.finishWithoutGemini(connection, live, attempt);
+        this.finishWithoutSession(connection, live, attempt);
         return;
       }
       await this.openSession(connection, live, attempt, {});
@@ -2269,7 +2343,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       await this.failOpen(connection, attempt, "unconfigured");
       return;
     }
-    if (!this.geminiUrl()) {
+    if (!this.voiceEndpoint()) {
       await this.failOpen(connection, attempt, "unconfigured");
       return;
     }
@@ -2413,7 +2487,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     // Resume: opening it here would bill the empty room. Listening is the
     // call being up, not the model being on the line.
     if (paused || call.muted) {
-      this.finishWithoutGemini(connection, call, attempt);
+      this.finishWithoutSession(connection, call, attempt);
       return;
     }
     await this.openSession(connection, call, attempt, {});
@@ -2444,14 +2518,15 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     attempt: OpeningAttempt,
     options: SessionContinuityV1,
   ): Promise<void> {
-    const url = this.geminiUrl();
-    if (!url) {
+    const endpoint = this.voiceEndpoint();
+    if (!endpoint) {
       await this.failOpen(connection, attempt, "unconfigured");
       return;
     }
+    const provider = this.voiceProvider();
     if (!this.stillOpening(connection, attempt)) return;
     if (call.paused || call.muted || call.exhausted) {
-      this.finishWithoutGemini(connection, call, attempt);
+      this.finishWithoutSession(connection, call, attempt);
       return;
     }
     attempt.phase = "preparing";
@@ -2459,8 +2534,9 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     call.inboundSequence = undefined;
     call.outboundSequence = 0;
     const timing = this.timingSink(connection);
-    const session = new GeminiSessionV1({
-      url,
+    const session = new VoiceSessionV1({
+      provider,
+      endpoint,
       onEvent: (event) =>
         this.onSessionEvent(connection.id, call.callId, event, attempt.id),
       onClosed: (code, reason) => {
@@ -2472,7 +2548,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
           reason,
         );
       },
-      open: (target, signal) => this.openGeminiSocket(target, signal),
+      open: (target, signal) => this.openVoiceSocket(target, signal),
       signal: attempt.abort.signal,
       ...(timing ? { timing } : {}),
     });
@@ -2481,16 +2557,22 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     this.trace(connection, "upstream", {
       state: "starting",
       attempt: attempt.id,
+      provider: provider.id,
     });
     this.sendState(connection, call);
 
-    const prompt = this.prepareSessionSetup(connection, call, options);
+    const prompt = this.prepareSessionSetup(
+      connection,
+      call,
+      options,
+      provider,
+    );
     try {
       await Promise.all([prompt, session.connect()]);
     } catch (error) {
       if (!this.stillOpening(connection, attempt)) return;
       if (call.paused || call.muted || call.exhausted) {
-        this.finishWithoutGemini(connection, call, attempt);
+        this.finishWithoutSession(connection, call, attempt);
         return;
       }
       this.trace(connection, "upstream-failed", {
@@ -2507,7 +2589,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       return;
     }
     if (call.paused || call.muted || call.exhausted) {
-      this.finishWithoutGemini(connection, call, attempt);
+      this.finishWithoutSession(connection, call, attempt);
       return;
     }
     const setup = await prompt;
@@ -2516,7 +2598,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       return;
     }
     if (call.paused || call.muted || call.exhausted) {
-      this.finishWithoutGemini(connection, call, attempt);
+      this.finishWithoutSession(connection, call, attempt);
       return;
     }
     this.trace(connection, "upstream-setup", {
@@ -2532,11 +2614,11 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     }
     attempt.phase = "configuring";
     try {
-      await session.configure(setup.frame);
+      await session.configure(setup.setup);
     } catch (error) {
       if (!this.stillOpening(connection, attempt)) return;
       if (call.paused || call.muted || call.exhausted) {
-        this.finishWithoutGemini(connection, call, attempt);
+        this.finishWithoutSession(connection, call, attempt);
         return;
       }
       this.trace(connection, "upstream-failed", {
@@ -2553,7 +2635,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       return;
     }
     if (call.paused || call.muted || call.exhausted) {
-      this.finishWithoutGemini(connection, call, attempt);
+      this.finishWithoutSession(connection, call, attempt);
       return;
     }
     call.setupFingerprint = setup.fingerprint;
@@ -2571,8 +2653,9 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     connection: Connection,
     call: LiveCall,
     options: SessionContinuityV1,
+    provider: VoiceProviderV1,
   ): Promise<{
-    frame: Record<string, unknown>;
+    setup: VoiceSessionSetupV1;
     instruction: string;
     fingerprint: string;
     resumed: boolean;
@@ -2600,10 +2683,10 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       : VOICE_ACCOUNT_FUNCTION_DECLARATIONS_V1.map((item) => item.name);
     const fingerprint = await voiceSetupFingerprintV1({
       botId: call.botId,
-      model: GEMINI_LIVE_MODEL_V1,
+      model: provider.model,
       voiceName: call.voice.voiceName,
       tools,
-      googleSearch: true,
+      googleSearch: provider.webSearch,
       memoryIdentity: voiceMemoryIdentityV1({
         durableIds: (sessionMemory?.record.durable ?? []).map(
           (entry) => entry.id,
@@ -2614,7 +2697,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       }),
     });
     const offer = options.resume
-      ? await this.resumptionOffer(call, fingerprint)
+      ? await this.resumptionOffer(call, fingerprint, provider)
       : undefined;
     const handle = offer?.status === "offer" ? offer.handle : undefined;
     // A call that goes on keeps its conversation one way or the other: the
@@ -2630,6 +2713,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       now: this.now(),
       ...(handover.length > 0 ? { handover } : {}),
       ...(runningTasks.length > 0 ? { runningTasks } : {}),
+      ...(provider.webSearch ? {} : { webSearch: false }),
     });
     return {
       instruction,
@@ -2637,15 +2721,14 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       resumed: Boolean(handle),
       handover: handover.length,
       ...(offer?.status === "fresh" ? { refused: offer.reason } : {}),
-      frame: buildGeminiLiveSetupV1({
-        systemInstruction: instruction,
+      setup: {
+        instruction,
         voiceName: call.voice.voiceName,
-        functionDeclarations: call.botId
+        functions: call.botId
           ? VOICE_FUNCTION_DECLARATIONS_V1
           : VOICE_ACCOUNT_FUNCTION_DECLARATIONS_V1,
-        googleSearch: true,
         ...(handle ? { resumptionHandle: handle } : {}),
-      }),
+      },
     };
   }
 
@@ -2653,15 +2736,16 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   private async resumptionOffer(
     call: LiveCall,
     fingerprint: string,
+    provider: VoiceProviderV1,
   ): Promise<VoiceResumptionOfferV1> {
-    if (!call.resumptionHandle || !call.resumable) {
+    if (!provider.resumes || !call.resumptionHandle || !call.resumable) {
       return { status: "fresh", reason: "not-resumable" };
     }
     return offerVoiceResumptionV1({
       record: await this.ledger().resumption(call.callId),
       callId: call.callId,
       botId: call.botId,
-      model: GEMINI_LIVE_MODEL_V1,
+      model: provider.model,
       fingerprint,
       uncertainEffects: await this.hasUncertainEffects(call),
     });
@@ -2683,7 +2767,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       schemaVersion: 1,
       callId: call.callId,
       botId: call.botId,
-      model: GEMINI_LIVE_MODEL_V1,
+      model: this.voiceProvider().model,
       fingerprint: call.setupFingerprint,
       ...(call.resumptionHandle ? { handle: call.resumptionHandle } : {}),
       resumable: call.resumable === true,
@@ -2968,7 +3052,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   private async onSessionEvent(
     connectionId: string,
     callId: string,
-    event: GeminiServerEventV1,
+    event: VoiceSessionEventV1,
     attemptId: string,
   ): Promise<void> {
     const live = this.live(connectionId, callId);
@@ -3080,6 +3164,11 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
           responseTokens: event.usage.responseTokens,
         });
         return;
+      case "provider-error":
+        this.trace(connection, "upstream-error", {
+          message: event.message.slice(0, 200),
+        });
+        return;
     }
   }
 
@@ -3118,7 +3207,10 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       this.sendState(connection, call);
       return;
     }
-    if (code === GEMINI_LIVE_UNKNOWN_HANDLE_CLOSE_V1 && call.resumptionHandle) {
+    if (
+      code === this.voiceProvider().unknownHandleCloseCode &&
+      call.resumptionHandle
+    ) {
       call.resumptionHandle = undefined;
       call.resumable = false;
       await this.ledger().clearResumption(call.callId);
@@ -3410,7 +3502,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   private async runToolCalls(
     connection: Connection,
     call: LiveCall,
-    calls: readonly GeminiFunctionCallV1[],
+    calls: readonly VoiceFunctionCallV1[],
   ): Promise<void> {
     const identity = this.identity(connection);
     if (!identity) return;
@@ -3424,7 +3516,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       (await call.promptContext).timezone,
     );
     const answered: {
-      request: GeminiFunctionCallV1;
+      request: VoiceFunctionCallV1;
       outcome: VoiceToolOutcomeV1;
     }[] = [];
     let invalidated = false;
@@ -3460,16 +3552,14 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       if (outcome.memoryInvalidated) invalidated = true;
       if (invalidated || call.session !== asker) continue;
       const memoryTool = request.name.startsWith("memory_");
-      asker?.send(
-        encodeGeminiToolResponseV1([
-          {
-            id: request.id,
-            name: request.name,
-            response: voiceToolResponseV1(outcome),
-            ...(memoryTool ? {} : { scheduling: "WHEN_IDLE" as const }),
-          },
-        ]),
-      );
+      asker?.sendToolAnswers([
+        {
+          id: request.id,
+          name: request.name,
+          response: voiceToolResponseV1(outcome),
+          ...(memoryTool ? {} : { whenIdle: true }),
+        },
+      ]);
       if (asker && call.turnId === turnId) call.callingGenerationOpen = true;
     }
     const kept =
@@ -3492,15 +3582,13 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       // with it: what the replacement says with the results is the answer.
       if (call.turnId === turnId) call.callingGenerationOpen = false;
       if (!replaced || answered.length === 0 || !call.session?.isOpen()) return;
-      call.session.send(
-        encodeGeminiTextTurnV1(
-          renderVoiceToolResultTurnV1(
-            answered.map(({ request, outcome }) => ({
-              name: request.name,
-              args: request.args,
-              result: outcome.result,
-            })),
-          ),
+      call.session.sendText(
+        renderVoiceToolResultTurnV1(
+          answered.map(({ request, outcome }) => ({
+            name: request.name,
+            args: request.args,
+            result: outcome.result,
+          })),
         ),
       );
       this.trace(connection, "tool-results-relayed", {
@@ -4463,18 +4551,16 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     const asked = call.subagentCalls.get(delegation.runId);
     call.subagentCalls.delete(delegation.runId);
     if (asked) {
-      session.send(
-        encodeGeminiToolResponseV1([
-          {
-            id: asked.id,
-            name: asked.name,
-            response: { result: told },
-            scheduling: "WHEN_IDLE",
-          },
-        ]),
-      );
+      session.sendToolAnswers([
+        {
+          id: asked.id,
+          name: asked.name,
+          response: { result: told },
+          whenIdle: true,
+        },
+      ]);
     } else {
-      session.send(encodeGeminiTextTurnV1(told));
+      session.sendText(told);
     }
     this.trace(connection, "answer-told", {
       run: delegation.runId,

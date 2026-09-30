@@ -7,6 +7,7 @@ import {
   encodeGeminiBase64V1,
   encodeGeminiTextTurnV1,
   encodeGeminiToolResponseV1,
+  geminiLiveProviderV1,
   geminiLiveUrlV1,
   GEMINI_LIVE_INPUT_MIME_V1,
   GEMINI_LIVE_MODEL_V1,
@@ -305,5 +306,77 @@ describe("decoding what the server sends", () => {
     expect(decodeGeminiServerFrameV1('{"goAway":{"timeLeft":"10s"}}')).toEqual([
       { kind: "go-away", timeLeft: "10s" },
     ]);
+  });
+});
+
+describe("behind the provider seam", () => {
+  const codec = geminiLiveProviderV1.codec();
+
+  test("writes exactly the frames the object wrote before the seam", () => {
+    const setup = {
+      instruction: "You are Sunny.",
+      voiceName: "Puck",
+      functions: [
+        {
+          name: "status",
+          description: "Read progress.",
+          parameters: { type: "OBJECT", properties: {} },
+          behavior: "NON_BLOCKING" as const,
+        },
+      ],
+      resumptionHandle: "handle-1",
+    };
+    expect(codec.setup(setup)).toEqual([
+      JSON.stringify(
+        buildGeminiLiveSetupV1({
+          systemInstruction: setup.instruction,
+          voiceName: setup.voiceName,
+          functionDeclarations: setup.functions,
+          googleSearch: true,
+          resumptionHandle: "handle-1",
+        }),
+      ),
+    ]);
+    const pcm = new Uint8Array([1, 2, 3, 4]);
+    expect(codec.audio(pcm)).toEqual([
+      JSON.stringify(encodeGeminiAudioFrameV1(pcm)),
+    ]);
+    expect(codec.textTurn("hi")).toEqual([
+      JSON.stringify(encodeGeminiTextTurnV1("hi")),
+    ]);
+    expect(
+      codec.toolAnswers([
+        { id: "a", name: "status", response: { ok: 1 }, whenIdle: true },
+        { id: "b", name: "memory_write", response: { ok: 2 } },
+      ]),
+    ).toEqual([
+      JSON.stringify(
+        encodeGeminiToolResponseV1([
+          {
+            id: "a",
+            name: "status",
+            response: { ok: 1 },
+            scheduling: "WHEN_IDLE",
+          },
+          { id: "b", name: "memory_write", response: { ok: 2 } },
+        ]),
+      ),
+    ]);
+  });
+
+  test("decodes as the wire decoder does and owes the server nothing", () => {
+    const raw = JSON.stringify({ setupComplete: {} });
+    expect(codec.decode(raw)).toEqual({
+      events: decodeGeminiServerFrameV1(raw),
+      replies: [],
+    });
+  });
+
+  test("puts the key on the url, and resumes", () => {
+    expect(geminiLiveProviderV1.endpoint("k").url).toBe(geminiLiveUrlV1("k"));
+    expect(geminiLiveProviderV1.endpoint("k").headers).toEqual({});
+    expect(geminiLiveProviderV1.resumes).toBe(true);
+    expect(geminiLiveProviderV1.unknownHandleCloseCode).toBe(1008);
+    expect(geminiLiveProviderV1.webSearch).toBe(true);
   });
 });

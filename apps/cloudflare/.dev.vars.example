@@ -24,12 +24,16 @@ FROCK_AI_GATEWAY_TOKEN=replace-with-ai-gateway-authorization-token
 # microphone and waveform buttons answer that voice is not set up.
 # The composer's dictation opens `wss://api.openai.com/v1/realtime` with this
 # key from the Worker (`gpt-live-transcribe`). The client never sees it.
-# Absent, dictation says voice is not set up.
+# Absent, dictation says voice is not set up. It also opens the voice session
+# when VOICE_PROVIDER is openai-realtime.
 OPENAI_API_KEY=replace-with-an-openai-api-key
-# The continuous voice session: one Gemini Live socket per call, which hears,
-# thinks and speaks. The key goes on the upstream URL from the Worker and
-# never leaves it. Absent, starting a call says voice is not set up.
+# The continuous voice session on Gemini Live, the default provider: one
+# socket per call, which hears, thinks and speaks. The key goes on the
+# upstream URL from the Worker and never leaves it. Absent, starting a call on
+# Gemini Live says voice is not set up.
 GEMINI_API_KEY=replace-with-a-google-ai-studio-api-key
+# Optional: run calls on OpenAI Realtime (`gpt-realtime-2.1`) instead.
+# VOICE_PROVIDER=openai-realtime
 # Optional: a gateway model for the end-of-call memory update instead of the
 # platform's Auto route. The call itself has no chat model.
 # VOICE_ASSISTANT_MODEL=workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast

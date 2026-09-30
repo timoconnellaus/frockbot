@@ -205,11 +205,11 @@ export const REQUIRED_PRODUCTION_SECRETS_V1: readonly ProductionSecretV1[] = [
   },
   {
     name: "OPENAI_API_KEY",
-    why: "Opens the composer's dictation session. Absent, dictation answers that voice is not set up.",
+    why: "Opens the composer's dictation session, and the voice session when `VOICE_PROVIDER` is `openai-realtime`. Absent, dictation answers that voice is not set up.",
   },
   {
     name: "GEMINI_API_KEY",
-    why: "Runs the voice session: one Gemini Live socket per call, ears, words and voice together. Absent, the voice session refuses to start.",
+    why: "Runs the voice session on the default provider: one Gemini Live socket per call, ears, words and voice together. Absent, a Gemini Live deployment's voice session refuses to start.",
   },
 ];
 
@@ -318,10 +318,14 @@ export const NON_SECRET_WORKER_SETTINGS_V1: readonly NonSecretWorkerSettingV1[] 
       why: "An optional `vars` entry pinning the gateway model the end-of-call memory update is asked; the platform's Auto route when unset.",
     },
     {
+      name: "VOICE_PROVIDER",
+      why: "The `vars` entry a profile's `voice.provider` writes: which speech-to-speech provider a call runs on. Gemini Live when unset.",
+    },
+    {
       name: "VOICE_ASSISTANT_UPSTREAM_URL",
       why: "Points the voice session at a local stand-in; set by the test harness only.",
       forbiddenLive:
-        "every voice call would be sent to that host instead of Gemini Live",
+        "every voice call would be sent to that host instead of the voice provider",
     },
     {
       name: "VOICE_DICTATION_CLEANUP_MODEL",

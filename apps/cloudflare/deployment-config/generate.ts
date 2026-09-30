@@ -616,6 +616,7 @@ function identityVarsV1(
     vars.ACCESS_AUD = profile.access.aud;
   }
   if (profile.email) vars.EMAIL_DOMAIN = profile.email.domain;
+  if (profile.voice) vars.VOICE_PROVIDER = profile.voice.provider;
   Object.assign(vars, profile.authEnvironment?.vars ?? {});
   Object.assign(vars, profile.paymentsEnvironment?.vars ?? {});
   // A string rather than a JSON var, so it is read and decoded exactly like

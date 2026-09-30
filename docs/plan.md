@@ -348,7 +348,7 @@ _Done._ Applets folded into Plugins by deletion, not by renaming the facet. A Pl
 
 ## Not now
 
-Billing, package publishing, a Plugin marketplace, and avatar wearables. Each is an addition to the target, not a change to it. Voice exists, scoped to one Bot ([ADR 0029](adr/0029-voice-per-bot.md)) and, since [ADR 0031](adr/0031-voice-gemini-live.md), one Gemini Live session that is the Bot's other mode rather than a layer over its chat model. Composer toolbar, message actions and bot-profile slots stay closed until a host region draws them.
+Billing, package publishing, a Plugin marketplace, and avatar wearables. Each is an addition to the target, not a change to it. Voice exists, scoped to one Bot ([ADR 0029](adr/0029-voice-per-bot.md)) and, since [ADR 0031](adr/0031-voice-gemini-live.md), one speech-to-speech session (Gemini Live by default, or OpenAI Realtime; [`voice.md`](voice.md)) that is the Bot's other mode rather than a layer over its chat model. Composer toolbar, message actions and bot-profile slots stay closed until a host region draws them.
 
 ## Billing implementation awaiting launch
 

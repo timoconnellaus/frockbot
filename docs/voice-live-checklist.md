@@ -23,12 +23,24 @@ untested end to end. The
 deterministic checks that _have_ run are in [`voice.md`](voice.md) under
 "Verification".
 
+OpenAI Realtime, the second provider behind the same seam, has been driven
+only against a scripted upstream (`apps/cloudflare/test/voice-openai-fake.ts`,
+the workerd suite's "a call on OpenAI Realtime"): talk, a tool call, barge-in,
+hang-up and a wake. No call has been made against the real OpenAI endpoint.
+Its own half of this list is below, under "On OpenAI Realtime".
+
 ## Prerequisites
 
-- `apps/cloudflare/.dev.vars` with `OPENAI_API_KEY` (dictation) and
-  `GEMINI_API_KEY` (the session) — see `.dev.vars.example`. Both are required
-  production secrets, so the same names go into the repository's production
-  environment before a release.
+- `apps/cloudflare/.dev.vars` with `OPENAI_API_KEY` (dictation, and the
+  session on OpenAI Realtime) and `GEMINI_API_KEY` (the session on Gemini
+  Live) — see `.dev.vars.example`. Both are required production secrets, so
+  the same names go into the repository's production environment before a
+  release.
+- Which provider a call runs on is `VOICE_PROVIDER` — `gemini-live` when
+  unset, `openai-realtime` otherwise; a deployment sets it with the profile's
+  `voice.provider`, and `deployments/staging.json` names OpenAI Realtime. The
+  session list below holds for either, except where a step names Gemini; the
+  differences have their own section.
 - The `AI` binding reaching Workers AI, which is the Frock AI gateway
   transport for the end-of-call memory update. The call itself does not use
   it: a stack without it holds a conversation and remembers nothing
@@ -169,6 +181,48 @@ the list stands as it was.
     browser with the capture device substituted: a WAV of zeros said it once
     and the call stayed live, and a fake device playing a tone never said it
     in thirty seconds.
+
+## On OpenAI Realtime
+
+Run the session list above on a deployment whose `VOICE_PROVIDER` is
+`openai-realtime` (staging, or `VOICE_PROVIDER=openai-realtime` in
+`.dev.vars`), then these, which are what the provider changes. The `upstream`
+trace line at the start of each session names the provider, so check it says
+`openai-realtime` before believing anything else.
+
+1. **Talk.** Start a call and ask "what bots do I have". Expect: the reply in
+   the Bot's mapped OpenAI voice (`OPENAI_VOICE_BY_GEMINI_VOICE_V1`), the turn
+   in the ledger with what you said — transcribed by `gpt-4o-transcribe` — and
+   what it answered. Listen for words dropped at the start of what you say: the
+   first chunk after a wake is resampled from 16 kHz like every other, and a
+   wrong rate sounds like a chipmunk or a slur rather than silence.
+2. **Every voice, by ear.** Step 3 above, again: the thirty map onto ten, so
+   Bots on different characters can share a voice. Eleven characters land on
+   ten voices; any other pair that sounds alike is a mapping to change.
+3. **Tool call.** Ask "what are you working on" (`status`), then "plan my
+   week" (`subagent`). Expect: each answered in speech after the result, and
+   one ledger turn per question, not two. The `subagent` answer comes back as
+   a turn when the Bot finishes — listen for it being told at a pause.
+4. **Today's facts.** Ask "what's the weather in Sydney right now". It has no
+   search of its own, so expect a hand-off to `subagent` and the answer when
+   it lands — never an invented forecast.
+5. **Interrupt.** Ask for something long and talk over it. Expect: playback
+   stops within ~200 ms, and when you then ask "what were you saying?" the
+   model knows it was cut off where you heard it stop, not at the end of what
+   it had generated — that is the truncate. A cough must not stop it.
+6. **Hang up.** Say goodbye. Expect: the goodbye is heard in full and the call
+   ends (`end_call`), with no error line.
+7. **Wake.** Stay silent until `voice/state` says `asleep`, then speak. It
+   cannot resume, so expect a fresh session that still knows what you were
+   talking about from the carried turns.
+8. **An hour.** Keep a call talking past sixty minutes. Expect: OpenAI ends
+   the session and the call reopens (read as `goAway`) rather than saying the
+   line dropped.
+9. **Spend.** Check the OpenAI dashboard against the meter: audio seconds each
+   way should track `audioInSeconds`/`audioOutSeconds`, and the day's cap on
+   this provider is about 56 minutes each way. Note what the context re-bill
+   (cached input tokens) adds per call; if it dominates, the caps need a token
+   bound rather than a seconds one.
 
 ## Flutter
 
