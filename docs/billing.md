@@ -149,7 +149,7 @@ Create a plan's product and price with the `stripe` CLI, in test mode and then l
 
 ```bash
 stripe --project-name frockbot products create --name="FrockBot BYO" -d "metadata[frockbot_plan]=byo"
-stripe --project-name frockbot prices create --product=<product id> --currency=usd -d "recurring[interval]=month" --lookup-key=frockbot_byo_monthly --nickname="BYO monthly" --unit-amount=500
+stripe --project-name frockbot prices create --product= id -d "recurring[interval]=month" --lookup-key=frockbot_byo_monthly --nickname="BYO monthly" --unit-amount=500 <product >--currency=usd
 ```
 
 The live CLI key may write prices but not products; a live price can carry its product inline instead:

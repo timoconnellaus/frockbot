@@ -407,7 +407,9 @@ describe("computer egress handler", () => {
       headers: {},
     });
     expect(response.status).toBe(403);
-    expect(messageOf(response)).toContain("Connected apps need a FrockBot plan.");
+    expect(messageOf(response)).toContain(
+      "Connected apps need a FrockBot plan.",
+    );
     expect(messageOf(response)).not.toContain("No GitHub account");
     expect(sent).toHaveLength(0);
   });
