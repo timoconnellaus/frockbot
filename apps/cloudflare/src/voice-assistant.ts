@@ -329,9 +329,10 @@ export interface VoiceAssistantEnv {
   FLOCK_AI_GATEWAY_TOKEN?: string;
 }
 
-type VoiceProviderEnvV1 = Partial<Record<VoiceProviderKeyNameV1, string>> & {
-  VOICE_PROVIDER?: string;
-};
+type VoiceProviderEnvV1 = Pick<
+  VoiceAssistantEnv,
+  VoiceProviderKeyNameV1 | "VOICE_PROVIDER"
+>;
 
 /** The provider this deployment's calls run on, and the key that opens it. */
 export function voiceAssistantProviderV1(
@@ -416,7 +417,7 @@ interface LiveCall {
   resumable: boolean;
   /** Semantic setup identity this handle was issued for. */
   setupFingerprint?: string;
-  /** The provider the current session was opened on. */
+  /** The provider the newest session was opened on. */
   provider?: VoiceProviderV1;
   /** The opening attempt currently bound to inbound and outbound PCM. */
   attemptId?: string;
@@ -702,7 +703,7 @@ class VoiceSessionV1 {
           ? event.data
           : new TextDecoder().decode(event.data as ArrayBuffer);
       const { events, replies } = this.codec.decode(raw);
-      if (replies.length > 0) this.write(replies);
+      this.write(replies);
       for (const decoded of events) {
         if (decoded.kind === "setup-complete") {
           this.ready = true;
@@ -2530,6 +2531,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     call.inboundSequence = undefined;
     call.outboundSequence = 0;
     const timing = this.timingSink(connection);
+    call.provider = provider;
     const session = new VoiceSessionV1({
       provider,
       endpoint,
@@ -2542,7 +2544,6 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
           attempt.id,
           code,
           reason,
-          code === provider.unknownHandleCloseCode,
         );
       },
       open: (target, signal) => this.openVoiceSocket(target, signal),
@@ -2636,7 +2637,6 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       return;
     }
     call.setupFingerprint = setup.fingerprint;
-    call.provider = provider;
     call.lastSystem = setup.instruction;
     attempt.phase = "ready";
     this.sendReady(connection, attempt, call.callId);
@@ -3185,7 +3185,6 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     attemptId: string,
     code: number,
     reason: string,
-    forgottenHandle: boolean,
   ): Promise<void> {
     const live = this.live(connectionId, callId);
     if (!live) return;
@@ -3207,7 +3206,10 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       this.sendState(connection, call);
       return;
     }
-    if (forgottenHandle && call.resumptionHandle) {
+    if (
+      code === call.provider?.unknownHandleCloseCode &&
+      call.resumptionHandle
+    ) {
       call.resumptionHandle = undefined;
       call.resumable = false;
       await this.ledger().clearResumption(call.callId);

@@ -258,7 +258,7 @@ export class OpenAiRealtimeVoiceCodecV1 implements VoiceSessionCodecV1 {
   audio(pcm: Uint8Array): string[] {
     const upsampled = this.upsampler.push(pcm);
     if (upsampled.byteLength === 0) return [];
-    return [voiceRealtimeAppendV1(upsampled.buffer as ArrayBuffer)];
+    return [voiceRealtimeAppendV1(upsampled)];
   }
 
   textTurn(text: string): string[] {

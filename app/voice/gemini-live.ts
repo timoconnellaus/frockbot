@@ -23,7 +23,6 @@ import {
   type VoiceFunctionDeclarationV1,
   type VoiceProviderV1,
   type VoiceSessionCodecV1,
-  type VoiceSessionDecodedV1,
   type VoiceSessionEventV1,
 } from "./provider.js";
 
@@ -368,8 +367,6 @@ function number(value: unknown): number {
  * exactly as the object wrote it before there was a seam, and nothing is
  * ever owed back: Gemini's protocol has no replies of its own.
  */
-const NO_REPLIES: string[] = [];
-
 export const geminiLiveProviderV1: VoiceProviderV1 = {
   id: "gemini-live",
   model: GEMINI_LIVE_MODEL_V1,
@@ -413,9 +410,9 @@ export const geminiLiveProviderV1: VoiceProviderV1 = {
             })),
           ),
         ),
-      decode: (raw): VoiceSessionDecodedV1 => ({
+      decode: (raw) => ({
         events: decodeGeminiServerFrameV1(raw),
-        replies: NO_REPLIES,
+        replies: [],
       }),
     };
   },
