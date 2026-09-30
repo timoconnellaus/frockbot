@@ -25,8 +25,8 @@
       "ours": true
     },
     {
-      "id": "sprites",
-      "name": "Your Sprites",
+      "id": "fly",
+      "name": "Your Fly.io account",
       "description": "The same computer, on your own Fly.io account.",
       "status": "coming-soon",
       "account": "Fly.io",
@@ -649,7 +649,7 @@
       "id": "self-hosted",
       "name": "Self-hosted",
       "host": "own",
-      "computer": "sprites",
+      "computer": "fly",
       "search": "brave",
       "apps": "composio",
       "jobs": {

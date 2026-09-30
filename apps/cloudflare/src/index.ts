@@ -1,4 +1,5 @@
 import { billingRoutes, type BillingAccountRpc } from "./billing.js";
+import { setupCarryOverRoutesV1 } from "@frockbot/app/setup/backend";
 import { decodeHostedModelRatesV1 } from "@frockbot/app/billing/rates";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { BOT_STATE_CHANNEL_INTERNAL_PATH } from "./bot-state-channel.js";
@@ -2868,6 +2869,7 @@ export default {
           backendContributions: [
             ...mountedBackend.contributions,
             uploadRoutes(uploadRouteDependenciesV1(env)),
+            setupCarryOverRoutesV1({ productName: BRAND_V1.productName }),
             billingRoutes(
               env,
               (userId) =>

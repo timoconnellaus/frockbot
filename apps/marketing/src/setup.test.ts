@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { catalogProvidersV1 } from "../../../providers/catalog/registry";
-import { STRIPE_PLAN_V1 } from "../../../app/payments/stripe/stripe";
 import { COMPUTER_TARIFF } from "../../../app/billing/computer";
 import {
   buildSetupOptions,
   renderChoicesModule,
   renderDefaultSetup,
   renderOptionsModule,
+  renderAppOptionsModule,
   replaceSetupRegion,
 } from "../scripts/render-setup";
 import {
@@ -32,7 +32,7 @@ const options: SetupOptionsV1 = buildSetupOptions(
     new URL("../content/setup-options.json", import.meta.url),
   ).json(),
 );
-const { describeSetup, APP_SETUP_URL, PLANS, COMPUTER_RATE } = await import(
+const { describeSetup, APP_SETUP_URL, COMPUTER_RATE } = await import(
   new URL("../public/setup/result.js", import.meta.url).href
 );
 const { carryHref } = await import(
@@ -102,6 +102,11 @@ describe("setup options", () => {
     expect(await publicFile("setup/options.generated.js").text()).toBe(
       renderOptionsModule(options),
     );
+    expect(
+      await Bun.file(
+        new URL("../../../app/setup/options.generated.ts", import.meta.url),
+      ).text(),
+    ).toBe(renderAppOptionsModule(options));
     const page = await publicFile("setup/index.html").text();
     expect(page).toBe(
       replaceSetupRegion(page, await renderDefaultSetup(options)),
@@ -124,15 +129,8 @@ describe("setup options", () => {
     for (const source of sources) expect(source).not.toMatch(/style="/);
   });
 
-  test("the plan prices are the payments Package's and billing's", () => {
-    const usd = (cents: number) => `US$${cents / 100} a month`;
-    for (const plan of STRIPE_PLAN_V1.subscriptions as readonly {
-      id: string;
-      monthlyCents: number;
-    }[]) {
-      if (plan.id in PLANS)
-        expect(PLANS[plan.id].price).toBe(usd(plan.monthlyCents));
-    }
+  // The plan prices are the payments Package's to hold: its own tests read them.
+  test("the computer rate is billing's", () => {
     expect(COMPUTER_RATE).toBe(
       `US$${COMPUTER_TARIFF.activeUsdPerHour.toFixed(2)} per active hour`,
     );

@@ -70,6 +70,8 @@ export interface SetupProviderV1 {
   /** A self-hosted install has it already: its own Cloudflare account. */
   includedWhenSelfHosted?: boolean;
   connect?: "key" | "sign-in";
+  /** Connecting needs more than a key, such as an account id or a region. */
+  needsSettings?: boolean;
   /** Omitted when the models are only known once the person connects. */
   models?: SetupModelV1[];
 }

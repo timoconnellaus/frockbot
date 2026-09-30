@@ -196,7 +196,7 @@ export function describeSetup(choices, options) {
       "Computer",
       {
         frockbot: "FrockBot’s cloud",
-        sprites: "Your Fly.io",
+        fly: "Your Fly.io",
         server: "Your server",
         mac: "Your Mac",
       }[choices.computer] ?? computer?.name,
@@ -241,7 +241,7 @@ export function describeSetup(choices, options) {
   ({
     frockbot: () =>
       gain(true, "The computer stays on, even when your devices are off."),
-    sprites: () => gain(true, "Your own Fly.io account, regions and limits."),
+    fly: () => gain(true, "Your own Fly.io account, regions and limits."),
     server: () => {
       gain(true, "Full control of the machine your bots use.");
       gain(false, "You keep the server patched and running.");
