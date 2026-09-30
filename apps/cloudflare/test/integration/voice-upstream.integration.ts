@@ -19,6 +19,7 @@ import { asUser, expectJson, freshUserId } from "./fixtures.ts";
 type VoiceEnv = {
   OPENAI_API_KEY?: string;
   GEMINI_API_KEY?: string;
+  VOICE_PROVIDER?: string;
 };
 
 const voiceEnv = env as unknown as VoiceEnv;
@@ -26,6 +27,7 @@ const voiceEnv = env as unknown as VoiceEnv;
 function withKeys(keys: VoiceEnv): void {
   voiceEnv.OPENAI_API_KEY = keys.OPENAI_API_KEY;
   voiceEnv.GEMINI_API_KEY = keys.GEMINI_API_KEY;
+  voiceEnv.VOICE_PROVIDER = keys.VOICE_PROVIDER;
 }
 
 afterEach(() => {
@@ -65,6 +67,18 @@ describe("what the two voice features need, through the gateway", () => {
       schemaVersion: 1,
       dictation: true,
       assistant: false,
+    });
+  });
+
+  it("is available on the OpenAI key alone when calls run on OpenAI Realtime", async () => {
+    withKeys({
+      OPENAI_API_KEY: "openai-test-key",
+      VOICE_PROVIDER: "openai-realtime",
+    });
+    expect(await capabilities("voice-openai-realtime")).toEqual({
+      schemaVersion: 1,
+      dictation: true,
+      assistant: true,
     });
   });
 
@@ -160,6 +174,27 @@ describe("starting a call", () => {
     // The key rides the URL because the socket carries no headers of ours;
     // it must not also be sent as one.
     expect(upgrade?.authorization).toBeNull();
+  });
+
+  it("opens one OpenAI Realtime session, with the key in a header and not on the URL", async () => {
+    withKeys({
+      GEMINI_API_KEY: "gemini-test-key",
+      OPENAI_API_KEY: "openai-test-key",
+      VOICE_PROVIDER: "openai-realtime",
+    });
+    await forgetUpstreamUpgrades();
+    const outcome = await startCall("openai-call");
+    expect(outcome.refusal).toBeUndefined();
+
+    const [upgrade, ...rest] = await upstreamUpgrades();
+    expect(rest).toEqual([]);
+    const url = new URL(upgrade!.url);
+    expect(url.origin).toBe("https://api.openai.com");
+    expect(url.pathname).toBe("/v1/realtime");
+    expect(url.searchParams.get("model")).toBe("gpt-realtime-2.1");
+    expect(upgrade!.url).not.toContain("openai-test-key");
+    expect(upgrade!.url).not.toContain("gemini-test-key");
+    expect(upgrade?.authorization).toBe("Bearer openai-test-key");
   });
 
   it("refuses the call with no key at all", async () => {
