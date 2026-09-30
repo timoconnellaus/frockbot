@@ -1,3 +1,7 @@
+import type {
+  WebSearchChoiceInputV1,
+  WebSearchChoiceViewV1,
+} from "@frockbot/app/web/search-choice";
 import type { ProductEventSinkV1 } from "@frockbot/app/analytics/events";
 import type {
   BotPluginsFrameV1,
@@ -505,6 +509,16 @@ export interface UserConfigurationBinding {
     userId: string;
     catalog?: import("@frockbot/app/settings/frame").ConnectionsCatalogQueryV1;
   }): Promise<ConnectionsFrame>;
+  /** Which web search the account uses; never its key or address. */
+  readWebSearchChoice(request: {
+    schemaVersion: 1;
+    userId: string;
+  }): Promise<WebSearchChoiceViewV1>;
+  setWebSearchChoice(request: {
+    schemaVersion: 1;
+    userId: string;
+    choice: WebSearchChoiceInputV1;
+  }): Promise<WebSearchChoiceViewV1>;
   /** The User's saved secrets: names and terms, never a value. */
   listSecrets(request: {
     schemaVersion: 1;

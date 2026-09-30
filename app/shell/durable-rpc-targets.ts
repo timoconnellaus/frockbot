@@ -117,6 +117,14 @@ export interface BotUserConfigurationRpcTargetV1
   settleToolCredential(
     input: UserRpcEnvelopeV1<{ connectionId: string; effectId: string }>,
   ): Promise<void>;
+  /** Which web search the account chose; never its key or address. */
+  readWebSearchChoice(input: UserRpcEnvelopeV1): Promise<object>;
+  leaseWebSearchCredential(
+    input: UserRpcEnvelopeV1<{ effectId: string; generation: string }>,
+  ): Promise<unknown>;
+  settleWebSearchCredential(
+    input: UserRpcEnvelopeV1<{ effectId: string }>,
+  ): Promise<void>;
   /** Seals a value a person typed on this Bot's secret-request card. */
   storeSecret(
     input: UserRpcEnvelopeV1<{

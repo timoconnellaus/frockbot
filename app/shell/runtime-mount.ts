@@ -87,6 +87,7 @@ import {
   readBotSettingsV1,
   userAccountFeaturesReaderV1,
   userConfigurationV1,
+  userWebSearchAccountV1,
 } from "@frockbot/app/settings/bot";
 import type { PreparedTurnInputsV1 } from "./prepared-inputs.js";
 import type { PluginSkillContributionV1 } from "@frockbot/app/skills/plugin";
@@ -845,6 +846,8 @@ export async function agentRuntime(
             ).account,
           }
         : {}),
+      webSearchAccount: () =>
+        userWebSearchAccountV1(state, identity, readSecret),
       // Enabled Contributions reach the network through the same
       // outbound seam the model provider uses, so a deployment that stubs
       // it stubs every one of them.

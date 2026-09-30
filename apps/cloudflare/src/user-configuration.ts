@@ -293,6 +293,14 @@ import {
   type SecretVaultV1,
 } from "@frockbot/app/secrets/user";
 import {
+  createWebSearchChoiceStoreV1,
+  type WebSearchChoiceStoreV1,
+} from "@frockbot/app/web/search-choice-user";
+import {
+  decodeWebSearchChoiceInputV1,
+  WEB_SEARCH_GENERATION_PATTERN_V1,
+} from "@frockbot/app/web/search-choice";
+import {
   isSecretIdV1,
   isSecretRequestIdV1,
   SECRET_LIMITS_V1,
@@ -2430,6 +2438,65 @@ export class UserConfiguration
       connectionId: request.connectionId as string,
       effectId: request.effectId as string,
     });
+  }
+
+  private async webSearchChoice(): Promise<WebSearchChoiceStoreV1> {
+    return createWebSearchChoiceStoreV1({
+      storage: this.ctx.storage,
+      credentials: (await this.contributions()).credentials,
+    });
+  }
+
+  /** Which web search the account uses; never its key or address. */
+  async readWebSearchChoice(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertUserIdentity(request.userId as string);
+    return (await this.webSearchChoice()).read();
+  }
+
+  /**
+   * Changes the account's web search. A key or address is sealed on arrival
+   * and read back by nothing but a search's lease; a refusal names the field,
+   * never what was in it.
+   */
+  async setWebSearchChoice(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      choice: (value) => value,
+    });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    await this.assertAccountOpen();
+    return (await this.webSearchChoice()).set(
+      userId,
+      decodeWebSearchChoiceInputV1(request.choice),
+    );
+  }
+
+  /** An expiring lease over the account's search secret, for one search. */
+  async leaseWebSearchCredential(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      effectId: rpcString(256),
+      generation: rpcPattern(WEB_SEARCH_GENERATION_PATTERN_V1, 32),
+    });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    await this.assertAccountOpen();
+    return (await this.webSearchChoice()).lease({
+      accountId: userId,
+      effectId: request.effectId as string,
+      generation: request.generation as string,
+    });
+  }
+
+  async settleWebSearchCredential(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      effectId: rpcString(256),
+    });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    await (
+      await this.webSearchChoice()
+    ).settle({ accountId: userId, effectId: request.effectId as string });
   }
 
   private async secretVault(): Promise<SecretVaultV1> {

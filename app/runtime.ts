@@ -88,10 +88,11 @@ export type { SubagentsRuntimeHostV1 } from "@frockbot/app/subagents/agent";
 // The Web Package contributes `web_fetch` and `web_search`: no Connection and
 // no Computer — both work while the User's Computer is hibernated.
 import { createConfiguredWebFetchRuntimeContribution } from "@frockbot/app/web/agent";
+import { BRAVE_SEARCH_API_KEY_SECRET_V1 } from "@frockbot/app/web/brave";
 import {
-  BRAVE_SEARCH_API_KEY_SECRET_V1,
   createConfiguredWebSearchRuntimeContribution,
-} from "@frockbot/app/web/brave";
+  type AccountWebSearchV1,
+} from "@frockbot/app/web/search";
 import { createSearchMeterV1 } from "@frockbot/app/billing/search";
 import type { AccountUsage } from "@frockbot/app/billing/model";
 import {
@@ -218,6 +219,8 @@ type EnabledRuntimeContributionFactory = (config: {
    * spends is metered.
    */
   billing?: AccountUsage;
+  /** The account's web search choice; absent, FrockBot's search is used. */
+  webSearchAccount?(): Promise<AccountWebSearchV1>;
 }) => FoundationFeature | undefined | Promise<FoundationFeature | undefined>;
 
 const enabledRuntimeContributionFactories = new Map<
@@ -294,7 +297,14 @@ const enabledRuntimeContributionFactories = new Map<
   ],
   [
     "web",
-    ({ brand, capability, fetch: outbound, readSecret, billing }) =>
+    async ({
+      brand,
+      capability,
+      fetch: outbound,
+      readSecret,
+      billing,
+      webSearchAccount,
+    }) =>
       createConfiguredWebFetchRuntimeContribution({
         userAgent: brandUserAgentV1(brand),
         capability,
@@ -303,9 +313,11 @@ const enabledRuntimeContributionFactories = new Map<
       createConfiguredWebSearchRuntimeContribution({
         capability,
         apiKey: readSecret(BRAVE_SEARCH_API_KEY_SECRET_V1),
-        // Search is the platform's to pay for, so where the deployment bills
-        // the account is charged per search.
+        // FrockBot's search is the platform's to pay for, so where the
+        // deployment bills the account is charged per search. A person's
+        // own provider is never metered.
         ...(billing ? { meter: createSearchMeterV1(billing) } : {}),
+        ...(webSearchAccount ? { account: webSearchAccount } : {}),
         ...(outbound ? { fetch: outbound } : {}),
       }),
   ],
@@ -678,6 +690,9 @@ export async function createFoundationEnabledRuntimePackages(
         ? { permitConnection: host.permitConnection }
         : {}),
       ...(host.billing ? { billing: host.billing } : {}),
+      ...(host.webSearchAccount
+        ? { webSearchAccount: host.webSearchAccount }
+        : {}),
     });
     if (!plugin) continue;
     result.push({ id: packageId, feature: plugin });

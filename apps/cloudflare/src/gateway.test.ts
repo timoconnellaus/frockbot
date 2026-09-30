@@ -1,3 +1,8 @@
+import {
+  PLATFORM_WEB_SEARCH_CHOICE_V1,
+  type WebSearchChoiceInputV1,
+  type WebSearchChoiceViewV1,
+} from "@frockbot/app/web/search-choice";
 import type { SettingsFrame } from "@frockbot/core/protocol-schemas";
 import type {
   ApprovalDecisionReceiptV1,
@@ -518,6 +523,22 @@ class MemoryConfiguration
     throw new Error("Bot plugins frame not configured in this fixture");
   }
   readonly secrets: SecretViewV1[] = [];
+  webSearchChoice: WebSearchChoiceViewV1 = PLATFORM_WEB_SEARCH_CHOICE_V1;
+  async readWebSearchChoice() {
+    return this.webSearchChoice;
+  }
+  async setWebSearchChoice(request: { choice: WebSearchChoiceInputV1 }) {
+    this.webSearchChoice =
+      request.choice.provider === "frockbot"
+        ? PLATFORM_WEB_SEARCH_CHOICE_V1
+        : {
+            schemaVersion: 1,
+            provider: request.choice.provider,
+            generation: "g000000000000000000000001",
+            updatedAt: "2026-09-30T00:00:00.000Z",
+          };
+    return this.webSearchChoice;
+  }
   async listSecrets() {
     return { schemaVersion: 1 as const, secrets: [...this.secrets] };
   }
@@ -1820,6 +1841,42 @@ describe("Cloudflare user application gateway", () => {
     const answer: unknown = await deleted.json();
     expect(answer).toEqual({ schemaVersion: 1, removed: true });
     expect(configuration.secrets).toEqual([]);
+  });
+
+  test("reads and changes the account's web search, never echoing its key", async () => {
+    const { gateway, configurations } = createTestGateway();
+    const configuration = new MemoryConfiguration();
+    configurations.set("alice", configuration);
+
+    const initial = await gateway(request("/api/web-search", "alice"));
+    const choice: unknown = await initial.json();
+    expect(choice).toEqual({
+      schemaVersion: 1,
+      provider: "frockbot",
+    });
+
+    const saved = await gateway(
+      request("/api/web-search", "alice", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ provider: "exa", apiKey: "exa-secret" }),
+      }),
+    );
+    expect(saved.status).toBe(200);
+    expect(saved.headers.get("cache-control")).toBe("no-store");
+    const view = await saved.text();
+    expect(JSON.parse(view)).toMatchObject({ provider: "exa" });
+    expect(view).not.toContain("exa-secret");
+
+    const refused = await gateway(
+      request("/api/web-search", "alice", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ provider: "searxng", url: "http://10.0.0.1" }),
+      }),
+    );
+    expect(refused.status).toBe(400);
+    expect(configuration.webSearchChoice.provider).toBe("exa");
   });
 
   test("rejects invalid encoded Bot settings paths before configuration lookup", async () => {
