@@ -10,6 +10,7 @@
     "./promise-cache": "./promise-cache.ts",
     "./contracts": "./contracts/index.ts",
     "./deadline": "./deadline.ts",
+    "./contracts/canonical-json": "./contracts/canonical-json.ts",
     "./contracts/contributions": "./contracts/contributions.ts",
     "./durable": "./durable/index.ts",
     "./durable/composition-failure": "./durable/composition/failure.ts",

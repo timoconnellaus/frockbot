@@ -17,12 +17,13 @@
 // effect id. A request is sent at most once; a transport failure after it
 // left is answered as unknown, never retried.
 
-import {
-  canonicalJson,
-  sha256,
-  type ToolCall,
-  type ToolExecutionContext,
-  type ToolPreparation,
+// The leaf, not the barrel: the Computer host's container carries this file
+// and only the few `core` files it names.
+import { canonicalJson, sha256 } from "@frockbot/core/contracts/canonical-json";
+import type {
+  ToolCall,
+  ToolExecutionContext,
+  ToolPreparation,
 } from "@frockbot/core/contracts";
 
 /** One API host a connected app is reached through, and the app it belongs to. */
