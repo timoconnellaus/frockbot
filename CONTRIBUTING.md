@@ -10,7 +10,7 @@ Some add-ons are licensed separately: FrockBot for Teams — organisations, SSO 
 
 ## Contributor Licence Agreement
 
-So before your first pull request can merge, you sign the [FrockBot Contributor Licence Agreement](CLA.md) once. It is adapted from the Apache Individual CLA and governed by the law of New South Wales. You keep the copyright in your work; you grant Tim O'Connell, the project's owner, a licence to use and relicense it, including under commercial terms, and a patent licence for it. The agreement can pass to a company Tim forms or to a buyer of the project.
+So before your first pull request can merge, you sign the [FrockBot Contributor Licence Agreement](CLA.md) once. It is adapted from the Apache Individual CLA and governed by the law of New South Wales. You keep the copyright in your work; you grant Tim O'Connell, the project's owner, a licence to use and relicense it, including under commercial terms, and a patent licence for it. In return, the CLA promises that whatever of yours goes into this repository stays available to everyone under MIT. The agreement, and that promise, can pass to a company Tim forms or to a buyer of the project.
 
 Signing takes one comment. When you open a pull request, the `CLA` check comments on it; reply with exactly:
 
