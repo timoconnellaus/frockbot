@@ -300,8 +300,8 @@ export interface VoiceAssistantEnv {
   GEMINI_API_KEY?: string;
   /**
    * Which provider a call runs on: `gemini-live` (the default) or
-   * `openai-realtime`. A `vars` entry; `production-secrets.ts` refuses any
-   * other value.
+   * `openai-realtime`. A `vars` entry from the profile's `voice.provider`,
+   * whose schema admits only those two; any other value runs the default.
    */
   VOICE_PROVIDER?: string;
   /**
