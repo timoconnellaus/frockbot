@@ -32,7 +32,6 @@
     "./machine-protocol": "./machine-protocol/index.ts",
     "./machine-protocol/protocol": "./machine-protocol/protocol.ts",
     "./machine-protocol/quota": "./machine-protocol/quota.ts",
-    "./machine-protocol/relay": "./machine-protocol/relay.ts",
     "./machine-protocol/routes": "./machine-protocol/routes.ts",
     "./machine-protocol/token": "./machine-protocol/token.ts",
     "./models": "./models/index.ts",

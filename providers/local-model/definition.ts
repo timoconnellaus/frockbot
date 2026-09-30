@@ -1,4 +1,8 @@
 import type { PackageDefinitionV1 } from "@frockbot/core/contracts";
+import {
+  MACHINE_LIMITS_V1,
+  MACHINE_RELAY_LIMITS_V1,
+} from "@frockbot/core/machine-protocol";
 
 import {
   LOCAL_MODEL_CONNECTION_TYPE_ID,
@@ -40,7 +44,7 @@ export const providerLocalModelDefinitionV1: PackageDefinitionV1 = {
             title: "Mac",
             description: "The paired Mac the model server runs on.",
             minLength: 1,
-            maxLength: 128,
+            maxLength: MACHINE_LIMITS_V1.identifier,
           },
         },
         {
@@ -53,7 +57,7 @@ export const providerLocalModelDefinitionV1: PackageDefinitionV1 = {
             description:
               "The server's OpenAI-compatible address on that Mac, such as http://localhost:11434/v1 for Ollama.",
             minLength: 1,
-            maxLength: 2048,
+            maxLength: MACHINE_RELAY_LIMITS_V1.url,
           },
         },
       ],

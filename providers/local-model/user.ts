@@ -24,9 +24,13 @@ import type {
   UserSettingsStorage,
   UserSettingsTransaction,
 } from "@frockbot/app/settings/user";
-import type { MachineModelRelayRequestV1 } from "@frockbot/core/machine-protocol/relay";
+import {
+  isMachineRelayIdV1,
+  type MachineModelRelayRequestV1,
+} from "@frockbot/core/machine-protocol";
 
 import {
+  LOCAL_MODEL_CHAT_FIRST_BYTE_MS,
   LOCAL_MODEL_CONNECTION_TYPE_ID,
   LOCAL_MODEL_ENDPOINT_SETTING,
   LOCAL_MODEL_LIST_FIRST_BYTE_MS,
@@ -202,6 +206,40 @@ export class LocalModelUserBackendContribution {
       `${COMMAND_PREFIX}${commandId}`,
     );
     return stored?.accountId === accountId ? stored.receipt : undefined;
+  }
+
+  /**
+   * One Bot's chat request, sent to the Mac and endpoint its Connection
+   * names. A Bot names only the Connection, so it reaches nothing on the Mac
+   * but that model server.
+   */
+  async relayChat(
+    accountId: string,
+    connectionId: string,
+    relayId: string,
+    body: string,
+  ): Promise<Response> {
+    if (!relayId.startsWith("chat:") || !isMachineRelayIdV1(relayId)) {
+      throw new Error("Local model relay id is invalid");
+    }
+    const connection = await this.host.settings.getConnection(
+      accountId,
+      connectionId,
+    );
+    if (!connection || connection.state !== "ready") {
+      throw new Error(
+        "This local model isn't connected. Reconnect it in Models.",
+      );
+    }
+    const { machineId, endpoint } = localModelTargetV1(connection);
+    return this.host.relay({
+      machineId,
+      relayId,
+      method: "POST",
+      url: localModelUrlV1(endpoint, "chat"),
+      body,
+      firstByteMs: LOCAL_MODEL_CHAT_FIRST_BYTE_MS,
+    });
   }
 
   leaseModelCredential(): Promise<never> {
@@ -474,12 +512,6 @@ export class LocalModelUserBackendContribution {
   }
 }
 
-export function createLocalModelUserBackendContribution(
-  host: LocalModelUserBackendHost,
-): LocalModelUserBackendContribution {
-  return new LocalModelUserBackendContribution(host);
-}
-
 export interface LocalModelUserApplicationHostV1 {
   localModels: LocalModelUserBackendHost;
 }
@@ -491,5 +523,5 @@ export const userContribution = defineUserBackendContribution<
 >({
   specifier: "@frockbot/providers/local-model/user",
   mount: (host, lifecycle) =>
-    lifecycle.mount(createLocalModelUserBackendContribution(host.localModels)),
+    lifecycle.mount(new LocalModelUserBackendContribution(host.localModels)),
 });

@@ -144,10 +144,9 @@ export interface UsageReservation {
    */
   platform?: true;
   /**
-   * Work that costs nothing whatever the account holds: a local model on the
-   * person's own Mac. It is recorded, so it shows on Spending at no charge,
-   * and it is never refused for want of credit, a plan or a daily limit.
-   * Only a zero reservation may be free.
+   * Work that costs nothing whatever the account holds. It is recorded, so it
+   * shows on Spending at no charge, and it is never refused for want of
+   * credit, a plan or a daily limit. Only a zero reservation may be free.
    */
   free?: true;
   /**

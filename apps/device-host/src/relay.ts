@@ -15,10 +15,14 @@ import {
   type MachineRelayFrameV1,
   type MachineRelayUpFrameV1,
 } from "@frockbot/core/machine-protocol";
+import { withDeadlineV1 } from "@frockbot/core/deadline";
 
 export interface LocalModelRelayOptionsV1 {
   fetch(url: string, init: RequestInit): Promise<Response>;
 }
+
+/** How long streamed text waits to share a frame with what follows it. */
+const RELAY_FLUSH_MS = 25;
 
 /** Relay ids remembered, so a frame delivered twice is forwarded once. */
 const SEEN_MAX = 500;
@@ -99,10 +103,23 @@ export class LocalModelRelayV1 {
       refuse("the request arrived after its deadline");
       return;
     }
+    // The cloud's cancel, and separately the first-byte deadline.
     const controller = new AbortController();
     this.running.set(relayId, controller);
-    const timer = setTimeout(() => controller.abort(), firstByte);
+    const deadline = withDeadlineV1(firstByte, controller.signal);
     let headed = false;
+    let pending = "";
+    let flushing: ReturnType<typeof setTimeout> | undefined;
+    // A model server writes one small event per token; sent as they come,
+    // that is a socket message, and a woken Durable Object, per token.
+    const flush = (): void => {
+      clearTimeout(flushing);
+      flushing = undefined;
+      for (const piece of relayPiecesV1(pending)) {
+        send({ type: "relay-data", relayId, data: piece });
+      }
+      pending = "";
+    };
     try {
       let response: Response;
       try {
@@ -116,17 +133,17 @@ export class LocalModelRelayV1 {
           },
           ...(frame.body === null ? {} : { body: frame.body }),
           redirect: "error",
-          signal: controller.signal,
+          signal: deadline.signal,
         });
       } catch (error) {
-        if (controller.signal.aborted) {
+        if (deadline.timedOut()) {
           refuse("the model server did not answer before the deadline");
-        } else {
+        } else if (!controller.signal.aborted) {
           refuse(unreachable(url, error));
         }
         return;
       }
-      clearTimeout(timer);
+      deadline.clear();
       const contentType = response.headers.get("content-type");
       send({
         type: "relay-head",
@@ -148,20 +165,17 @@ export class LocalModelRelayV1 {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          for (const piece of relayPiecesV1(
-            decoder.decode(value, { stream: true }),
-          )) {
-            send({ type: "relay-data", relayId, data: piece });
-          }
+          pending += decoder.decode(value, { stream: true });
+          if (pending.length >= MACHINE_RELAY_LIMITS_V1.dataChars) flush();
+          else flushing ??= setTimeout(flush, RELAY_FLUSH_MS);
         }
       }
-      for (const piece of relayPiecesV1(decoder.decode())) {
-        send({ type: "relay-data", relayId, data: piece });
-      }
+      pending += decoder.decode();
+      flush();
       send({ type: "relay-end", relayId });
     } catch (error) {
       // A cancel is the cloud's own doing; it is waiting for nothing.
-      if (!controller.signal.aborted || !headed) {
+      if (!controller.signal.aborted) {
         refuse(
           headed
             ? `the model server stopped mid-answer: ${message(error)}`
@@ -169,7 +183,8 @@ export class LocalModelRelayV1 {
         );
       }
     } finally {
-      clearTimeout(timer);
+      deadline.clear();
+      clearTimeout(flushing);
       this.running.delete(relayId);
     }
   }

@@ -8,7 +8,7 @@ import {
 import {
   LOCAL_MODEL_DROPPED_V1,
   LOCAL_MODEL_OFFLINE_V1,
-} from "@frockbot/core/machine-protocol/relay";
+} from "@frockbot/core/machine-protocol";
 import {
   type ModelRequestDeadlineOptionsV1,
   OpenAICompatibleProvider,

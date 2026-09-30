@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 
-import { decodeMachineSocketFrameV1 } from "./protocol.ts";
 import {
   MACHINE_RELAY_LIMITS_V1,
   decodeLocalModelUrlV1,
   decodeMachineRelayFrameV1,
   decodeMachineRelayUpFrameV1,
-} from "./relay.ts";
+  decodeMachineSocketFrameV1,
+} from "./protocol.ts";
 
 const NOW = "2026-09-30T00:00:00.000Z";
 

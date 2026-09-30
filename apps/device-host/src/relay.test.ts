@@ -98,6 +98,31 @@ describe("relaying", () => {
     ]);
   });
 
+  test("tokens that arrive together share a frame", async () => {
+    const { relay, sent, send } = harness(
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              const encoder = new TextEncoder();
+              for (const token of ["a", "b", "c"]) {
+                controller.enqueue(encoder.encode(`data: ${token}\n\n`));
+              }
+              controller.close();
+            },
+          }),
+        ),
+    );
+    await relay.handle(frame(), send);
+    expect(sent.filter((reply) => reply.type === "relay-data")).toEqual([
+      {
+        type: "relay-data",
+        relayId: "chat:req-1",
+        data: "data: a\n\ndata: b\n\ndata: c\n\n",
+      },
+    ]);
+  });
+
   test("a server that is not running is a clear failure", async () => {
     const { relay, sent, send } = harness(async () => {
       throw new TypeError(

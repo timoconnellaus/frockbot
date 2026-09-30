@@ -7,7 +7,7 @@ import {
 import {
   LOCAL_MODEL_OFFLINE_V1,
   type MachineModelRelayRequestV1,
-} from "@frockbot/core/machine-protocol/relay";
+} from "@frockbot/core/machine-protocol";
 
 import { providerLocalModelDefinitionV1 } from "./definition.js";
 import {

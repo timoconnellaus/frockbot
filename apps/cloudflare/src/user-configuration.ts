@@ -148,11 +148,6 @@ import {
 } from "@frockbot/app/machine/module-calls";
 import { MachineModelRelaysV1 } from "@frockbot/app/machine/model-relay";
 import {
-  LOCAL_MODEL_CHAT_FIRST_BYTE_MS,
-  localModelUrlV1,
-} from "@frockbot/providers/local-model/endpoint";
-import { localModelTargetV1 } from "@frockbot/providers/local-model/user";
-import {
   readPluginModuleReportsV1,
   recordPluginModuleReportsV1,
 } from "@frockbot/app/plugins/module-reports";
@@ -4141,45 +4136,31 @@ export class UserConfiguration
 
   /** Local model requests in flight to the User's Macs. */
   private localModelRelays(): MachineModelRelaysV1 {
-    this.modelRelays ??= new MachineModelRelaysV1({
-      connected: (machineId) =>
-        durableObjectMachineSocketsV1(this.ctx).connected(machineId),
-      push: (machineId, frame) =>
-        durableObjectMachineSocketsV1(this.ctx).push(machineId, frame),
-    });
+    if (!this.modelRelays) {
+      const sockets = durableObjectMachineSocketsV1(this.ctx);
+      this.modelRelays = new MachineModelRelaysV1({
+        connected: (machineId) => sockets.connected(machineId),
+        push: (machineId, frame) => sockets.push(machineId, frame),
+      });
+    }
     return this.modelRelays;
   }
 
-  /**
-   * One Bot's chat request to a local model. The Mac and the endpoint are
-   * read from the Connection here, where it is held, so a Bot names only the
-   * Connection and can reach nothing on the Mac but that model server.
-   */
+  /** One Bot's chat request to a local model, streamed back from its Mac. */
   async relayLocalModel(input: unknown): Promise<Response> {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
       connectionId: rpcIdentifier,
-      relayId: rpcPattern(/^chat:[A-Za-z0-9._:@-]{1,190}$/, 196),
+      relayId: rpcString(200),
       body: rpcString(MACHINE_RELAY_LIMITS_V1.requestBytes),
     });
     const userId = await this.assertUserIdentity(request.userId as string);
-    const connection = await (
-      await this.settingsContribution()
-    ).getConnection(userId, request.connectionId as string);
-    if (!connection || connection.state !== "ready") {
-      throw new Error(
-        "This local model isn't connected. Reconnect it in Models.",
-      );
-    }
-    const { machineId, endpoint } = localModelTargetV1(connection);
-    return this.localModelRelays().open({
-      machineId,
-      relayId: request.relayId as string,
-      method: "POST",
-      url: localModelUrlV1(endpoint, "chat"),
-      body: request.body as string,
-      firstByteMs: LOCAL_MODEL_CHAT_FIRST_BYTE_MS,
-    });
+    return (await this.contributions()).localModels.relayChat(
+      userId,
+      request.connectionId as string,
+      request.relayId as string,
+      request.body as string,
+    );
   }
 
   async claimMachineCommand(input: unknown) {

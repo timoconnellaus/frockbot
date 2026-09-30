@@ -33,10 +33,10 @@ export interface MachineModelRelaysHostV1 {
 
 interface OpenRelay {
   machineId: string;
-  headed: boolean;
   bytes: number;
   head(response: Response): void;
   refuse(error: Error): void;
+  /** Set once the head arrived: the body the answer is streamed into. */
   stream?: ReadableStreamDefaultController<Uint8Array>;
   timer: ReturnType<typeof setTimeout>;
 }
@@ -73,7 +73,6 @@ export class MachineModelRelaysV1 {
     return new Promise<Response>((resolve, reject) => {
       const relay: OpenRelay = {
         machineId,
-        headed: false,
         bytes: 0,
         head: resolve,
         refuse: reject,
@@ -107,8 +106,7 @@ export class MachineModelRelaysV1 {
     if (!relay || relay.machineId !== machineId) return;
     switch (frame.type) {
       case "relay-head": {
-        if (relay.headed) return;
-        relay.headed = true;
+        if (relay.stream) return;
         clearTimeout(relay.timer);
         const body = new ReadableStream<Uint8Array>({
           start: (controller) => {
@@ -131,7 +129,7 @@ export class MachineModelRelaysV1 {
         return;
       }
       case "relay-data": {
-        if (!relay.headed || !relay.stream) return;
+        if (!relay.stream) return;
         const bytes = this.#encoder.encode(frame.data);
         relay.bytes += bytes.byteLength;
         if (relay.bytes > MACHINE_RELAY_LIMITS_V1.responseBytes) {
@@ -148,13 +146,13 @@ export class MachineModelRelaysV1 {
         return;
       }
       case "relay-end":
-        if (relay.headed) relay.stream?.close();
+        if (relay.stream) relay.stream.close();
         else
           relay.refuse(new Error("Your Mac ended the answer before it began."));
         this.finish(frame.relayId);
         return;
       case "relay-fail":
-        if (relay.headed) relay.stream?.error(new Error(frame.error));
+        if (relay.stream) relay.stream.error(new Error(frame.error));
         else relay.refuse(new Error(frame.error));
         this.finish(frame.relayId);
         return;
@@ -165,7 +163,7 @@ export class MachineModelRelaysV1 {
   closed(machineId: string): void {
     for (const [relayId, relay] of [...this.#open]) {
       if (relay.machineId !== machineId) continue;
-      if (relay.headed) relay.stream?.error(new Error(LOCAL_MODEL_DROPPED_V1));
+      if (relay.stream) relay.stream.error(new Error(LOCAL_MODEL_DROPPED_V1));
       else relay.refuse(new Error(LOCAL_MODEL_OFFLINE_V1));
       this.finish(relayId);
     }

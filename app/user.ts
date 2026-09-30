@@ -21,7 +21,7 @@ import {
 import {
   LOCAL_MODEL_OFFLINE_V1,
   type MachineModelRelayRequestV1,
-} from "@frockbot/core/machine-protocol/relay";
+} from "@frockbot/core/machine-protocol";
 import {
   type SearchUserBackendContribution,
   type SearchUserBackendHost,
@@ -29,6 +29,7 @@ import {
 import { type ConnectUserBackendContribution } from "@frockbot/app/connect/user";
 import { type McpUserBackendContribution } from "@frockbot/app/mcp/user";
 import { type OllamaCloudUserBackendContribution } from "@frockbot/providers/ollama-cloud/user";
+import { type LocalModelUserBackendContribution } from "@frockbot/providers/local-model/user";
 import { type FrockAiUserBackendContribution } from "@frockbot/providers/frock-ai/user";
 import {
   type UserSettingsBackendContribution,
@@ -52,6 +53,7 @@ import {
   flockUserContribution,
   machineUserContribution,
   mcpUserContribution,
+  localModelUserContribution,
   ollamaCloudUserContribution,
   connectUserContribution,
   searchUserContribution,
@@ -153,6 +155,8 @@ export interface MountedFoundationUserBackend {
   connect: ConnectUserBackendContribution;
   /** Remote MCP servers: their credentials, sign-ins and tool directories. */
   mcp: McpUserBackendContribution;
+  /** Local models: their Connections, and the chat relay a Turn asks for. */
+  localModels: LocalModelUserBackendContribution;
   dispose(): Promise<void>;
 }
 
@@ -431,6 +435,7 @@ export async function createFoundationUserBackendContributions(host: {
     | ConnectUserBackendContribution
     | McpUserBackendContribution
     | OllamaCloudUserBackendContribution
+    | LocalModelUserBackendContribution
     | FrockAiUserBackendContribution
     | FlockUserBackendContribution
     | SearchUserBackendContribution
@@ -448,6 +453,7 @@ export async function createFoundationUserBackendContributions(host: {
   const machines = mounted.get(machineUserContribution);
   const connect = mounted.get(connectUserContribution);
   const mcp = mounted.get(mcpUserContribution);
+  const localModels = mounted.get(localModelUserContribution);
   if (
     !settings ||
     !credentials ||
@@ -458,11 +464,12 @@ export async function createFoundationUserBackendContributions(host: {
     !audit ||
     !machines ||
     !connect ||
-    !mcp
+    !mcp ||
+    !localModels
   ) {
     await mounted.dispose();
     throw new Error(
-      "Foundation requires Settings, Credentials, Ollama, the built-in model, Flock, Search, Audit, Machines, Connected apps and MCP servers User Contributions",
+      "Foundation requires Settings, Credentials, Ollama, the built-in model, Flock, Search, Audit, Machines, Connected apps, MCP servers and Local models User Contributions",
     );
   }
 
@@ -492,6 +499,7 @@ export async function createFoundationUserBackendContributions(host: {
     machines,
     connect,
     mcp,
+    localModels,
     async dispose() {
       for (const undo of unregister) undo();
       await mounted.dispose();
