@@ -1,15 +1,15 @@
-"""Signed Android delivery: Shorebird full releases, signed staging patches, same-signer APK downloads.
+"""Signed Android delivery: Shorebird full releases and signed staging patches.
 
 release: `shorebird release android` (Flutter 3.47.0, arm64 APK) with the patch public key baked
          in, the existing signer, a versionCode above every known floor. Saves the baseline and
-         publishes the APK for download. `build` is the same command.
+         records the APK in `latest.json`, which the release pipeline attaches to the GitHub
+         release. `build` is the same command.
 patch:   `shorebird patch android` against the baseline's exact version+build, staging track, signed
          with the private key. No new APK, no new versionCode, never native/asset overrides. The
          baseline is the saved release (`--baseline local`) or, in the release pipeline, the newest
          active Android release Shorebird reports (`--baseline shorebird`). Exit status 3 means
          Shorebird found native or asset differences: only a full release can carry that change.
 promote: move a patch to the stable track.
-publish: publish an already-built APK for download.  serve/setup: the download server.
 export-apk: write the newest active Shorebird APK, re-signed with the phone's key.
          A tag whose patch exits 3 cuts `release` in the pipeline and uploads those
          bytes itself. `export-apk` is the sideload for every other tag.
@@ -22,11 +22,9 @@ import base64
 import fcntl
 from functools import cache
 import hashlib
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
-import plistlib
 import re
 import shutil
 import subprocess
@@ -560,94 +558,9 @@ def promote(release_version, number):
     print(json.dumps({"release": release_version, "patch": number, "track": "stable"}, indent=2))
 
 
-class Downloads(BaseHTTPRequestHandler):
-    def do_HEAD(self):
-        self.respond(False)
-
-    def do_GET(self):
-        self.respond(True)
-
-    def respond(self, body):
-        route = self.path.split("?", 1)[0]
-        if route not in ("/frockbot.apk", "/latest.json", "/health"):
-            self.send_error(404)
-            return
-        if route == "/health":
-            data = b"ok\n"
-        else:
-            metadata = latest()
-            if not metadata:
-                self.send_error(503, "No APK published yet")
-                return
-            if route == "/frockbot.apk":
-                path = STATE / metadata["file"]
-                if not path.is_file():
-                    self.send_error(503, "No APK published yet")
-                    return
-                with path.open("rb") as apk:
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/vnd.android.package-archive")
-                    self.send_header("Content-Length", str(os.fstat(apk.fileno()).st_size))
-                    self.send_header("Content-Disposition", f'attachment; filename="frockbot-{metadata["versionCode"]}.apk"')
-                    self.send_header("Cache-Control", "no-store")
-                    self.end_headers()
-                    if body:
-                        shutil.copyfileobj(apk, self.wfile)
-                return
-            data = json.dumps(metadata).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json" if route == "/latest.json" else "text/plain")
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        if body:
-            self.wfile.write(data)
-
-
-def setup():
-    tailscale = shutil.which("tailscale")
-    if not tailscale:
-        raise RuntimeError("Install and connect Tailscale first.")
-    status = json.loads(run([tailscale, "status", "--json"]))
-    if status.get("BackendState") != "Running":
-        raise RuntimeError("Connect Tailscale first.")
-    hostname = status["Self"]["DNSName"].rstrip(".")
-    endpoint = f"{hostname}:8443"
-    config = json.loads(run([tailscale, "serve", "status", "--json"]))
-    target = "http://127.0.0.1:18743"
-    existing = config.get("Web", {}).get(endpoint)
-    if existing and existing != {"Handlers": {"/": {"Proxy": target}}}:
-        raise RuntimeError("Tailscale port 8443 is already used by another service.")
-    if config.get("AllowFunnel", {}).get(endpoint):
-        raise RuntimeError("Port 8443 has public Funnel enabled; refusing to expose this APK publicly.")
-    tcp = config.get("TCP", {}).get("8443")
-    if tcp and tcp != {"HTTPS": True}:
-        raise RuntimeError("Tailscale TCP port 8443 is already used by another service.")
-    label = "com.frockbot.android-updates"
-    plist = Path.home() / "Library/LaunchAgents" / f"{label}.plist"
-    settings = {
-        "Label": label,
-        "ProgramArguments": [sys.executable, str(Path(__file__).resolve()), "serve"],
-        "WorkingDirectory": str(ROOT), "RunAtLoad": True, "KeepAlive": True,
-        "StandardOutPath": str(STATE / "server.log"),
-        "StandardErrorPath": str(STATE / "server.log"),
-    }
-    if plist.exists() and plistlib.loads(plist.read_bytes()).get("ProgramArguments") != settings["ProgramArguments"]:
-        raise RuntimeError(f"Existing {plist} points to another checkout; refusing to replace it.")
-    plist.parent.mkdir(parents=True, exist_ok=True)
-    plist.write_bytes(plistlib.dumps(settings))
-    domain = f"gui/{os.getuid()}"
-    subprocess.run(["launchctl", "bootout", f"{domain}/{label}"], capture_output=True)
-    subprocess.run(["launchctl", "bootstrap", domain, str(plist)], check=True)
-    subprocess.run([tailscale, "serve", "--bg", "--yes", "--https=8443", target], check=True)
-    print(f"Bookmark https://{endpoint}/frockbot.apk on your phone.")
-
-
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["build", "release", "patch", "promote", "publish", "serve", "setup",
-                                            "export-apk"])
-    parser.add_argument("--apk", type=Path)
+    parser.add_argument("command", choices=["build", "release", "patch", "promote", "export-apk"])
     parser.add_argument("--out", type=Path, help="export-apk: where to write frockbot.apk.")
     parser.add_argument("--baseline", default="local", choices=["local", "shorebird"],
                         help="Patch the saved release (local) or the newest active release Shorebird reports.")
@@ -665,17 +578,11 @@ def main(argv=None):
             parser.error("export-apk requires --out")
         export_apk(args.out)
         return
-    if args.command == "setup":
-        setup()
-        return
-    if args.command == "serve":
-        ThreadingHTTPServer(("127.0.0.1", 18743), Downloads).serve_forever()
-        return
     with (STATE / "publish.lock").open("w") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
-            raise RuntimeError("Another Android release, patch, or publication is already running.") from error
+            raise RuntimeError("Another Android release or patch is already running.") from error
         if args.command in ("build", "release"):
             release(args.version_floor, args.build_number)
         elif args.command == "patch":
@@ -684,14 +591,10 @@ def main(argv=None):
             except FullReleaseRequired as error:
                 print(error, file=sys.stderr)
                 sys.exit(FULL_RELEASE_REQUIRED_STATUS)
-        elif args.command == "promote":
+        else:
             if not args.release_version or args.patch_number is None:
                 parser.error("promote requires --release-version and --patch-number")
             promote(args.release_version, args.patch_number)
-        else:
-            if not args.apk:
-                parser.error("publish requires --apk")
-            publish(args.apk.resolve(), args.version_floor)
 
 
 if __name__ == "__main__":

@@ -61,7 +61,7 @@ The Shorebird CLI (1.6.120, logged in to Tim's account) comes from `NATIVE_SHORE
 
 Keys: `apps/native/shorebird-public-key.pem` is baked into every release. The matching RSA private key lives at ignored `.native-build/updates/shorebird-private.pem` or wherever `NATIVE_SHOREBIRD_PRIVATE_KEY` points; it is never committed. The APK signer is the existing debug keystore the installed app already trusts. Before uploading a patch the script confirms with `openssl` that the two keys are a pair.
 
-State lives under ignored `.native-build/updates/` (`NATIVE_UPDATE_STATE` overrides; the download service reads the same directory). `latest.json` names the immutable `frockbot-<code>-<sha256>.apk` and is replaced atomically. `baseline.json` records the release identity (`<version>+<code>`), Shorebird `app_id`, source revision, CLI and Flutter versions, signer and public-key digests, the exact release arguments and every patch cut against it. `pending-release.json` holds the version of an upload that has not been confirmed.
+State lives under ignored `.native-build/updates/` (`NATIVE_UPDATE_STATE` overrides). `latest.json` names the immutable `frockbot-<code>-<sha256>.apk` and is replaced atomically. `baseline.json` records the release identity (`<version>+<code>`), Shorebird `app_id`, source revision, CLI and Flutter versions, signer and public-key digests, the exact release arguments and every patch cut against it. `pending-release.json` holds the version of an upload that has not been confirmed.
 
 Release:
 
@@ -94,7 +94,7 @@ shorebird preview --device-id emulator-5554 --platform android --app-id fab29f02
 bun run native:promote --release-version 1.2.0+<code> --patch-number <n>                                          # to stable after it works
 ```
 
-The emulator has shown a signed staging patch download and restart, an offline boot and a remote rollback; a patch signed with the wrong private key is rejected by the CLI before upload. The evidence and what stays unqualified are in the [qualification ledger](../../docs/research/shorebird-qualification-2026-09-09.md). After promotion, launch the installed app on the phone twice and confirm the change is live. The APK download route stays the fallback for a phone that cannot pick up a patch.
+The emulator has shown a signed staging patch download and restart, an offline boot and a remote rollback; a patch signed with the wrong private key is rejected by the CLI before upload. The evidence and what stays unqualified are in the [qualification ledger](../../docs/research/shorebird-qualification-2026-09-09.md). After promotion, launch the installed app on the phone twice and confirm the change is live. The GitHub release's `frockbot.apk` stays the fallback for a phone that cannot pick up a patch.
 
 The release pipeline ships the phone app for every version tag whose `apps/native` differs from the previous tag. `release.yml`'s `Ship Android` job runs `native-update.py patch --baseline shorebird`, which takes the baseline from Shorebird's release list instead of `baseline.json`: the newest active Android release is the one the pipeline last cut. `Promote Android patch` runs `native-update.py promote` after the production deploy. The job installs the CLI version `qualification.json` records, takes the private key and the signer from repository secrets (see the root `README.md`, Releases → Android patches), and its patches show in `shorebird patches list`, not in the local `baseline.json`. Shorebird's native or asset diff verdict leaves the script with exit status 3, and the same job then runs `native-update.py release` and uploads that APK. Installing it once is what puts the phone on the baseline later patches target.
 
@@ -102,21 +102,9 @@ Each version tag attaches `frockbot.apk` to the GitHub release. When the tag cut
 
 The application retains `com.frockbot.mobile`. Compile SDK 37 is required by secure storage 11; minSdk 24 and targetSdk 36 remain unchanged. Its API-28+ WebView directory is separate from Capacitor's retained directory, and cookies are disabled before the first WebView. API 24–27 isolation remains unqualified. The acceptance build checks only a random continuity sentinel; same-User/Bot re-auth is a separate device check.
 
-## APK download service
-
-The public copy of a published APK is `frockbot.apk` on the GitHub release. The same script also serves it over Tailscale on port 8443, reading `latest.json` from the state directory:
-
-```sh
-python3 scripts/native-update.py setup   # one-off: launchd agent plus `tailscale serve` on 8443
-bun run native:serve                     # run the server in the foreground
-python3 scripts/native-update.py publish --apk <path>   # publish an already-built APK
-```
-
-`setup` refuses to take over port 8443 from another service, refuses a public Funnel, and refuses a launchd agent pointing at another checkout. The routes are `/frockbot.apk`, `/latest.json` and `/health`; the first two answer 503 until a published APK is actually present on disk. Publishing rejects any APK that is not the normal package with the existing signer, or whose versionCode does not advance the download track.
-
 ## macOS
 
-Run `bun run update:desktop` to install a development-signed build on this Mac. The local build is its own app, **FrockBot Dev**: bundle `com.frockbot.mobile.dev`, scheme `frockbot-dev`, a DEV-ribboned icon, installed at `/Users/tim/Applications/FrockBot Dev.app`. It runs beside the released `/Applications/FrockBot.app` without either being opened in place of the other; when the two shared `com.frockbot.mobile`, Launch Services opened the local build, which carries no update feed, and the released app silently stopped receiving updates. The dev build has its own Keychain group and app data, so it signs in separately.
+Releases reach the Mac through Sparkle from the tag ([below](#in-app-updates)). For a local build to try something before it ships, `bun run update:desktop` installs a development-signed one on this Mac; nothing in delivery depends on it. The local build is its own app, **FrockBot Dev**: bundle `com.frockbot.mobile.dev`, scheme `frockbot-dev`, a DEV-ribboned icon, installed at `/Users/tim/Applications/FrockBot Dev.app`. It runs beside the released `/Applications/FrockBot.app` without either being opened in place of the other; when the two shared `com.frockbot.mobile`, Launch Services opened the local build, which carries no update feed, and the released app silently stopped receiving updates. The dev build has its own Keychain group and app data, so it signs in separately.
 
 It checks the client protocol against the server compatibility range, runs `flutter build macos --config-only` with `--dart-define=FROCKBOT_DESKTOP_DEV=true`, then `xcodebuild` with `FROCKBOT_DESKTOP_DEV=YES` and `-allowProvisioningUpdates`, verifies the bundle identifier, name, scheme, empty update feed, version, build number, signature and Apple team, then safely replaces and opens the installed app, quitting only FrockBot Dev. It unregisters the `build/` bundles from Launch Services and registers the installed one, so a `frockbot-dev://` return from the browser reaches it; should Launch Services still open another copy, that copy hands the link to the running app and quits (`macos/Runner/AppDelegate.swift`). If an earlier local build is still installed at `/Users/tim/Applications/FrockBot.app` under the released identity, the script says so and suggests removing it; it never deletes it.
 
