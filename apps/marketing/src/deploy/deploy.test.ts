@@ -319,9 +319,13 @@ describe("zip", () => {
     const entries = await readZipV1(
       storedZipV1({ "index.html": "hi", "assets/a.js": "x" }),
     );
-    expect(
-      entries.map((e) => [e.path, new TextDecoder().decode(e.bytes)]),
-    ).toEqual([
+    const read = await Promise.all(
+      entries.map(async (e) => [
+        e.path,
+        new TextDecoder().decode(await e.read()),
+      ]),
+    );
+    expect(read).toEqual([
       ["index.html", "hi"],
       ["assets/a.js", "x"],
     ]);

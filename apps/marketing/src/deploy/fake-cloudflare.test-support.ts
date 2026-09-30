@@ -259,13 +259,16 @@ export class FakeCloudflareV1 {
     const query = path.match(new RegExp(`^${a}/d1/database/([^/]+)/query$`));
     if (query) {
       const db = [...this.d1.values()].find((d) => d.id === query[1])!;
-      const { sql, params } = await body();
+      const { sql } = (await body()) as { sql: string };
       db.statements.push(sql);
       if (sql.startsWith("SELECT name FROM d1_migrations")) {
         return this.ok([{ results: db.migrations.map((name) => ({ name })) }]);
       }
-      if (sql.startsWith("INSERT INTO d1_migrations"))
-        db.migrations.push(params[0]);
+      for (const match of sql.matchAll(
+        /INSERT INTO d1_migrations \(name\) VALUES \('([^']*)'\)/g,
+      )) {
+        db.migrations.push(match[1]!);
+      }
       return this.ok([{ results: [] }]);
     }
     if (path === `${a}/vectorize/v2/indexes`) {

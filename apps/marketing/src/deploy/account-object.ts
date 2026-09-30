@@ -26,7 +26,7 @@ import {
   isTransientV1,
   type InstallRecordV1,
 } from "./deployer";
-import { releaseManifestV1 } from "./release";
+import { releaseManifestV1, sha256HexV1 } from "./release";
 import {
   checksPassV1,
   initialStepsV1,
@@ -96,14 +96,8 @@ export function installKeyV1(accountId: string, name: string): string {
   return `${accountId}/${name}`;
 }
 
-async function hashSecret(secret: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(secret),
-  );
-  return [...new Uint8Array(digest)]
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+function hashSecret(secret: string): Promise<string> {
+  return sha256HexV1(new TextEncoder().encode(secret));
 }
 
 function publicJob(job: DeployJobV1): Omit<DeployJobV1, "grantId"> {
@@ -114,6 +108,7 @@ function publicJob(job: DeployJobV1): Omit<DeployJobV1, "grantId"> {
 export class DeployAccount extends DurableObject<DeployEnvV1> {
   /** Refreshes in flight, so a page and the deploy never redeem one refresh token twice. */
   private readonly refreshing = new Map<string, Promise<OAuthTokensV1>>();
+  private starting = false;
 
   private client(): OAuthClientV1 {
     const client = oauthClientV1(this.env);
@@ -252,13 +247,22 @@ export class DeployAccount extends DurableObject<DeployEnvV1> {
         };
   }
 
+  /**
+   * The account checks, read afresh when asked or never read yet; otherwise
+   * the session's last reading, so reloading Choose doesn't probe the account
+   * again. "Check again" is the ask.
+   */
   async checks(
     secret: string,
     accountId: string,
+    refresh = false,
   ): Promise<AccountCheckV1[] | null> {
     const record = await this.session(secret);
     if (!record || !record.accounts.some((a) => a.id === accountId))
       return null;
+    if (!refresh && record.checks?.accountId === accountId) {
+      return [...record.checks.results];
+    }
     const api = new CloudflareApiV1(await this.token(record.secretHash));
     const results = await accountChecksV1(api, accountId);
     const latest = (await this.session(secret)) ?? record;
@@ -270,6 +274,36 @@ export class DeployAccount extends DurableObject<DeployEnvV1> {
   }
 
   async startDeploy(
+    secret: string,
+    accountId: string,
+    name: string,
+    version: string,
+  ): Promise<StartResultV1> {
+    return this.oneStart(() =>
+      this.startDeployNow(secret, accountId, name, version),
+    );
+  }
+
+  /**
+   * A start reads the job, then calls Cloudflare before it writes one, and a
+   * request can interleave at every call; this keeps a double-submitted Deploy
+   * from starting two jobs over each other.
+   */
+  private async oneStart(
+    start: () => Promise<StartResultV1>,
+  ): Promise<StartResultV1> {
+    if (this.starting) {
+      return { ok: false, problem: "A deploy is already starting." };
+    }
+    this.starting = true;
+    try {
+      return await start();
+    } finally {
+      this.starting = false;
+    }
+  }
+
+  private async startDeployNow(
     secret: string,
     accountId: string,
     name: string,
@@ -335,6 +369,14 @@ export class DeployAccount extends DurableObject<DeployEnvV1> {
     key: string,
     version: string,
   ): Promise<StartResultV1> {
+    return this.oneStart(() => this.startUpdateNow(secret, key, version));
+  }
+
+  private async startUpdateNow(
+    secret: string,
+    key: string,
+    version: string,
+  ): Promise<StartResultV1> {
     const record = await this.session(secret);
     if (!record)
       return {
@@ -361,6 +403,10 @@ export class DeployAccount extends DurableObject<DeployEnvV1> {
 
   /** Picks the failed job up at the step it failed on, with this session's grant. */
   async retry(secret: string): Promise<StartResultV1> {
+    return this.oneStart(() => this.retryNow(secret));
+  }
+
+  private async retryNow(secret: string): Promise<StartResultV1> {
     const record = await this.session(secret);
     const job = await this.job();
     if (!record)
@@ -380,6 +426,7 @@ export class DeployAccount extends DurableObject<DeployEnvV1> {
       ),
     };
     delete (resumed as { error?: string }).error;
+    delete (resumed as { waitingSince?: number }).waitingSince;
     delete (resumed as { finishedAt?: string }).finishedAt;
     await this.ctx.storage.put("job", resumed);
     await this.ctx.storage.setAlarm(Date.now());

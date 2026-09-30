@@ -489,39 +489,6 @@ export class CloudflareApiV1 {
     );
   }
 
-  async deleteScriptSecret(
-    accountId: string,
-    name: string,
-    secret: string,
-  ): Promise<void> {
-    try {
-      await this.result(
-        "DELETE",
-        `/accounts/${accountId}/workers/scripts/${name}/secrets/${secret}`,
-      );
-    } catch (error) {
-      if (!(error instanceof CloudflareApiErrorV1 && error.status === 404))
-        throw error;
-    }
-  }
-
-  async putScriptSecret(
-    accountId: string,
-    name: string,
-    secret: string,
-    value: string,
-  ): Promise<void> {
-    await this.result(
-      "PUT",
-      `/accounts/${accountId}/workers/scripts/${name}/secrets`,
-      {
-        name: secret,
-        text: value,
-        type: "secret_text",
-      },
-    );
-  }
-
   async deleteScript(accountId: string, name: string): Promise<void> {
     try {
       await this.result(
@@ -532,15 +499,6 @@ export class CloudflareApiV1 {
       if (!(error instanceof CloudflareApiErrorV1 && error.status === 404))
         throw error;
     }
-  }
-
-  /** Whether Workers AI answers for this account at all. */
-  async aiReachable(accountId: string): Promise<boolean> {
-    const found = await this.result<unknown[]>(
-      "GET",
-      `/accounts/${accountId}/ai/models/search?per_page=1`,
-    );
-    return found.length > 0;
   }
 
   /** Whether the account's Workers AI catalog serves this model. */

@@ -6,6 +6,7 @@
  * person who just turned something on clicks Check again and is read afresh.
  */
 import { CloudflareApiErrorV1, type CloudflareApiV1 } from "./cloudflare-api";
+import { JEV_MODEL_V1 } from "./deployer";
 import {
   r2CheckV1,
   workersAiCheckV1,
@@ -13,7 +14,8 @@ import {
   zeroTrustCheckV1,
   type AccountCheckV1,
 } from "./plan";
-import { randomTokenV1 } from "./oauth";
+
+export const PLAN_PROBE_WORKER_V1 = "frockbot-plan-check";
 
 /** R2's code for an account that has not turned it on. */
 const R2_NOT_ENABLED = 10042;
@@ -23,16 +25,15 @@ const R2_NOT_ENABLED = 10042;
  *
  * Cloudflare grants no billing scope to a third party, so the plan is read by
  * doing the thing FrockBot needs Paid for: uploading a Worker with a Worker
- * Loader binding, which only Paid accepts. The probe is a one-line Worker under
- * a throwaway name, deleted straight after.
+ * Loader binding, which only Paid accepts. The probe is a one-line Worker,
+ * deleted straight after, under one fixed name: a delete that failed leaves a
+ * single Worker the next probe overwrites, never a trail of them.
  */
 export async function probeWorkersPaidV1(
   api: CloudflareApiV1,
   accountId: string,
 ): Promise<boolean | undefined> {
-  const name = `frockbot-plan-check-${randomTokenV1(6)
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, "")}`;
+  const name = PLAN_PROBE_WORKER_V1;
   try {
     await api.uploadScript(accountId, name, {
       metadata: {
@@ -78,12 +79,13 @@ async function r2Enabled(
   }
 }
 
+/** Workers AI answers, and serves Jev, which every Turn is supervised by. */
 async function workersAi(
   api: CloudflareApiV1,
   accountId: string,
 ): Promise<boolean | undefined> {
   try {
-    return await api.aiReachable(accountId);
+    return await api.aiModelAvailable(accountId, JEV_MODEL_V1);
   } catch {
     return undefined;
   }

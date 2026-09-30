@@ -540,10 +540,6 @@ export function decodeReleaseManifestV1(
   };
 }
 
-export function isManifestErrorV1(error: unknown): boolean {
-  return error instanceof ManifestErrorV1;
-}
-
 /** `a` is newer than `b`, by semantic version. */
 export function isNewerVersionV1(a: string, b: string): boolean {
   const parse = (v: string) => v.split(".").map((n) => Number.parseInt(n, 10));

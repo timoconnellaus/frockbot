@@ -18,12 +18,16 @@ The code is `apps/marketing/src/deploy/`, served by the marketing Worker under
    several accounts is sent back to sign in again with one.
 2. **Choose.** The page shows the account, the install name and its
    `workers.dev` address, "Just you", and four account checks. Deploy stays
-   off until all four pass, and the server enforces the same rule.
+   off until all four pass, and the server enforces the same rule. The
+   reading is kept for the session, and "Check again" reads the account
+   afresh.
    - **Workers Paid.** Cloudflare gives third parties no billing scope, so
-     the check uploads a throwaway Worker with a Worker Loader binding (only
-     Paid accepts one) and deletes it straight after.
+     the check uploads a one-line Worker, `frockbot-plan-check`, with a
+     Worker Loader binding (only Paid accepts one) and deletes it straight
+     after.
    - **R2.** Listing buckets fails with 10042 until R2 is turned on.
-   - **Workers AI.** The model catalog answers.
+   - **Workers AI.** The account's catalog serves Jev (`typesafe/jev`),
+     which the install's `AI` binding runs and every Turn is supervised by.
    - **Zero Trust.** The Access organization, or the Zero Trust (Gateway)
      account, exists. The fix links to Zero Trust, where the person chooses
      the Free plan.
@@ -33,8 +37,9 @@ The code is `apps/marketing/src/deploy/`, served by the marketing Worker under
    "Try again" picks up at the step that stopped. Every step converges, so a
    repeat makes nothing twice.
    1. **Storage.** The R2 buckets, KV namespaces, queues and Vectorize
-      indexes, plus the D1 databases with their migrations. Migrations are
-      recorded in `d1_migrations`, as wrangler records them.
+      indexes, plus the D1 databases with their migrations. Each migration
+      and its row in `d1_migrations` (the table wrangler keeps) go in one
+      request, so a retry never replays one.
    2. **Sign-in.** The Access organization, if Zero Trust is on without one,
       then two applications ([ADR 0028](adr/0028-open-deployment.md) step 4):
       - Allow on the hostname, for the deployer's email only;
@@ -46,8 +51,8 @@ The code is `apps/marketing/src/deploy/`, served by the marketing Worker under
       2. Put the release's R2 objects.
       3. Upload the Worker with the audience Access issued.
       4. Switch on `workers.dev` last.
-   4. **Jev and Workers AI.** Checks that `typesafe/jev` is in the account's
-      Workers AI catalog. The install's `AI` binding runs Jev.
+   4. **Jev and Workers AI.** Looks for Jev in the catalog again, now as the
+      deploy's own step.
    5. **First check.** `/` must redirect to Access. `/api/identity` must be
       refused by the Worker itself (401, JSON). A new `workers.dev` name is
       retried for up to five minutes.

@@ -7,9 +7,14 @@
  * general-purpose reader.
  */
 
+/**
+ * One file, read on demand: a Flutter web client inflates to tens of
+ * megabytes, and holding all of it at once would crowd a Durable Object's
+ * memory, so each file is inflated only while it is hashed or uploaded.
+ */
 export interface ZipEntryV1 {
   readonly path: string;
-  readonly bytes: Uint8Array<ArrayBuffer>;
+  read(): Promise<Uint8Array<ArrayBuffer>>;
 }
 
 const END_OF_CENTRAL_DIRECTORY = 0x06054b50;
@@ -76,13 +81,16 @@ export async function readZipV1(
       view.getUint16(localOffset + 26, true) +
       view.getUint16(localOffset + 28, true);
     const data = archive.subarray(dataStart, dataStart + compressedSize);
-    if (method === 0) entries.push({ path, bytes: data.slice() });
-    else if (method === 8)
-      entries.push({ path, bytes: await inflateRaw(data) });
-    else
+    if (method !== 0 && method !== 8) {
       throw new Error(
         `The web client archive uses compression method ${method}`,
       );
+    }
+    entries.push({
+      path,
+      read: () =>
+        method === 0 ? Promise.resolve(data.slice()) : inflateRaw(data),
+    });
   }
   return entries;
 }

@@ -256,6 +256,25 @@ export function startPageV1(problem?: string): Response {
   );
 }
 
+export function problemPageV1(problem: string): Response {
+  return page(
+    "Something went wrong",
+    html`<section class="deploy-narrow">
+      <h1 class="deploy-title">Something went wrong.</h1>
+      <p class="deploy-problem" role="alert">${problem}</p>
+      <p class="deploy-lede">
+        Nothing you started is lost: a deploy that was running carries on.
+      </p>
+      <div class="deploy-actions">
+        <a class="deploy-button deploy-primary" href="/deploy">Try again</a>
+        <a class="deploy-button deploy-outline" href="/deploy/sign-in?switch"
+          >Sign in again</a
+        >
+      </div>
+    </section>`,
+  );
+}
+
 /** Several accounts granted: Cloudflare's own sign-in is where one is picked. */
 export function oneAccountPageV1(
   accounts: readonly CloudflareAccountV1[],
@@ -272,7 +291,7 @@ export function oneAccountPageV1(
         should use.
       </p>
       <p>
-        <a class="deploy-button deploy-primary" href="/deploy/sign-in?switch=1"
+        <a class="deploy-button deploy-primary" href="/deploy/sign-in?switch"
           >Sign in again</a
         >
       </p>
@@ -304,7 +323,7 @@ function checkRow(check: AccountCheckV1): Html {
                   : ""
               }<a
                 class="deploy-button deploy-outline deploy-button-small"
-                href="/deploy/choose"
+                href="/deploy/choose?check"
                 >Check again</a
               ></span
             >`
@@ -343,9 +362,7 @@ export function choosePageV1(input: ChoosePageInputV1): Response {
             <span class="deploy-field-label">Cloudflare account</span>
             <span
               >${input.account.name}, the account you signed in to.
-              <a href="/deploy/sign-in?switch=1"
-                >Use a different account</a
-              ></span
+              <a href="/deploy/sign-in?switch">Use a different account</a></span
             >
           </div>
           <label class="deploy-field">

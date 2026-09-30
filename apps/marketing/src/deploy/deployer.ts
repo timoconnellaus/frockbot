@@ -24,8 +24,8 @@ import {
   type DeployStepIdV1,
 } from "./plan";
 import { releaseFileV1, sha256HexV1 } from "./release";
-import { randomTokenV1 } from "./oauth";
-import { readZipV1 } from "./zip";
+import { randomSuffixV1 } from "./oauth";
+import { readZipV1, type ZipEntryV1 } from "./zip";
 
 /** Jev's model on Workers AI, which the install's `AI` binding calls. */
 export const JEV_MODEL_V1 = "typesafe/jev";
@@ -138,12 +138,13 @@ async function applyD1Migrations(
     const sql = new TextDecoder().decode(
       await releaseFileV1(context.manifest.version, migration, context.fetcher),
     );
-    await api.d1Query(accountId, databaseId, sql);
+    // One request, so the migration and its record land together: two would
+    // leave a window where a retry replays a migration already applied.
+    const name = migration.name.replaceAll("'", "''");
     await api.d1Query(
       accountId,
       databaseId,
-      "INSERT INTO d1_migrations (name) VALUES (?)",
-      [migration.name],
+      `${sql.trim().replace(/;?$/, ";")}\nINSERT INTO d1_migrations (name) VALUES ('${name}');`,
     );
   }
 }
@@ -165,12 +166,7 @@ async function signIn(
   for (let attempt = 0; !organization; attempt += 1) {
     // A team domain is global across Cloudflare, so a taken one gets a suffix.
     const base = suggestedTeamNameV1(install.accountName, accountId);
-    const team =
-      attempt === 0
-        ? base
-        : `${base}-${randomTokenV1(3)
-            .toLowerCase()
-            .replace(/[^a-z0-9]/g, "")}`;
+    const team = attempt === 0 ? base : `${base}-${randomSuffixV1()}`;
     try {
       organization = await api.createAccessOrganization(accountId, {
         name: install.accountName || team,
@@ -221,22 +217,21 @@ async function uploadAssets(
 ): Promise<string> {
   const { api } = context;
   const entries = await readZipV1(archive);
-  const byHash = new Map<string, { base64: string; contentType: string }>();
+  const byHash = new Map<string, ZipEntryV1>();
   const manifest: Record<string, { hash: string; size: number }> = {};
   for (const entry of entries) {
-    let binary = "";
-    for (let i = 0; i < entry.bytes.length; i += 0x8000) {
-      binary += String.fromCharCode(...entry.bytes.subarray(i, i + 0x8000));
-    }
-    const base64 = btoa(binary);
-    const extension = entry.path.split(".").pop() ?? "";
-    // Any stable 32-hex content key does; this is the content and its extension,
-    // so the same bytes served as another type are a different asset.
-    const hash = (
-      await sha256HexV1(new TextEncoder().encode(base64 + extension))
-    ).slice(0, 32);
-    manifest[`/${entry.path}`] = { hash, size: entry.bytes.length };
-    byHash.set(hash, { base64, contentType: assetContentTypeV1(entry.path) });
+    const bytes = await entry.read();
+    const extension = new TextEncoder().encode(
+      entry.path.split(".").pop() ?? "",
+    );
+    const keyed = new Uint8Array(bytes.length + extension.length);
+    keyed.set(bytes);
+    keyed.set(extension, bytes.length);
+    // Any stable 32-hex content key does; this is the content and its
+    // extension, so the same bytes served as another type are another asset.
+    const hash = (await sha256HexV1(keyed)).slice(0, 32);
+    manifest[`/${entry.path}`] = { hash, size: bytes.length };
+    byHash.set(hash, entry);
   }
   const session = await api.assetsUploadSession(
     install.accountId,
@@ -244,13 +239,30 @@ async function uploadAssets(
     manifest,
   );
   let completion = session.jwt;
+  // Only the files Cloudflare doesn't already hold, one bucket at a time.
   for (const bucket of session.buckets) {
-    const files = bucket.map((hash) => ({ hash, ...byHash.get(hash)! }));
+    const files = [];
+    for (const hash of bucket) {
+      const entry = byHash.get(hash)!;
+      files.push({
+        hash,
+        base64: base64V1(await entry.read()),
+        contentType: assetContentTypeV1(entry.path),
+      });
+    }
     completion =
       (await api.uploadAssetBucket(install.accountId, session.jwt, files)) ??
       completion;
   }
   return completion;
+}
+
+function base64V1(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(binary);
 }
 
 async function release(

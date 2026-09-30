@@ -181,6 +181,23 @@ describe("DeployAccount", () => {
     expect(await object.checks(secret, cf.accountId)).not.toBeNull();
   });
 
+  test("reloading Choose reuses the checks; Check again reads the account afresh", async () => {
+    const { cf, object, expired } = world();
+    const secret = await object.startSession(
+      { id: "user-1", email: "tim@example.com" },
+      [{ id: cf.accountId, name: cf.accountName }],
+      expired,
+    );
+    cf.zeroTrust = false;
+    await object.checks(secret, cf.accountId);
+    await object.checks(secret, cf.accountId);
+    expect(cf.deletedScripts).toHaveLength(1);
+    cf.zeroTrust = true;
+    const again = await object.checks(secret, cf.accountId, true);
+    expect(cf.deletedScripts).toHaveLength(2);
+    expect(again!.every((c) => c.state === "ok")).toBe(true);
+  });
+
   test("a deploy refuses to start before every check passed", async () => {
     const { cf, object, expired } = world();
     cf.zeroTrust = false;
@@ -226,15 +243,15 @@ describe("DeployAccount", () => {
   test("a failed step can be tried again from where it stopped", async () => {
     const { cf, storage, object, expired } = world();
     await publishMinimalRelease(cf);
-    cf.aiModels = [];
     const secret = await object.startSession(
       { id: "user-1", email: "tim@example.com" },
       [{ id: cf.accountId, name: cf.accountName }],
       expired,
     );
-    cf.aiModels = ["x"];
     await object.checks(secret, cf.accountId);
     await object.startDeploy(secret, cf.accountId, "tims-frockbot", "1.0.0");
+    // Jev leaves the catalog between the check and the deploy's own look.
+    cf.aiModels = [];
     const failed = (await runAlarms(object, storage)) as {
       state: string;
       steps: { id: string; state: string }[];

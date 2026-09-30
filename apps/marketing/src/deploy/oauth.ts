@@ -67,6 +67,13 @@ export function randomTokenV1(bytes = 32): string {
   return base64Url(crypto.getRandomValues(new Uint8Array(bytes)));
 }
 
+/** A short lowercase suffix for a name Cloudflare needs unique. */
+export function randomSuffixV1(): string {
+  return [...crypto.getRandomValues(new Uint8Array(3))]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 export async function pkceChallengeV1(verifier: string): Promise<string> {
   const digest = await crypto.subtle.digest(
     "SHA-256",
@@ -79,6 +86,8 @@ export async function authorizeUrlV1(
   client: OAuthClientV1,
   state: string,
   verifier: string,
+  /** Ask again even if already granted: how a person picks another account. */
+  reconsent = false,
 ): Promise<string> {
   const url = new URL(CLOUDFLARE_AUTHORIZE_URL_V1);
   url.searchParams.set("response_type", "code");
@@ -88,6 +97,7 @@ export async function authorizeUrlV1(
   url.searchParams.set("state", state);
   url.searchParams.set("code_challenge", await pkceChallengeV1(verifier));
   url.searchParams.set("code_challenge_method", "S256");
+  if (reconsent) url.searchParams.set("prompt", "consent");
   return url.toString();
 }
 

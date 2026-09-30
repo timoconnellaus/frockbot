@@ -14,6 +14,7 @@ import {
   choosePageV1,
   installsPageV1,
   oneAccountPageV1,
+  problemPageV1,
   progressPageV1,
   readyPageV1,
   startPageV1,
@@ -104,16 +105,14 @@ async function latestRelease(): Promise<{
 async function signIn(request: Request, env: DeployEnvV1): Promise<Response> {
   const client = oauthClientV1(env)!;
   const cookies: string[] = [];
-  const session = sessionOf(request);
-  if (session && new URL(request.url).searchParams.has("switch")) {
-    // Another account means another sign-in: this one ends first.
-    await stub(env, session.userId).endSession(session.secret);
-    cookies.push(setCookie(SESSION_COOKIE, "", 0));
-  }
   const state = randomTokenV1(24);
   const verifier = randomTokenV1(48);
   cookies.push(setCookie(OAUTH_COOKIE, `${state}.${verifier}`, 600));
-  return redirect(await authorizeUrlV1(client, state, verifier), cookies);
+  const reconsent = new URL(request.url).searchParams.has("switch");
+  return redirect(
+    await authorizeUrlV1(client, state, verifier, reconsent),
+    cookies,
+  );
 }
 
 async function callback(request: Request, env: DeployEnvV1): Promise<Response> {
@@ -141,6 +140,14 @@ async function callback(request: Request, env: DeployEnvV1): Promise<Response> {
       accounts.map((a) => ({ id: a.id, name: a.name })),
       tokens,
     );
+    // A sign-in replaces the one before it, which ends here rather than on
+    // the GET that started this one, so no other site can sign anyone out.
+    const previous = sessionOf(request);
+    if (previous) {
+      await stub(env, previous.userId)
+        .endSession(previous.secret)
+        .catch(() => undefined);
+    }
     return redirect("/deploy/choose", [
       clear,
       setCookie(SESSION_COOKIE, `${user.id}.${secret}`, 12 * 60 * 60),
@@ -167,6 +174,7 @@ async function choose(
   status: DeployStatusV1,
   name?: string,
   problem?: string,
+  recheck = false,
 ): Promise<Response> {
   const [account, ...others] = status.session.accounts;
   if (!account) {
@@ -178,7 +186,7 @@ async function choose(
   const object = stub(env, session.userId);
   const [subdomain, checks, latest] = await Promise.all([
     object.workersSubdomain(session.secret, account.id),
-    object.checks(session.secret, account.id),
+    object.checks(session.secret, account.id, recheck),
     latestRelease(),
   ]);
   const chosen =
@@ -211,10 +219,24 @@ function jobInstall(status: DeployStatusV1) {
   );
 }
 
+/**
+ * Every `/deploy` request. A Cloudflare call that fails — a revoked grant, an
+ * API that answered 403 — is shown as a page with a way back, never a 500.
+ */
 export async function handleDeployRequestV1(
   request: Request,
   env: DeployEnvV1,
 ): Promise<Response> {
+  try {
+    return await handle(request, env);
+  } catch (error) {
+    return problemPageV1(
+      error instanceof Error ? error.message : "Something went wrong.",
+    );
+  }
+}
+
+async function handle(request: Request, env: DeployEnvV1): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, "") || DEPLOY_PATH_V1;
   if (!oauthClientV1(env)) return unavailablePageV1();
@@ -307,7 +329,14 @@ export async function handleDeployRequestV1(
         status.installs.length > 0 ? "/deploy/installs" : "/deploy/choose",
       );
     case "/deploy/choose":
-      return choose(env, session, status);
+      return choose(
+        env,
+        session,
+        status,
+        undefined,
+        undefined,
+        url.searchParams.has("check"),
+      );
     case "/deploy/progress": {
       const install = jobInstall(status);
       if (!status.job || !install) return redirect("/deploy/choose");
