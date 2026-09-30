@@ -137,7 +137,7 @@ export function bundleWorkerSecretsV1(
 
 /**
  * A secret the Computer host reads is required of another Worker only when the
- * install runs the host: the host is optional (Your Sprites).
+ * install runs the host, which is optional.
  */
 function requiredWithV1(
   key: BundleWorkerKeyV1,

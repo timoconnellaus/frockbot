@@ -113,7 +113,7 @@ export interface BundleMigrationV1 {
 export interface BundleWorkerV1 {
   /** The script name, templated. */
   readonly name: string;
-  /** Deployed only when the install chooses it (the Computer: Your Sprites). */
+  /** Deployed only when the install chooses it (its own Computer host). */
   readonly optional: boolean;
   /** sha256 over this entry with this field left out. */
   readonly contentHash: string;
@@ -687,7 +687,7 @@ export interface InstallV1 {
   readonly name: string;
   /** The app's custom domains. */
   readonly hostnames: readonly string[];
-  /** Whether the install runs its own Computer host (Your Sprites). */
+  /** Whether the install runs its own Computer host, on its own Fly account. */
   readonly computerHost: boolean;
   readonly vars: Readonly<Record<string, string>>;
   readonly secrets: Readonly<Record<string, string>>;

@@ -19,7 +19,7 @@
  *   --access-team <domain>    the Zero Trust team domain
  *   --access-aud <tag>        the Access application's audience tag
  *   --secrets <file.json>     the secrets by name; minted ones are added to it
- *   --no-computer-host        run without the Computer (Your Sprites not chosen)
+ *   --no-computer-host        run without its own Computer host
  *   --location <hint>         an R2 location hint for a first install
  *
  * The token is CLOUDFLARE_API_TOKEN, or `wrangler login`'s. A conversation is a
