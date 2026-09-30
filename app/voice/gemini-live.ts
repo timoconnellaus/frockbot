@@ -17,13 +17,14 @@
 // seam (`provider.ts`): the frames below, one per command, and the decoder as
 // it is.
 
-import type {
-  VoiceFunctionCallV1,
-  VoiceFunctionDeclarationV1,
-  VoiceProviderV1,
-  VoiceSessionCodecV1,
-  VoiceSessionEventV1,
-  VoiceUsageV1,
+import {
+  VOICE_REFERENCE_RATES_V1,
+  type VoiceFunctionCallV1,
+  type VoiceFunctionDeclarationV1,
+  type VoiceProviderV1,
+  type VoiceSessionCodecV1,
+  type VoiceSessionDecodedV1,
+  type VoiceSessionEventV1,
 } from "./provider.js";
 
 /** The model one call runs on. Named with the `models/` prefix the API wants. */
@@ -91,21 +92,17 @@ export function decodeGeminiBase64V1(value: string): Uint8Array {
 // ---------------------------------------------------------------------------
 // Setup
 
-/**
- * One tool the model may call, as the API declares it.
- *
- * `behavior: "NON_BLOCKING"` is accepted (probed). On `gemini-3.8-live` it
- * does not make the model talk over a running tool: the generation that calls
- * ends silent, and the result is spoken in a fresh one.
- */
-export type GeminiFunctionDeclarationV1 = VoiceFunctionDeclarationV1;
-
 export interface GeminiLiveSetupOptionsV1 {
   /** The rendered per-Bot instruction: persona, then rules, then guardrails. */
   systemInstruction: string;
   /** One of Gemini's prebuilt voices. Absent leaves the API's own default. */
   voiceName?: string;
-  functionDeclarations?: readonly GeminiFunctionDeclarationV1[];
+  /**
+   * `behavior: "NON_BLOCKING"` is accepted (probed). On `gemini-3.8-live` it
+   * does not make the model talk over a running tool: the generation that
+   * calls ends silent, and the result is spoken in a fresh one.
+   */
+  functionDeclarations?: readonly VoiceFunctionDeclarationV1[];
   /** Grounding the session runs itself. */
   googleSearch?: boolean;
   /** A handle from a previous session, so wake continues rather than restarts. */
@@ -240,26 +237,18 @@ export function encodeGeminiToolResponseV1(
 // ---------------------------------------------------------------------------
 // Server frames
 
-export type GeminiFunctionCallV1 = VoiceFunctionCallV1;
-
-export type GeminiUsageV1 = VoiceUsageV1;
-
 /**
- * One fact off the wire. A single server frame can carry several — audio and
- * a transcription fragment ride the same `serverContent`, and `turnComplete`
- * arrives with `usageMetadata` beside it — so decoding answers with a list.
- */
-export type GeminiServerEventV1 = VoiceSessionEventV1;
-
-/**
- * Decodes one text frame.
+ * Decodes one text frame. A single server frame can carry several facts —
+ * audio and a transcription fragment ride the same `serverContent`, and
+ * `turnComplete` arrives with `usageMetadata` beside it — so decoding answers
+ * with a list.
  *
  * Bare `{}` frames arrive constantly — several between every pair of content
  * frames — and carry nothing, so anything unrecognised answers with an empty
  * list rather than a throw: a session must not die because Google added a
  * field.
  */
-export function decodeGeminiServerFrameV1(raw: string): GeminiServerEventV1[] {
+export function decodeGeminiServerFrameV1(raw: string): VoiceSessionEventV1[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -268,7 +257,7 @@ export function decodeGeminiServerFrameV1(raw: string): GeminiServerEventV1[] {
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return [];
   const value = parsed as Record<string, unknown>;
-  const events: GeminiServerEventV1[] = [];
+  const events: VoiceSessionEventV1[] = [];
   if (isRecord(value.setupComplete)) events.push({ kind: "setup-complete" });
   const content = value.serverContent;
   if (isRecord(content)) {
@@ -309,7 +298,7 @@ export function decodeGeminiServerFrameV1(raw: string): GeminiServerEventV1[] {
   }
   const toolCall = value.toolCall;
   if (isRecord(toolCall) && Array.isArray(toolCall.functionCalls)) {
-    const calls: GeminiFunctionCallV1[] = [];
+    const calls: VoiceFunctionCallV1[] = [];
     for (const entry of toolCall.functionCalls) {
       if (!isRecord(entry)) continue;
       if (typeof entry.name !== "string" || !entry.name) continue;
@@ -379,12 +368,14 @@ function number(value: unknown): number {
  * exactly as the object wrote it before there was a seam, and nothing is
  * ever owed back: Gemini's protocol has no replies of its own.
  */
+const NO_REPLIES: string[] = [];
+
 export const geminiLiveProviderV1: VoiceProviderV1 = {
   id: "gemini-live",
   model: GEMINI_LIVE_MODEL_V1,
   keyName: "GEMINI_API_KEY",
-  // $3 and $12 per million audio tokens, 25 tokens a second.
-  rates: { inputMicrosPerSecond: 75, outputMicrosPerSecond: 300 },
+  // The daily caps' reference is Gemini's own price.
+  rates: VOICE_REFERENCE_RATES_V1,
   resumes: true,
   unknownHandleCloseCode: GEMINI_LIVE_UNKNOWN_HANDLE_CLOSE_V1,
   webSearch: true,
@@ -422,9 +413,9 @@ export const geminiLiveProviderV1: VoiceProviderV1 = {
             })),
           ),
         ),
-      decode: (raw) => ({
+      decode: (raw): VoiceSessionDecodedV1 => ({
         events: decodeGeminiServerFrameV1(raw),
-        replies: [],
+        replies: NO_REPLIES,
       }),
     };
   },

@@ -54,6 +54,7 @@ import {
   voiceProviderDailyAudioSecondsV1,
   type VoiceFunctionCallV1,
   type VoiceProviderEndpointV1,
+  type VoiceProviderKeyNameV1,
   type VoiceProviderV1,
   type VoiceSessionCodecV1,
   type VoiceSessionEventV1,
@@ -328,19 +329,15 @@ export interface VoiceAssistantEnv {
   FLOCK_AI_GATEWAY_TOKEN?: string;
 }
 
-/** The provider this deployment's calls run on, and the key that opens it. */
-export function voiceAssistantProviderV1(env: {
-  GEMINI_API_KEY?: string;
-  OPENAI_API_KEY?: string;
+type VoiceProviderEnvV1 = Partial<Record<VoiceProviderKeyNameV1, string>> & {
   VOICE_PROVIDER?: string;
-}): VoiceProviderChoiceV1 {
-  return chooseVoiceProviderV1({
-    deployment: env.VOICE_PROVIDER,
-    keys: {
-      GEMINI_API_KEY: env.GEMINI_API_KEY,
-      OPENAI_API_KEY: env.OPENAI_API_KEY,
-    },
-  });
+};
+
+/** The provider this deployment's calls run on, and the key that opens it. */
+export function voiceAssistantProviderV1(
+  env: VoiceProviderEnvV1,
+): VoiceProviderChoiceV1 {
+  return chooseVoiceProviderV1({ deployment: env.VOICE_PROVIDER, keys: env });
 }
 
 /**
@@ -351,12 +348,9 @@ export function voiceAssistantProviderV1(env: {
  * update, but a deployment without it can hold a conversation, so it does not
  * gate the control.
  */
-export function voiceAssistantConfiguredV1(env: {
-  GEMINI_API_KEY?: string;
-  OPENAI_API_KEY?: string;
-  VOICE_PROVIDER?: string;
-  VOICE_ASSISTANT_UPSTREAM_URL?: string;
-}): boolean {
+export function voiceAssistantConfiguredV1(
+  env: VoiceProviderEnvV1 & { VOICE_ASSISTANT_UPSTREAM_URL?: string },
+): boolean {
   return Boolean(
     voiceAssistantProviderV1(env).key ||
     env.VOICE_ASSISTANT_UPSTREAM_URL?.trim(),
@@ -422,6 +416,8 @@ interface LiveCall {
   resumable: boolean;
   /** Semantic setup identity this handle was issued for. */
   setupFingerprint?: string;
+  /** The provider the current session was opened on. */
+  provider?: VoiceProviderV1;
   /** The opening attempt currently bound to inbound and outbound PCM. */
   attemptId?: string;
   inboundSequence?: number;
@@ -706,7 +702,7 @@ class VoiceSessionV1 {
           ? event.data
           : new TextDecoder().decode(event.data as ArrayBuffer);
       const { events, replies } = this.codec.decode(raw);
-      this.write(replies);
+      if (replies.length > 0) this.write(replies);
       for (const decoded of events) {
         if (decoded.kind === "setup-complete") {
           this.ready = true;
@@ -1076,10 +1072,10 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     return new VoiceLedgerV1(
       this.voiceStorage(),
       this.name,
-      voiceProviderDailyAudioSecondsV1(this.voiceProvider().rates, {
-        audioInSeconds: VOICE_METER_CAPS_V1.audioInSeconds,
-        audioOutSeconds: VOICE_METER_CAPS_V1.audioOutSeconds,
-      }),
+      voiceProviderDailyAudioSecondsV1(
+        this.voiceProvider().rates,
+        VOICE_METER_CAPS_V1,
+      ),
     );
   }
 
@@ -2546,6 +2542,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
           attempt.id,
           code,
           reason,
+          code === provider.unknownHandleCloseCode,
         );
       },
       open: (target, signal) => this.openVoiceSocket(target, signal),
@@ -2639,6 +2636,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       return;
     }
     call.setupFingerprint = setup.fingerprint;
+    call.provider = provider;
     call.lastSystem = setup.instruction;
     attempt.phase = "ready";
     this.sendReady(connection, attempt, call.callId);
@@ -2713,7 +2711,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       now: this.now(),
       ...(handover.length > 0 ? { handover } : {}),
       ...(runningTasks.length > 0 ? { runningTasks } : {}),
-      ...(provider.webSearch ? {} : { webSearch: false }),
+      webSearch: provider.webSearch,
     });
     return {
       instruction,
@@ -2762,12 +2760,13 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   }
 
   private async persistResumption(call: LiveCall): Promise<void> {
-    if (!call.setupFingerprint) return;
+    const provider = call.provider;
+    if (!call.setupFingerprint || !provider) return;
     const record: VoiceResumptionRecordV1 = {
       schemaVersion: 1,
       callId: call.callId,
       botId: call.botId,
-      model: this.voiceProvider().model,
+      model: provider.model,
       fingerprint: call.setupFingerprint,
       ...(call.resumptionHandle ? { handle: call.resumptionHandle } : {}),
       resumable: call.resumable === true,
@@ -3186,6 +3185,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     attemptId: string,
     code: number,
     reason: string,
+    forgottenHandle: boolean,
   ): Promise<void> {
     const live = this.live(connectionId, callId);
     if (!live) return;
@@ -3207,10 +3207,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       this.sendState(connection, call);
       return;
     }
-    if (
-      code === this.voiceProvider().unknownHandleCloseCode &&
-      call.resumptionHandle
-    ) {
+    if (forgottenHandle && call.resumptionHandle) {
       call.resumptionHandle = undefined;
       call.resumable = false;
       await this.ledger().clearResumption(call.callId);

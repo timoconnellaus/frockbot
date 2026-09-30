@@ -13,12 +13,12 @@
 // answer, how much of a reply was sent before the person talked over it.
 
 /** Every provider a deployment may choose. */
-export type VoiceProviderIdV1 = "gemini-live" | "openai-realtime";
-
-export const VOICE_PROVIDER_IDS_V1: readonly VoiceProviderIdV1[] = [
+export const VOICE_PROVIDER_IDS_V1 = [
   "gemini-live",
   "openai-realtime",
-];
+] as const;
+
+export type VoiceProviderIdV1 = (typeof VOICE_PROVIDER_IDS_V1)[number];
 
 /** The provider a deployment that chose nothing runs. */
 export const DEFAULT_VOICE_PROVIDER_V1: VoiceProviderIdV1 = "gemini-live";
