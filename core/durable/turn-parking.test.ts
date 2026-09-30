@@ -269,6 +269,22 @@ async function settle(): Promise<void> {
   }
 }
 
+/**
+ * Until the run leaves `running`. How many ticks that takes depends on the
+ * digests and storage writes after its last boundary, which a loaded machine
+ * spreads over more of them.
+ */
+async function settledRun(
+  storage: MemoryStorage,
+  runId: string,
+): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (storedRun(storage, runId).status === "running") {
+    if (Date.now() > deadline) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 function duplicates(values: readonly string[]): string[] {
   return values.filter((value, index) => values.indexOf(value) !== index);
 }
@@ -538,7 +554,7 @@ describe("Stop on a parked Routine", () => {
 
     // The person's Turn is untouched by it.
     probe.boundary("msg-1", 2).open();
-    await settle();
+    await settledRun(storage, "msg-1");
     expect(storedRun(storage, "msg-1").status).toBe("completed");
     expect(probe.observed.map((input) => input.command.runId)).toEqual([
       "fire-1",
