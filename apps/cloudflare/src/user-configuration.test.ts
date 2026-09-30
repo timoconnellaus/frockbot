@@ -400,6 +400,22 @@ describe("UserConfiguration Connection routing", () => {
     expect(withLoader).toContain("provider-openai");
   });
 
+  test("a User who never chose a Computer host runs on FrockBot's own", async () => {
+    const userId = "computer-host-user";
+    const storage = new MemoryStorage();
+    const bound = identity(userId);
+    const configuration = new UserConfiguration(bound.ctx(storage), {
+      ...bound.env,
+      CREDENTIAL_KEYRING: credentialKeyring,
+    });
+    expect(
+      await configuration.readComputerHost({ schemaVersion: 1, userId }),
+    ).toEqual({ kind: "frockbot" });
+    await expect(
+      configuration.readComputerHost({ schemaVersion: 1, userId: "other" }),
+    ).rejects.toThrow();
+  });
+
   test("dispatches a Connection command to the Package the User Contribution adjudicates", async () => {
     const executed: unknown[] = [];
     const resolved: unknown[] = [];

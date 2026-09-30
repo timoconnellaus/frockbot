@@ -401,6 +401,7 @@ export const FLY_HOST_CAPABILITIES_V1: ComputerHostCapabilitiesV1 = {
   egressShellPrelude: flyEgressShellPreludeV1,
   desktop: { slots: DESKTOP_SLOTS, width: SLOT_WIDTH, height: SLOT_HEIGHT },
   viewerFrameOrigins: ["https://*.sprites.app"],
+  availability: "always",
 };
 
 function handle(

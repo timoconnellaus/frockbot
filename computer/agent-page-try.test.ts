@@ -12,7 +12,7 @@ import {
 const opened: string[] = [];
 const host: ComputerHostV1 = {
   id: "fixture",
-  capabilities: { viewerFrameOrigins: [] },
+  capabilities: { viewerFrameOrigins: [], availability: "always" },
   open: () => {
     opened.push("open");
     return Promise.reject(new Error("a refused try opens no Computer"));

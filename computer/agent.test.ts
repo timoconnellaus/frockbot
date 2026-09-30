@@ -31,6 +31,7 @@ import {
 /** A host that offers nothing beyond the operations under test. */
 const TEST_HOST_CAPABILITIES: ComputerHostCapabilitiesV1 = {
   viewerFrameOrigins: [],
+  availability: "always",
 };
 
 async function execute(
@@ -311,6 +312,7 @@ describe("computer agent contribution", () => {
     let tokenOf: ComputerEgressTokenV1 | undefined;
     const capabilities: ComputerHostCapabilitiesV1 = {
       viewerFrameOrigins: [],
+      availability: "always",
       egressShellPrelude: (token) => `export PROXY_TOKEN=${token}`,
     };
     const provider: ComputerHostV1 = {
@@ -410,6 +412,7 @@ describe("computer agent contribution", () => {
     const asked: string[] = [];
     const capabilities: ComputerHostCapabilitiesV1 = {
       viewerFrameOrigins: [],
+      availability: "always",
       egressShellPrelude: (token) => `export PROXY_TOKEN=${token}`,
     };
     const provider: ComputerHostV1 = {
@@ -483,6 +486,7 @@ describe("computer agent contribution", () => {
     let during: number | undefined;
     const capabilities: ComputerHostCapabilitiesV1 = {
       viewerFrameOrigins: [],
+      availability: "always",
       egressShellPrelude: (token) => `export PROXY_TOKEN=${token}`,
     };
     const provider: ComputerHostV1 = {

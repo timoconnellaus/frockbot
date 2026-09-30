@@ -108,6 +108,9 @@ for (const build of HOSTS) {
 
     test("declares its viewer frame origins before a session exists", () => {
       expect(Array.isArray(host.capabilities.viewerFrameOrigins)).toBe(true);
+      expect(["always", "while-connected"]).toContain(
+        host.capabilities.availability,
+      );
       expect(host.id.trim()).not.toBe("");
     });
 
@@ -122,6 +125,10 @@ for (const build of HOSTS) {
       expect(session.capabilities.viewerFrameOrigins).toEqual(
         host.capabilities.viewerFrameOrigins,
       );
+      expect(session.capabilities.availability).toBe(
+        host.capabilities.availability,
+      );
+      expect(session.capabilities.desktop).toEqual(host.capabilities.desktop);
       // Closing is a session ending, not a Computer being destroyed, and it
       // may be asked for twice.
       await session.close();

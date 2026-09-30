@@ -5,6 +5,7 @@
 // into a mounted runtime, so both an admitted Turn (`app/shell/turn.ts`) and an
 // isolate's `ai` grant (`app/isolates/bot.ts`) resolve the same way.
 
+import { decodeComputerHostChoiceV1 } from "@frockbot/computer/core/host";
 import { hostedJevClientV1 } from "@frockbot/app/supervision/jev";
 import { createCallApprovalStoreV1 } from "@frockbot/app/supervision/call-approval";
 import { askRoutineApprovalV1 } from "@frockbot/app/routines/approval-bot";
@@ -789,9 +790,23 @@ export async function agentRuntime(
               : {}),
           }
         : {}),
-      // The Computer host this deployment runs, when it has one. Which host
-      // that is was chosen by the shell that holds the bindings.
-      ...(state.computerHost ? { computerHost: state.computerHost } : {}),
+      // The Computer host this deployment runs, when it has one, chosen by the
+      // shell that holds the bindings; whether a User's Computer runs on it is
+      // that User's choice, kept on their Durable Object.
+      ...(state.computerHost
+        ? {
+            computerHost: state.computerHost,
+            computerHostChoice: async () =>
+              decodeComputerHostChoiceV1(
+                await state.env.USER_CONFIGURATIONS.get(
+                  state.env.USER_CONFIGURATIONS.idFromName(identity.userId),
+                ).readComputerHost({
+                  schemaVersion: 1,
+                  userId: identity.userId,
+                }),
+              ),
+          }
+        : {}),
     }),
     ...(await state.application.runtime.enabled(plan, {
       userId: identity.userId,

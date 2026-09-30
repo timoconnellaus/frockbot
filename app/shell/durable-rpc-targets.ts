@@ -213,6 +213,8 @@ export interface BotUserConfigurationRpcTargetV1
   operateMemory(
     input: BotRpcEnvelopeV1<{ action: string; request: object }>,
   ): Promise<object>;
+  /** Where the User's Computer runs; see `ComputerHostChoiceV1`. */
+  readComputerHost(input: UserRpcEnvelopeV1): Promise<object>;
   /** The User's sealed browser sign-ins; `./computer-logins.ts` is both halves. */
   readComputerLogins(
     input: UserRpcEnvelopeV1<{ capture: boolean }>,

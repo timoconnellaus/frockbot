@@ -585,6 +585,9 @@ export function createFoundationHostedRuntimePackages(
         productName: brand.productName,
         userId: host.userId,
         defaultProviderId: "computer-host",
+        ...(host.computerHostChoice
+          ? { hostChoice: host.computerHostChoice }
+          : {}),
         configured: computerConfigured,
         ...(host.computerWriter ? { writer: host.computerWriter } : {}),
         ...(host.computerProcesses

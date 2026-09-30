@@ -113,6 +113,7 @@ export const FAKE_HOST_CAPABILITIES_V1: ComputerHostCapabilitiesV1 = {
       : undefined,
   desktop: { slots: 2, width: 1280, height: 720 },
   viewerFrameOrigins: [FAKE_VIEWER_ORIGIN],
+  availability: "always",
 };
 
 /** An in-memory `ComputerWorkspace` that records every write it admitted. */
