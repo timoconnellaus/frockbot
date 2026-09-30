@@ -34,7 +34,15 @@ typedef _Plan = ({
   String name,
   int monthlyCents,
   int includedMicros,
+
+  /// The Jev a month covers where the plan meters it; null covers it all.
+  int? jevFairUseMicros,
 });
+
+/// What a month of [plan] comes with, after "US$N a month".
+String _includes(_Plan plan) => plan.includedMicros > 0
+    ? 'with ${_wholeMicros(plan.includedMicros)} of usage'
+    : 'with no usage included: your own models and Computer, with Jev and connected apps covered, and anything else of ours paid from top-ups';
 
 /// The monthly subscriptions the deployment sells, cheapest first.
 List<_Plan> _plans(Map data) => [
@@ -46,19 +54,14 @@ List<_Plan> _plans(Map data) => [
       name: '${plan['name']}',
       monthlyCents: (plan['monthlyCents'] as num?)?.toInt() ?? 0,
       includedMicros: (plan['includedMicros'] as num?)?.toInt() ?? 0,
+      jevFairUseMicros: (plan['jevFairUseMicros'] as num?)?.toInt(),
     ),
 ];
 
-/// The plan the account's subscription is on, trialling or paid. A
-/// subscription recorded before plans had ids is on the first, until its next
-/// provider event names one.
+/// The plan the account's subscription is on, trialling or paid.
 _Plan? _ownPlan(Map data, List<_Plan> plans) {
-  final subscription = data['subscription'] as Map?;
-  if (subscription == null) return null;
-  final id = subscription['planId'];
-  return id == null
-      ? plans.firstOrNull
-      : plans.where((plan) => plan.id == id).firstOrNull;
+  final id = (data['subscription'] as Map?)?['planId'];
+  return plans.where((plan) => plan.id == id).firstOrNull;
 }
 
 /// What the payments Package offers the account for [purpose], and for
@@ -269,14 +272,14 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
     if (busy) return;
     final data = account ?? const {};
     final trialing = data['trial'] is Map;
-    final up = from == null || to.includedMicros > from.includedMicros;
+    final up = from == null || to.monthlyCents > from.monthlyCents;
     final renews = (data['subscription'] as Map?)?['periodEnd'] as num?;
     final label = action['label'] as String? ?? 'Move to ${to.name}';
     final terms = trialing
         ? 'This ends your trial and charges ${to.name}’s first month, ${_dollars(to.monthlyCents)}, now. A new billing month begins today.'
         : up
-        ? '${to.name} is ${_dollars(to.monthlyCents)} a month with ${_wholeMicros(to.includedMicros)} of usage. It starts now: you are charged today and a new billing month begins. Top-ups you have stay yours.'
-        : '${to.name} is ${_dollars(to.monthlyCents)} a month with ${_wholeMicros(to.includedMicros)} of usage. You stay on ${from.name} until your plan renews${renews == null ? '' : ' on ${spendDate(renews)}'}.';
+        ? '${to.name} is ${_dollars(to.monthlyCents)} a month ${_includes(to)}. It starts now: you are charged today and a new billing month begins. Top-ups you have stay yours.'
+        : '${to.name} is ${_dollars(to.monthlyCents)} a month ${_includes(to)}. You stay on ${from.name} until your plan renews${renews == null ? '' : ' on ${spendDate(renews)}'}.';
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -834,6 +837,47 @@ _Fuel _fuel(
 
   final renews = end == null ? '' : spendDate(end);
   final start = end == null ? null : _monthBefore(end);
+
+  // A plan with no allowance, for people who bring their own: the month's
+  // measure is its Jev fair use, and everything else of ours is top-ups.
+  if (allowance <= 0) {
+    final jev = data['jevFairUse'] as Map?;
+    final jevLeft = (jev?['remainingMicros'] as num?)?.toInt() ?? 0;
+    final jevWhole = (jev?['grantedMicros'] as num?)?.toInt() ?? 0;
+    final top = purchased + complimentary;
+    final topUp = top > 0
+        ? '${_money(top)} of top-up credit for our Computer, models, voice and search · never expires'
+        : 'No top-up credit. Add some to use our Computer, models, voice or search.';
+    if (jev == null) {
+      return _Fuel(lead: '${_money(top)} of top-up credit');
+    }
+    if (jevLeft > 0) {
+      return _Fuel(
+        lead: '${_percent(jevLeft, jevWhole)} of Jev left',
+        caption:
+            'of this month’s ${plan?.name ?? 'plan'} fair use. Your own models and Computer need no credit.',
+        gauge: gauge(jevLeft, jevWhole, start: start, until: end),
+        notes: [topUp],
+      );
+    }
+    if (top <= 0) {
+      return _Fuel(
+        lead: end == null ? 'Paused' : 'Paused until $renews',
+        leadTone: _Tone.stop,
+        caption: 'This month’s Jev fair use is used up. Top up to keep your Bots replying now.',
+        gauge: gauge(0, jevWhole),
+        short: true,
+      );
+    }
+    return _Fuel(
+      lead: '${_money(top)} of top-up left',
+      caption: end == null
+          ? 'This month’s Jev fair use is used, so Jev draws on top-ups.'
+          : 'This month’s Jev fair use is used, so Jev draws on top-ups until it renews on $renews.',
+      gauge: gauge(0, jevWhole, start: start, until: end),
+    );
+  }
+
   if (included + purchased + complimentary <= 0) {
     return _Fuel(
       lead: end == null ? 'Paused' : 'Paused until $renews',
@@ -1312,8 +1356,12 @@ class _PlansCard extends StatelessWidget {
   });
 
   String _room(_Plan plan) {
-    final base = plans.first.includedMicros;
-    if (plan == plans.first || base <= 0) {
+    if (plan.includedMicros <= 0) {
+      return 'For your own models and Computer. Jev and connected apps included.';
+    }
+    final first = plans.firstWhere((each) => each.includedMicros > 0);
+    final base = first.includedMicros;
+    if (plan == first) {
       return 'Room for everyday chats and a few Routines.';
     }
     final times = plan.includedMicros / base;
@@ -1342,7 +1390,10 @@ class _PlansCard extends StatelessWidget {
       margin: EdgeInsets.zero,
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final wide = constraints.maxWidth >= 560 && plans.length > 1;
+          // Side by side only while each tile keeps room for its price.
+          final wide =
+              plans.length > 1 &&
+              constraints.maxWidth >= math.max(560, 300 * plans.length);
           final tiles = [for (final plan in plans) _tile(context, plan, wide)];
           return Padding(
             padding: EdgeInsets.all(constraints.maxWidth >= 560 ? 24 : 18),
@@ -1491,7 +1542,14 @@ class _PlansCard extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              '${_wholeMicros(plan.includedMicros)} of usage included each month',
+              plan.includedMicros > 0
+                  ? '${_wholeMicros(plan.includedMicros)} of usage included each month'
+                  : [
+                      'No usage included',
+                      if (plan.jevFairUseMicros case final int jev)
+                        'Jev up to ${_wholeMicros(jev)} a month',
+                      'everything else of ours from top-ups',
+                    ].join(' · '),
               style: muted,
             ),
             // Side by side, the buttons line up along the bottom.

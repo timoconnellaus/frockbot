@@ -163,6 +163,11 @@ export interface ConnectUserBackendHost {
   settings: UserSettingsBackendContribution;
   /** The deployment's provider key. Absent, nothing can be connected. */
   apiKey?: string;
+  /**
+   * Refuses, in the words the person reads, an account whose plan does not
+   * cover connected apps. Absent where the deployment does not bill.
+   */
+  requirePlan?(): Promise<void>;
   /** The deployment's own origin, which the sign-in returns to. */
   callbackBaseUrl?: string;
   apiBaseUrl?: string;
@@ -596,6 +601,9 @@ export class ConnectUserBackendContribution {
     ) {
       return failed();
     }
+    // Thrown rather than a failed receipt: nothing is recorded, so the same
+    // command goes through once the person has a plan.
+    await this.host.requirePlan?.();
     const authConfigId = await this.authConfigId(toolkit);
     // An app with nothing to sign in to has no page to send anyone to: its
     // account is live the moment it exists.

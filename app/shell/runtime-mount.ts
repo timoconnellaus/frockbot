@@ -13,7 +13,10 @@ import {
   createBrowserTaskDeciderV1,
   createJevEgressV1,
 } from "@frockbot/app/supervision/jev-egress";
-import { createJevMeterV1 } from "@frockbot/app/billing/jev";
+import {
+  createJevMeterV1,
+  createPlatformJevFetchV1,
+} from "@frockbot/app/billing/jev";
 import type { StoredRunCauseV1 } from "@frockbot/core/durable";
 import {
   COMPUTER_EGRESS_PATH_V1,
@@ -450,6 +453,14 @@ export async function agentRuntime(
   // Filled in once this Turn's model binding is resolved, below. The tool
   // and the prompt section both read it lazily, from inside the Turn.
   const subagentModels: SubagentModelOptionV1[] = [];
+  // The account this Turn's platform-paid work is charged to, where the
+  // deployment bills.
+  const turnBilling = turn
+    ? state.env.BILLING?.(identity.userId, identity.botId, turn.sessionId, {
+        runId: turn.runId,
+        ...(turn.cause ? { cause: turn.cause } : {}),
+      })
+    : undefined;
   // A Bot dispatches a subagent only inside an admitted Turn, whose run
   // the task record names, and only where a Subagent Durable Object can
   // actually be addressed.
@@ -464,7 +475,19 @@ export async function agentRuntime(
       ...(turn
         ? {
             supervision: {
-              supervisor: state.turnSupervisor,
+              // Metered where the account's plan has a Jev fair-use
+              // allowance; every other plan covers it.
+              supervisor: state.turnSupervisor(
+                turnBilling
+                  ? (send) =>
+                      createPlatformJevFetchV1({
+                        account: turnBilling.account,
+                        botId: identity.botId,
+                        sessionId: turn.sessionId,
+                        fetch: send,
+                      })
+                  : undefined,
+              ),
               origin: turn.inputOrigin ?? "user",
               approvals: createCallApprovalStoreV1(state.ctx.storage),
               runId: turn.runId,
@@ -711,15 +734,7 @@ export async function agentRuntime(
                 JEV_BASE_URL: state.env.JEV_BASE_URL,
               });
               if (!client) return {};
-              const billing = state.env.BILLING?.(
-                identity.userId,
-                identity.botId,
-                turn.sessionId,
-                {
-                  runId: turn.runId,
-                  ...(turn.cause ? { cause: turn.cause } : {}),
-                },
-              );
+              const billing = turnBilling;
               return {
                 computerJev: createJevEgressV1({
                   client,

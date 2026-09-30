@@ -861,6 +861,7 @@ export class BotState
                   settle: (
                     settlement: import("@frockbot/app/billing/ledger").UsageSettlement,
                   ) => account.settleUsage({ userId, settlement }),
+                  requirePlan: () => account.requirePlan({ userId }),
                 },
               };
             },

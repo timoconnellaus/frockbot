@@ -304,8 +304,11 @@ export interface ComputerEgressAccountV1 {
   readonly toolkit: string;
   /** What a person calls this account, for the review and the refusals. */
   readonly label: string;
-  /** Live permission for the Connection. Absent keeps the admitted snapshot. */
-  permit?(): Promise<boolean>;
+  /**
+   * Live permission for the Connection: true, false when it is not connected,
+   * or the refusal the person reads. Absent keeps the admitted snapshot.
+   */
+  permit?(): Promise<boolean | string>;
   /**
    * Sends one request as the account to `endpoint` — absolute, or relative to
    * the account's API base URL. The credential never leaves the far side.
@@ -426,7 +429,9 @@ export function createComputerEgressHandlerV1(
     const account = config
       .accounts()
       .find((candidate) => candidate.toolkit === target.toolkit);
-    if (!account || (account.permit && !(await account.permit()))) {
+    const permitted = account?.permit ? await account.permit() : true;
+    if (typeof permitted === "string") return refused(permitted);
+    if (!account || !permitted) {
       const name =
         computerEgressRouteByToolkitV1(target.toolkit)?.label ?? target.toolkit;
       return computerEgressMessageV1(

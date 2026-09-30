@@ -68,8 +68,21 @@ export function subscriptionRequiredReasonV1(productName: string): string {
  */
 export const SUBSCRIPTION_REQUIRED_REASON_PATTERN_V1 =
   /A paid [^.\n<>]{1,80} subscription is required\. Open Billing to subscribe or update your payment method\./;
+/**
+ * Connected apps run on the deployment's own provider account, which any plan
+ * covers and no plan at all does not.
+ */
+export function connectedAppsPlanRequiredReasonV1(productName: string): string {
+  return `Connected apps need a ${productName} plan. Open Billing to choose one.`;
+}
 export const CREDIT_EXHAUSTED_REASON_V1 =
   "You have no usage credit left. Open Billing to add more.";
+/**
+ * A plan's Jev fair use spent, with no credit behind it. Every Turn needs Jev
+ * and Jev has no permissive failure mode, so the Turn stops and says why.
+ */
+export const JEV_FAIR_USE_EXHAUSTED_REASON_V1 =
+  "This month's Jev fair use is used up and you have no usage credit left, so your Bots can't reply. Open Billing to add credit.";
 /**
  * A Bot's or a Routine's own daily limit. Its subject is whoever is reading
  * it: the message about a Routine already names the Routine.
@@ -77,7 +90,11 @@ export const CREDIT_EXHAUSTED_REASON_V1 =
 export const DAILY_LIMIT_REASON_V1 =
   "It reached its daily spending limit and is paused until midnight. You can raise the limit under Spending in Billing.";
 
-export type GrantKind = "included" | "purchased" | "complimentary";
+/**
+ * `jev` is a plan's monthly Jev fair use: spendable by Jev alone, and by Jev
+ * before anything else.
+ */
+export type GrantKind = "included" | "purchased" | "complimentary" | "jev";
 
 /** Credit an administrator gave an account by hand. Spendable without a subscription. */
 export interface ComplimentaryGrant {
@@ -120,6 +137,12 @@ export interface UsageReservation {
   description: string;
   pricingVersion: string;
   unitRates?: Record<string, number>;
+  /**
+   * Jev the product asks for itself — Turn supervision — rather than Jev the
+   * account asked for. A plan without a Jev fair-use allowance covers it in
+   * full: the reservation answers `covered` and nothing is recorded.
+   */
+  platform?: true;
   /**
    * Why the money was spent, for the Spending page. Descriptive only: it is
    * not part of the charge's identity, so a retry that resolves it
@@ -384,22 +407,44 @@ export class BillingLedger {
     throw new BillingError(subscriptionRequiredReasonV1(this.productName));
   }
   /**
+   * Refuses an account on no plan, or suspended, in the words the person
+   * reads. A trial is a plan; so is the smallest one. A deployment that sells
+   * no subscription asks for none.
+   */
+  requirePlan() {
+    if (this.plan.subscriptions.length === 0) return;
+    if (this.subscribed()) return;
+    if (this.trial() && !this.get<boolean>("suspended")) return;
+    throw new BillingError(connectedAppsPlanRequiredReasonV1(this.productName));
+  }
+  /**
    * The grants a reservation may draw on, cheapest to spend first: monthly
    * credit expires soonest, complimentary credit was a gift, purchased credit
    * carries forward. Without a subscription only complimentary credit counts,
    * and purchased credit too where the plan does not tie it to one.
    */
-  private spendable(subscribed: boolean): Grant[] {
+  private spendable(subscribed: boolean, jev: boolean): Grant[] {
     return this.rows<Grant>(
       `SELECT id, kind, remaining, expires FROM billing_grants WHERE remaining > 0 AND (expires IS NULL OR expires > ?)${
+        jev ? "" : " AND kind != 'jev'"
+      }${
         subscribed
           ? ""
           : this.plan.purchasedCreditNeedsSubscription
             ? " AND kind = 'complimentary'"
             : " AND kind IN ('complimentary', 'purchased')"
-      } ORDER BY CASE kind WHEN 'included' THEN 0 WHEN 'complimentary' THEN 1 ELSE 2 END, expires, created, id`,
+      } ORDER BY CASE kind WHEN 'jev' THEN 0 WHEN 'included' THEN 1 WHEN 'complimentary' THEN 2 ELSE 3 END, expires, created, id`,
       this.now(),
     );
+  }
+  /**
+   * The plan whose Jev fair use governs this account: its subscription's,
+   * lapsed or not, so a lapsed plan that metered Jev still meters it.
+   */
+  private jevFairUsePlan() {
+    const planId = this.subscription()?.planId;
+    const plan = this.plan.subscriptions.find((each) => each.id === planId);
+    return plan?.jevFairUseMicros === undefined ? undefined : plan;
   }
   /**
    * Hold a charge's maximum against the account's credit. `dayStart` is the
@@ -407,11 +452,19 @@ export class BillingLedger {
    * limit has already stopped is refused. A charge already reserved is never
    * refused again: its retry is the same charge.
    */
-  reserve(input: UsageReservation, dayStart?: number) {
+  reserve(
+    input: UsageReservation,
+    dayStart?: number,
+  ): {
+    status: "reserved" | "settled" | "released" | "covered";
+    created: boolean;
+  } {
     identifier(input.id);
     amount(input.maximumMicros, "reservation");
     if (
       !["model", "computer", "search", "jev"].includes(input.kind) ||
+      (input.platform !== undefined &&
+        (input.platform !== true || input.kind !== "jev")) ||
       !input.description ||
       input.description.length > 300 ||
       !input.pricingVersion
@@ -419,6 +472,8 @@ export class BillingLedger {
       throw new BillingError("Invalid usage reservation", 400);
     const { attribution, ...charge } = input;
     return this.storage.transactionSync(() => {
+      if (input.platform && !this.jevFairUsePlan())
+        return { status: "covered" as const, created: false };
       const fingerprint = stable(charge);
       const old = this.rows<Operation>(
         "SELECT * FROM billing_operations WHERE id = ?",
@@ -440,13 +495,17 @@ export class BillingLedger {
       const subscribed = this.subscribed();
       if (this.get<boolean>("suspended"))
         throw new BillingError(subscriptionRequiredReasonV1(this.productName));
-      const grants = this.spendable(subscribed);
+      const grants = this.spendable(subscribed, input.kind === "jev");
       const available = grants.reduce((total, g) => total + g.remaining, 0);
       if (!subscribed && available === 0 && this.plan.subscriptions.length > 0)
         throw new BillingError(subscriptionRequiredReasonV1(this.productName));
       let needed = input.maximumMicros;
       if (available < needed)
-        throw new BillingError(CREDIT_EXHAUSTED_REASON_V1);
+        throw new BillingError(
+          input.kind === "jev" && subscribed && this.jevFairUsePlan()
+            ? JEV_FAIR_USE_EXHAUSTED_REASON_V1
+            : CREDIT_EXHAUSTED_REASON_V1,
+        );
       const allocations: { id: string; micros: number }[] = [];
       for (const grant of grants) {
         const micros = Math.min(needed, grant.remaining);
@@ -731,6 +790,12 @@ export class BillingLedger {
     timestamp(trial.expires, "trial end");
     if (!this.plan.trial)
       throw new BillingError("This deployment offers no trial", 409);
+    const subscription = this.subscription();
+    if (
+      subscription?.subscriptionId === trial.subscriptionId &&
+      this.subscriptionPlan(subscription.planId).trial === false
+    )
+      throw new BillingError("This plan has no trial", 409);
     const id = `trial:${trial.subscriptionId}`;
     // The same trial again is nothing; another subscription's is a second.
     if (
@@ -772,12 +837,23 @@ export class BillingLedger {
         periodStart: period.periodStart,
         periodEnd: period.periodEnd,
       } satisfies PaidAccessState);
-    this.grant(
-      `monthly:${period.subscriptionId}:${Math.floor(period.periodStart / 1000)}`,
-      "included",
-      plan.includedMicros,
-      period.periodEnd,
-    );
+    const periodKey = `${period.subscriptionId}:${Math.floor(period.periodStart / 1000)}`;
+    // A plan that includes no credit grants none, rather than an empty
+    // allowance that would read as a spent month.
+    if (plan.includedMicros > 0)
+      this.grant(
+        `monthly:${periodKey}`,
+        "included",
+        plan.includedMicros,
+        period.periodEnd,
+      );
+    if (plan.jevFairUseMicros)
+      this.grant(
+        `jev:${periodKey}`,
+        "jev",
+        plan.jevFairUseMicros,
+        period.periodEnd,
+      );
     // A paid month ends the trial before it, early ("Start now") or on time,
     // and the trial's credit ends with it.
     this.storage.sql.exec(
@@ -840,6 +916,21 @@ export class BillingLedger {
       creditMicros: grant?.original ?? this.plan.trial?.creditMicros ?? 0,
     };
   }
+  /**
+   * The month's Jev fair use, where the plan meters Jev: every live allowance
+   * as granted, and what is left of them.
+   */
+  jevFairUse(): { remainingMicros: number; grantedMicros: number } | null {
+    if (!this.jevFairUsePlan()) return null;
+    const row = this.rows<{ remaining: number; granted: number }>(
+      "SELECT COALESCE(SUM(remaining), 0) AS remaining, COALESCE(SUM(original), 0) AS granted FROM billing_grants WHERE kind = 'jev' AND expires > ?",
+      this.now(),
+    )[0];
+    return {
+      remainingMicros: row?.remaining ?? 0,
+      grantedMicros: row?.granted ?? 0,
+    };
+  }
   snapshot(before?: number) {
     const now = this.now();
     const subscription = this.subscription();
@@ -873,6 +964,7 @@ export class BillingLedger {
       payments: this.rows<SqlRow>(
         "SELECT id, kind, original AS creditMicros, expires, created FROM billing_grants ORDER BY created DESC LIMIT 100",
       ),
+      jevFairUse: this.jevFairUse(),
       plan: this.plan,
       trial: this.trial(),
       trialUsed: this.get<boolean>("trialUsed") ?? false,

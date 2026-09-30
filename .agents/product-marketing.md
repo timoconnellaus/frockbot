@@ -10,7 +10,8 @@ sessions, runs on a schedule, uses a cloud computer of its own (browser,
 files, terminal), writes tools and plugins that extend it, talks and listens,
 and works inside 1,400+ connected apps (Gmail, Calendar, Drive, Slack,
 Notion, Shopify and the rest). One web + Mac + phone client (the phone app sideloads from GitHub releases; it is not in a store). Hosted at
-frockbot.com for US$20/month (US$20 credit included), or self-hosted into
+frockbot.com from US$5/month (Standard, US$20/month with US$20 credit
+included, is the lead), or self-hosted into
 your own Cloudflare account with one command. MIT licensed.
 
 ## Two audiences, two doors
@@ -37,7 +38,7 @@ carries the architecture and the capability reference.
 - Angles: MIT open source; bring your own model (28 providers); everything
   is a plugin (hooks on the loop, tools, storage, declared egress, Bots can
   author plugins behind approval); one-command self-host on Cloudflare;
-  same code as the hosted deployment; US$20 or free vs the US$200 category.
+  same code as the hosted deployment; US$5 or free vs the US$200 category.
 - Vocabulary: theirs — harness, provider, plugin, Durable Object, Worker.
 - Primary CTA: read the install guide / star the repo.
 
@@ -70,7 +71,9 @@ sovereignty, with "read the docs" as the CTA and GitHub stars as proof.
 
 ## Proof points that are true today
 
-- US$20/month, US$20 credit included, top-ups US$10/25/50, computer
+- Standard US$20/month with US$20 credit included (Plus US$50 with US$60;
+  both with a 7-day trial); BYO US$5/month, no trial and no credit included,
+  for people bringing their own models. Top-ups US$10/25/50, computer
   US$2.75/active hour, 100 GB idle storage included, no overage bills.
 - 40 model providers built in; OAuth sign-in where a provider offers it.
 - Voice: composer dictation plus a continuous voice session across all Bots.

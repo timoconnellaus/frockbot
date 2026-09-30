@@ -851,9 +851,14 @@ export class UserConfiguration
     await this.assertUserIdentity(input.userId);
     this.billing().settle(input.settlement);
   }
-  async requirePaidAccount(input: { userId: string }) {
+  async requirePlan(input: { userId: string }) {
     await this.assertUserIdentity(input.userId);
-    this.billing().requireSubscription();
+    this.requireAccountPlan();
+  }
+  /** Connected apps need a plan wherever the deployment bills. */
+  private requireAccountPlan() {
+    if (!hostedBillingEnabledV1(this.env as BillingSwitchEnv)) return;
+    this.billing().requirePlan();
   }
 
   /**
@@ -1040,6 +1045,7 @@ export class UserConfiguration
               : name === "COMPOSIO_API_KEY"
                 ? this.env.COMPOSIO_API_KEY
                 : this.env.CREDENTIAL_KEYRING,
+        requirePlan: async () => this.requireAccountPlan(),
         // The transcript index (parity register row 52). It lives on this
         // object's own SQL storage because "The User's Durable Object is the
         // authority for everything User-scoped", and it is a *projection*:

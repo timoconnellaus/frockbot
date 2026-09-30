@@ -27,6 +27,7 @@ function account(
         plan: PAYMENTS_PACKAGE_V1.plan,
         trial: null,
         trialUsed: false,
+        jevFairUse: null,
         subscription: null,
         paidAccess: null,
         canSpend: false,
@@ -50,7 +51,7 @@ function account(
       return { status: "reserved", created: true };
     },
     async settleUsage() {},
-    async requirePaidAccount() {},
+    async requirePlan() {},
     async setSpendingLimit() {},
     async readSpendingPaused() {
       return false;
@@ -151,6 +152,7 @@ describe("billing HTTP routes", () => {
     expect(await response?.json()).toMatchObject({
       plan: {
         subscriptions: [
+          { id: "byo", monthlyCents: 500, includedMicros: 0, trial: false },
           { id: "standard", monthlyCents: 2000, includedMicros: 20_000_000 },
           { id: "plus", monthlyCents: 5000, includedMicros: 60_000_000 },
         ],

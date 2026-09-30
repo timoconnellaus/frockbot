@@ -51,6 +51,8 @@ export interface StripeEnvironmentV1 {
   STRIPE_MONTHLY_PRICE_ID?: string;
   /** Absent, Plus is not sold. */
   STRIPE_PLUS_PRICE_ID?: string;
+  /** Absent, BYO is not sold. */
+  STRIPE_BYO_PRICE_ID?: string;
   /** The deployment's own origin, which Checkout and the portal return to. */
   BETTER_AUTH_URL?: string;
 }
@@ -70,7 +72,11 @@ export function stripeConfig(
       503,
     );
   const origin = new URL(env.BETTER_AUTH_URL).origin;
-  for (const price of [env.STRIPE_MONTHLY_PRICE_ID, env.STRIPE_PLUS_PRICE_ID])
+  for (const price of [
+    env.STRIPE_MONTHLY_PRICE_ID,
+    env.STRIPE_PLUS_PRICE_ID,
+    env.STRIPE_BYO_PRICE_ID,
+  ])
     if (price !== undefined && !/^price_[a-zA-Z0-9]+$/.test(price))
       throw new BillingError("Payment plan is not configured", 503);
   return {
@@ -81,6 +87,7 @@ export function stripeConfig(
     ...(env.STRIPE_PLUS_PRICE_ID
       ? { plusPriceId: env.STRIPE_PLUS_PRICE_ID }
       : {}),
+    ...(env.STRIPE_BYO_PRICE_ID ? { byoPriceId: env.STRIPE_BYO_PRICE_ID } : {}),
     origin,
   };
 }
@@ -350,10 +357,11 @@ export const STRIPE_PAYMENTS_PACKAGE_V1: PaymentsPackageBuildV1<StripeEnvironmen
         ),
         providerName: "Stripe",
         actions: (account) =>
-          stripeActionsV1(
-            account,
-            env.STRIPE_PLUS_PRICE_ID ? ["standard", "plus"] : ["standard"],
-          ),
+          stripeActionsV1(account, [
+            ...(env.STRIPE_BYO_PRICE_ID ? (["byo"] as const) : []),
+            "standard",
+            ...(env.STRIPE_PLUS_PRICE_ID ? (["plus"] as const) : []),
+          ]),
         paths: Object.keys(
           EARLIER_PATHS_V1,
         ) as (keyof typeof EARLIER_PATHS_V1)[],

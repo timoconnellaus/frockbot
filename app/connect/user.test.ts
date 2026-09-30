@@ -220,6 +220,7 @@ function fixture(
     apiKey?: string;
     clock?: { now: number };
     bootstrapDeadlineMs?: number;
+    requirePlan?: () => Promise<void>;
   } = {},
 ) {
   const storage = new MemoryStorage();
@@ -240,6 +241,7 @@ function fixture(
     ...(options.bootstrapDeadlineMs === undefined
       ? {}
       : { bootstrapDeadlineMs: options.bootstrapDeadlineMs }),
+    ...(options.requirePlan ? { requirePlan: options.requirePlan } : {}),
   });
   settings.registerConfigurationReadBootstrap(contribution);
   return { storage, settings, client, contribution, clock };
@@ -291,6 +293,26 @@ describe("starting a connected app", () => {
     const again = await contribution.executeConnection("tim", start("s1"));
     expect(again).toEqual(receipt);
     expect(client.links).toHaveLength(1);
+  });
+
+  test("an account on no plan is told so, and nothing is recorded to retry against", async () => {
+    const refusal =
+      "Connected apps need a FrockBot plan. Open Billing to choose one.";
+    let planned = false;
+    const { contribution, settings, client } = fixture({
+      requirePlan: async () => {
+        if (!planned) throw new Error(refusal);
+      },
+    });
+    await expect(
+      contribution.executeConnection("tim", start("s1")),
+    ).rejects.toThrow(refusal);
+    expect(client.links).toHaveLength(0);
+    expect(settings.state.connections).toEqual([]);
+    // Once on a plan, the same command goes through.
+    planned = true;
+    const receipt = await contribution.executeConnection("tim", start("s1"));
+    expect(receipt.status).toBe("applied");
   });
 
   test("the return page is the client's, on the deployment's own origin", async () => {

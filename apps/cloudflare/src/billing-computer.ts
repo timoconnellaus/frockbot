@@ -198,7 +198,7 @@ export function prepaidComputerHost(
         ).catch(() => undefined);
         let reservation:
           | {
-              status: "reserved" | "settled" | "released";
+              status: "reserved" | "settled" | "released" | "covered";
               created: boolean;
             }
           | undefined;

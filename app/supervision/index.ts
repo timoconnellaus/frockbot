@@ -8,6 +8,7 @@ export {
   WORKERS_AI_JEV_MODEL_V1,
   type HostedJevEnvV1,
   type JevAiBindingV1,
+  type JevFetchMeterV1,
 } from "./jev.js";
 export {
   createFakeDictationCleanupJudgeV1,

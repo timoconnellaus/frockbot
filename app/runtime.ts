@@ -238,6 +238,7 @@ const enabledRuntimeContributionFactories = new Map<
       pinToolCatalog,
       readConnectToolCatalog,
       permitConnection,
+      billing,
     }) =>
       createConfiguredConnectRuntimeContribution({
         capability,
@@ -258,6 +259,10 @@ const enabledRuntimeContributionFactories = new Map<
           ? {
               permitConnection: () => permitConnection(connection),
             }
+          : {}),
+        // The deployment's provider account is what a plan covers.
+        ...(billing?.requirePlan
+          ? { requirePlan: () => billing.requirePlan!() }
           : {}),
       }),
   ],

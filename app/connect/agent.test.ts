@@ -78,6 +78,7 @@ async function mount(options: {
   apiKey?: string;
   pinned?: Map<string, unknown>;
   permitConnection?: () => Promise<boolean>;
+  requirePlan?: () => Promise<void>;
 }) {
   const requests: { url: URL; init: RequestInit | undefined }[] = [];
   const root = createAgentRuntimeHarness();
@@ -105,6 +106,7 @@ async function mount(options: {
     ...(options.permitConnection
       ? { permitConnection: options.permitConnection }
       : {}),
+    ...(options.requirePlan ? { requirePlan: options.requirePlan } : {}),
   });
   if (feature) await root.mount(feature);
   return { root, requests, feature };
@@ -155,6 +157,38 @@ describe("a connected app in a Bot's Turn", () => {
     expect(
       requests.some((entry) => entry.url.pathname.includes("/execute/")),
     ).toBe(false);
+    await root.dispose();
+  });
+
+  test("an account on no plan is told so, and the app is never called", async () => {
+    const refusal =
+      "Connected apps need a FrockBot plan. Open Billing to choose one.";
+    let planned = false;
+    const { root, requests } = await mount({
+      respond: (url) =>
+        url.pathname.endsWith("/tools")
+          ? Response.json(TOOL_LIST)
+          : Response.json({
+              successful: true,
+              data: { id: "msg_1" },
+              error: null,
+            }),
+      requirePlan: async () => {
+        if (!planned) throw new Error(refusal);
+      },
+    });
+    const send = call("gmail", "send_email", {
+      to: "a@example.com",
+      body: "hi",
+    });
+    const refused = await run(root, send);
+    expect(refused).toMatchObject({ isError: true, content: refusal });
+    expect(
+      requests.some((entry) => entry.url.pathname.includes("/execute/")),
+    ).toBe(false);
+    // On a plan — BYO is one — the same call goes through.
+    planned = true;
+    expect((await run(root, send)).isError).toBe(false);
     await root.dispose();
   });
 

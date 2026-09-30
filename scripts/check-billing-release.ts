@@ -16,9 +16,13 @@ for (const name of [
 ]) {
   if (!process.env[name]?.trim()) issues.push(`${name} is required.`);
 }
-// Plus is optional: without its price the Package sells Standard alone.
-if (!process.env.STRIPE_PLUS_PRICE_ID?.trim())
-  console.log("STRIPE_PLUS_PRICE_ID is absent: only Standard is sold.");
+// Plus and BYO are optional: without its price, a plan is not sold.
+for (const [name, plan] of [
+  ["STRIPE_PLUS_PRICE_ID", "Plus"],
+  ["STRIPE_BYO_PRICE_ID", "BYO"],
+] as const)
+  if (!process.env[name]?.trim())
+    console.log(`${name} is absent: ${plan} is not sold.`);
 if (issues.length) {
   console.error(
     "Billing is not ready for release:\n" +

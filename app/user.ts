@@ -197,6 +197,11 @@ export async function createFoundationUserBackendContributions(host: {
       | "BETTER_AUTH_URL"
       | "COMPOSIO_API_KEY",
   ): string | undefined;
+  /**
+   * Refuses, in the words the person reads, an account on no plan. Absent
+   * where the deployment does not bill.
+   */
+  requirePlan?(): Promise<void>;
   /** The registered machines' sockets, which only the Durable Object holds. */
   machineSockets: MachineSocketsV1;
   /**
@@ -311,6 +316,7 @@ export async function createFoundationUserBackendContributions(host: {
         settings,
         ...(apiKey ? { apiKey } : {}),
         ...(callbackBaseUrl ? { callbackBaseUrl } : {}),
+        ...(host.requirePlan ? { requirePlan: host.requirePlan } : {}),
       };
     },
     get modelConnections() {

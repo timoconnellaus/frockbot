@@ -709,12 +709,18 @@ describe("deleting an account's customers", () => {
 });
 
 describe("plans and the trial", () => {
-  const plusConfig = { ...config, plusPriceId: "price_plus" };
+  const plusConfig = {
+    ...config,
+    plusPriceId: "price_plus",
+    byoPriceId: "price_byo",
+  };
+  type Price = "price_monthly" | "price_plus" | "price_byo";
+  const cents = { price_monthly: 2000, price_plus: 5000, price_byo: 500 };
   const DAY = 86_400;
   const unix = Math.floor(NOW / 1000);
 
   function subscriptionObject(options: {
-    price: "price_monthly" | "price_plus";
+    price: Price;
     status: string;
     start: number;
     end: number;
@@ -736,7 +742,7 @@ describe("plans and the trial", () => {
             price: {
               id: options.price,
               currency: "usd",
-              unit_amount: options.price === "price_plus" ? 5000 : 2000,
+              unit_amount: cents[options.price],
               recurring: { interval: "month" },
             },
           },
@@ -746,7 +752,7 @@ describe("plans and the trial", () => {
   }
   function invoiceObject(options: {
     reason: string;
-    price: "price_monthly" | "price_plus";
+    price: Price;
     amount: number;
     start: number;
     end: number;
@@ -831,6 +837,78 @@ describe("plans and the trial", () => {
     const second = seen.at(-1)!.body!;
     expect(second.get("line_items[0][price]")).toBe("price_monthly");
     expect(second.has("subscription_data[trial_period_days]")).toBe(false);
+  });
+
+  test("BYO starts paying at once: never a trial, even as a first subscription", async () => {
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
+    ledger.set("customer", "cus_owner");
+    const seen: { path: string; body?: URLSearchParams }[] = [];
+    const payments = paymentsWith(
+      ledger,
+      () => ({ id: "cs_byo", url: "https://checkout.stripe.com/c/byo" }),
+      seen,
+    );
+    await payments.checkout({
+      id: "subscription-byo-one",
+      kind: "subscription",
+      plan: "byo",
+    });
+    const body = seen.at(-1)!.body!;
+    expect(body.get("line_items[0][price]")).toBe("price_byo");
+    expect(body.has("subscription_data[trial_period_days]")).toBe(false);
+    // Nor does it spend the account's one trial.
+    expect(ledger.paymentsPort().account().trialUsed).toBe(false);
+  });
+
+  test("a paid BYO month grants Jev fair use and no usage credit", async () => {
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
+    ledger.set("customer", "cus_owner");
+    const start = unix - 60;
+    const end = unix + 30 * DAY;
+    const payments = paymentsWith(ledger, (path) =>
+      path.startsWith("invoices/")
+        ? invoiceObject({
+            reason: "subscription_create",
+            price: "price_byo",
+            amount: 500,
+            start,
+            end,
+          })
+        : subscriptionObject({
+            price: "price_byo",
+            status: "active",
+            start,
+            end,
+          }),
+    );
+    await payments.webhook(invoicePaid("evt_byo"));
+    expect(ledger.snapshot()).toMatchObject({
+      includedMicros: 0,
+      subscribed: true,
+      subscription: { planId: "byo" },
+      jevFairUse: { remainingMicros: 2_000_000, grantedMicros: 2_000_000 },
+      trial: null,
+    });
+  });
+
+  test("BYO is refused where its price is not configured", async () => {
+    const ledger = new BillingLedger(storage(), "FrockBot", PLAN, () => NOW);
+    const payments = new AccountPayments(
+      ledger.paymentsPort(),
+      new StripeClient(
+        config,
+        fakeFetch(async () => Response.json({})),
+      ),
+      "user_one",
+      () => NOW,
+    );
+    await expect(
+      payments.checkout({
+        id: "subscription-byo-off",
+        kind: "subscription",
+        plan: "byo",
+      }),
+    ).rejects.toThrow("That plan is not available yet");
   });
 
   test("Plus is refused where its price is not configured", async () => {
@@ -1113,18 +1191,27 @@ describe("the marketing page's prices", () => {
         `${usd(plan.monthlyCents)}<span> / month</span>`,
       );
       expect(section).toContain(
-        `Includes ${usd(plan.includedMicros / 10_000)} of usage credit every month.`,
+        plan.includedMicros > 0
+          ? `Includes ${usd(plan.includedMicros / 10_000)} of usage credit every month.`
+          : "No usage credit included.",
       );
+      if ("jevFairUseMicros" in plan)
+        expect(section).toContain(
+          `Every reply checked before it's sent, up to ${usd(plan.jevFairUseMicros / 10_000)} a month`,
+        );
     }
     expect(homepage).toContain(
       `From ${usd(PLAN.subscriptions[0]!.monthlyCents)} a month`,
     );
   });
 
-  test("states the trial and the top-ups", () => {
+  test("states the trial, who has none, and the top-ups", () => {
     expect(section).toContain(
       `${PLAN.trial.days}-day trial that includes ${usd(PLAN.trial.creditMicros / 10_000)} of credit`,
     );
+    for (const plan of PLAN.subscriptions)
+      if ("trial" in plan && plan.trial === false)
+        expect(section).toContain(`${plan.name} has no trial`);
     const topUps = PLAN.topUpCents.map(usd);
     expect(section).toContain(
       `Add ${topUps.slice(0, -1).join(", ")}, or ${topUps.at(-1)} of prepaid credit`,

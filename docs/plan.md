@@ -352,7 +352,7 @@ Billing, package publishing, a Plugin marketplace, and avatar wearables. Each is
 
 ## Billing implementation awaiting launch
 
-The US$20 and US$50 account plans with their included allowances, the 7-day trial, prepaid top-ups, Stripe adapter,
+The BYO, Standard and Plus account plans with their included allowances, the 7-day trial, prepaid top-ups, Stripe adapter,
 account ledger, model metering, native/web billing screens, and marketing pricing
 section are implemented locally. Launch is blocked on a verified Sprites resource
 meter and prepaid computer cutoff; adding Stripe keys alone does not make this

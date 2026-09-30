@@ -388,6 +388,31 @@ describe("computer egress handler", () => {
     expect(response.status).toBe(403);
     expect(sent).toHaveLength(0);
   });
+
+  test("an account refused with a reason answers that reason", async () => {
+    const sent: ComputerEgressRequestV1[] = [];
+    const handler = createComputerEgressHandlerV1({
+      productName: "FrockBot",
+      accounts: () => [
+        {
+          ...account(sent),
+          permit: async () => "Connected apps need a FrockBot plan.",
+        },
+      ],
+      context,
+    });
+    const response = await handler({
+      method: "GET",
+      url: "https://api.github.com/user",
+      headers: {},
+    });
+    expect(response.status).toBe(403);
+    expect(messageOf(response)).toContain(
+      "Connected apps need a FrockBot plan.",
+    );
+    expect(messageOf(response)).not.toContain("No GitHub account");
+    expect(sent).toHaveLength(0);
+  });
 });
 
 describe("Jev from the terminal", () => {
