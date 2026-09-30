@@ -2,7 +2,16 @@ import { createHash } from "node:crypto";
 import { EVAL_JEV_SETUP_HINT_V1, evalJevClientV1 } from "./jev-client.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { callReviewFixturesV1 } from "./call-review.fixtures.js";
-import { callReviewReportCaseV1, gradeCallReviewV1 } from "./call-review.js";
+import {
+  callReviewReportCaseV1,
+  gradeCallReviewV1,
+  gradeFetchReviewV1,
+} from "./call-review.js";
+import {
+  FETCH_REVIEW_DISCLOSES_YES_V1,
+  FETCH_REVIEW_TOOLS_V1,
+  reviewFetchV1,
+} from "../supervision/fetch-review.js";
 import { describeFailureV1 } from "./failure.js";
 import {
   evalRepeatV1,
@@ -62,6 +71,7 @@ async function runCallReviewEvalV1() {
   // sitting on a threshold shows up as a flip rather than a lucky pass.
   const repeat = evalRepeatV1(process.env);
   const thresholds = {
+    disclosesToSite: FETCH_REVIEW_DISCLOSES_YES_V1,
     argumentsMatchRequest: CALL_REVIEW_ARGUMENTS_YES_V1,
     instructsReviewer: CALL_REVIEW_INSTRUCTS_REVIEWER_YES_V1,
   };
@@ -79,6 +89,19 @@ async function runCallReviewEvalV1() {
     const attempts = [];
     for (let attempt = 0; attempt < repeat; attempt++) {
       try {
+        // A fetch is asked the fetch question, as the loop asks it.
+        if (FETCH_REVIEW_TOOLS_V1.has(fixture.evidence.proposedCall.tool)) {
+          const review = await reviewFetchV1(client, fixture.evidence, {
+            signal,
+          });
+          attempts.push(
+            callReviewReportCaseV1(fixture, {
+              review,
+              checks: gradeFetchReviewV1(fixture, review),
+            }),
+          );
+          continue;
+        }
         const review = await reviewCallV1(client, fixture.evidence, { signal });
         attempts.push(
           callReviewReportCaseV1(fixture, {
@@ -139,11 +162,15 @@ async function runCallReviewEvalV1() {
       readMin: CALL_REVIEW_READ_MIN_V1,
       readNoneMin: CALL_REVIEW_READ_NONE_MIN_V1,
       instructsReviewerYes: CALL_REVIEW_INSTRUCTS_REVIEWER_YES_V1,
+      fetchDisclosesYes: FETCH_REVIEW_DISCLOSES_YES_V1,
     },
     commit: git("rev-parse", "HEAD"),
     workingTreeStatus: git("status", "--porcelain"),
     patchHash: createHash("sha256").update(git("diff", "HEAD")).digest("hex"),
     questionsSourceHash: await sourceHash("../supervision/call-review.ts"),
+    fetchQuestionsSourceHash: await sourceHash(
+      "../supervision/fetch-review.ts",
+    ),
     gradingSourceHash: await sourceHash("./call-review.ts"),
     fixturesSourceHash: await sourceHash("./call-review.fixtures.ts"),
     createdAt: new Date().toISOString(),
