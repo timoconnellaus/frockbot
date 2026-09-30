@@ -241,7 +241,7 @@ Modelled on how Cloudflare OS deploys ([repo](https://github.com/cloudflare/clou
 
 - **A self-hosted install is single-user at first.** The person who deploys it is its only user; the Access policy admits them alone, and every choice in AI setup is theirs.
 - **Multi-user comes later, in two layers.** An admin sets the install's defaults: the computer, a provider and model for each job, search and connected apps. For each job or service the admin marks the default **fixed** or **open**; people may override only what is open. The admin's connected accounts serve everyone, and a person adds their own keys only where overrides are open.
-- **Where the line sits.** Several people on one install with the admin's defaults is part of the MIT core. Fixed-or-open locks, SSO and SCIM, audit and per-person policy are FrockBot for Teams ([§7](#7-enterprise)).
+- **Where the line sits.** Several people on one install with the admin's defaults is part of the MIT core. Fixed-or-open locks, SSO and SCIM, audit and per-person policy are FrockBot for Teams ([§10](#10-enterprise)).
 
 ### Cuts
 
@@ -254,7 +254,27 @@ Modelled on how Cloudflare OS deploys ([repo](https://github.com/cloudflare/clou
 
 ---
 
-## 7. Enterprise
+## 8. The setup web app
+
+Setup moves out of the Flutter app into a web app at `bot.frockbot.com/setup` (and `/setup` on a self-hosted install), served by the app Worker on the same origin and sign-in.
+
+- **What it holds:** the self-host deploy and install steps, plan, billing and credit, the Computer (where it runs, pairing, reset), AI setup (jobs, providers, models, keys), search, connected apps, and later members, defaults, locks and SSO.
+- **What stays in the app:** conversations, voice and dictation, each Bot's identity, instructions, notifications and Plugins, watching the Computer, and the Work and audit views. The app keeps a Settings entry that opens the web setup through `lib/view/host_frame.dart`, so no second sign-in is needed.
+- **Stack:** a small client-side app (Preact or Svelte) bundled into the app Worker's assets, reusing the marketing chooser's options and rules.
+- **The admin portal stays separate:** it is FrockBot's operator surface, not a user one.
+- **A new user on a phone is never sent to the browser.** They start on Frock AI with nothing to set up; setup is for changing things.
+- **The screens it replaces are deleted from Flutter** in the same change: the Models page, provider accounts and the Marketplace's model half.
+
+## 9. Apps on any server
+
+- **Several accounts in one app.** Each account signs in to one server, frockbot.com or a self-hosted install, with a switcher like Slack workspaces.
+- **Choosing a server.** "Use another server" reads `/.well-known/frockbot.json` for the server's name, protocol range and sign-in method.
+- **Sign-in is the browser with PKCE,** returning on the app's custom scheme. No device-code flow.
+- **Push to the released apps goes through a free relay at `push.frockbot.com`,** like Matrix's push gateway: the app registers its token and hands its server an opaque handle; the relay alone holds FrockBot's Apple and Firebase credentials. Pushes are content-free and the app fetches the text from its own server, so the relay never sees messages. No FrockBot account is needed.
+- **The web app uses Web Push** straight from any server with the deployment's own VAPID keys. UnifiedPush on Android may follow if people ask.
+- **Desktop enrolment drops the pairing code:** the signed-in Mac app enrols its own device agent with its session. A pairing code stays only for a headless Your server.
+
+## 10. Enterprise
 
 The code stays MIT. Organisations pay for what surrounds it:
 
