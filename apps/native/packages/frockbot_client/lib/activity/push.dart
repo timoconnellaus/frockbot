@@ -144,8 +144,6 @@ class PushController {
     deviceId = await store.read('push-device');
     deviceId ??= randomId();
     await store.write('push-device', deviceId!);
-    delivery = await store.read('push-delivery:$userId');
-    relayHandle = await store.read('push-relay-handle:$userId');
     if (disposed) return;
     if (mobile) {
       channel.setMethodCallHandler((call) async {
@@ -193,6 +191,11 @@ class PushController {
         }
       }
     }
+    if (disposed) return;
+    // Read after the platform is set up, which the badge waits on; only the
+    // first registration needs them.
+    delivery = await store.read('push-delivery:$userId');
+    relayHandle = await store.read('push-relay-handle:$userId');
     if (disposed) return;
     await register();
     if (disposed) return;
