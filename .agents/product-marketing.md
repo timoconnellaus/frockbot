@@ -38,7 +38,7 @@ carries the architecture and the capability reference.
 - Angles: MIT open source; bring your own model (28 providers); everything
   is a plugin (hooks on the loop, tools, storage, declared egress, Bots can
   author plugins behind approval); one-command self-host on Cloudflare;
-  same code as the hosted deployment; US$20 or free vs the US$200 category.
+  same code as the hosted deployment; US$5 or free vs the US$200 category.
 - Vocabulary: theirs — harness, provider, plugin, Durable Object, Worker.
 - Primary CTA: read the install guide / star the repo.
 
