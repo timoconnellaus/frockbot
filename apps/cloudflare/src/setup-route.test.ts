@@ -246,6 +246,7 @@ describe("the reader credential", () => {
       "/api/billing",
       "/api/billing/spending",
       "/api/web-search",
+      "/api/machines",
       "/api/billing/provider/checkout",
       "/api/plugins/connect/connections",
       "/api/plugins/mcp/connections/conn-1/authorize",
@@ -259,6 +260,8 @@ describe("the reader credential", () => {
       "/api/billing/reconcile",
       "/api/plugins/other/connections",
       "/api/settings/application",
+      "/api/machines/pair",
+      "/api/machines/mac-1/revoke",
     ])
       expect(setupReaderPathV1(path)).toBe(false);
   });

@@ -93,6 +93,27 @@ export async function connectKey(
   return receipt.connectionId;
 }
 
+/**
+ * Adds a model server on one of the account's Macs. Connecting is the test:
+ * the server is asked for its models through the Mac, and the Connection
+ * comes back ready with them, or failed with the reason.
+ */
+export async function connectLocalModel(input: {
+  type: CatalogRow;
+  label: string;
+  machineId: string;
+  endpoint: string;
+}): Promise<string> {
+  const receipt = await connectionCommand({
+    type: "connection/create",
+    packageId: input.type.packageId,
+    connectionTypeId: input.type.connectionTypeId,
+    label: input.label.slice(0, 120),
+    settings: { "machine-id": input.machineId, endpoint: input.endpoint },
+  });
+  return receipt.connectionId;
+}
+
 export async function replaceKey(
   connectionId: string,
   apiKey: string,

@@ -165,6 +165,59 @@ export const FROCK_AI_PACKAGE_ID = "provider-flock-ai";
 export const MCP_PACKAGE_ID = "mcp";
 export const APPS_PACKAGE_ID = "connect";
 export const IMAGE_PACKAGE_ID = "image";
+/** A model server on the person's Mac, reached through the app (`providers/local-model`). */
+export const LOCAL_MODEL_PACKAGE_ID = "provider-local";
+
+/**
+ * The model servers people run on a Mac, at the port each listens on by
+ * default. The backend refuses anything off the Mac's loopback whatever the
+ * page sends.
+ */
+export const LOCAL_MODEL_SERVERS = [
+  { id: "ollama", name: "Ollama", port: 11434 },
+  { id: "lm-studio", name: "LM Studio", port: 1234 },
+  { id: "mesh-llm", name: "mesh-llm", port: 9337 },
+] as const;
+
+/** The endpoint a server on `port` of the Mac answers at. */
+export function localModelEndpoint(port: number): string {
+  return `http://localhost:${port}/v1`;
+}
+
+/** A port as a person typed it, or undefined when it is not one. */
+export function localModelPort(typed: string): number | undefined {
+  const port = Number(typed.trim());
+  return Number.isInteger(port) && port > 0 && port < 65_536 ? port : undefined;
+}
+
+/** A paired Mac, as a local model is set up on one. */
+export interface Mac {
+  machineId: string;
+  label: string;
+  connected: boolean;
+}
+
+/** The account's paired Macs from `GET /api/machines`, connected ones first. */
+export function macsOf(view: unknown): Mac[] {
+  const machines = (view as { machines?: unknown } | null)?.machines;
+  if (!Array.isArray(machines)) return [];
+  const macs: Mac[] = [];
+  for (const entry of machines as Record<string, unknown>[]) {
+    if (
+      entry?.platform !== "macos" ||
+      entry.revokedAt !== undefined ||
+      typeof entry.machineId !== "string" ||
+      typeof entry.label !== "string"
+    )
+      continue;
+    macs.push({
+      machineId: entry.machineId,
+      label: entry.label,
+      connected: entry.connected === true,
+    });
+  }
+  return macs.sort((a, b) => Number(b.connected) - Number(a.connected));
+}
 
 /** The providers most people reach for, in the order the picker lists them. */
 export const POPULAR_PROVIDERS = [

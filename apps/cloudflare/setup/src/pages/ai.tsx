@@ -3,10 +3,12 @@ import {
   addProvider,
   connectApp,
   connectKey,
+  connectLocalModel,
   replaceKey,
   setChatModel,
   setImageModel,
 } from "../actions.ts";
+import { api } from "../api.ts";
 import { loadSetup, useSetup, type SetupData } from "../state.ts";
 import {
   chatModels,
@@ -16,11 +18,17 @@ import {
   imageModelOf,
   jobsOf,
   listWords,
+  LOCAL_MODEL_PACKAGE_ID,
+  LOCAL_MODEL_SERVERS,
+  localModelEndpoint,
+  localModelPort,
+  macsOf,
   matchProviders,
   providersOf,
   usesOf,
   type Connection,
   type Job,
+  type Mac,
   type Provider,
   type SettingField,
 } from "../model.ts";
@@ -401,6 +409,157 @@ function ConnectProvider(props: {
   );
 }
 
+/**
+ * Adds a model server on one of the account's Macs: which Mac, which server,
+ * then a test that asks the server for its models through that Mac. There is
+ * no key; the Mac app reaches the server on its own loopback.
+ */
+function ConnectLocalModel(props: {
+  packageId: string;
+  onClose: () => void;
+  onConnected: (provider: Provider) => void;
+}) {
+  const { data, reload } = useSetup();
+  const action = useAction();
+  const adding = useAction();
+  const [macs, setMacs] = useState<Mac[]>();
+  const [macId, setMacId] = useState<string>();
+  const [server, setServer] = useState<string>(LOCAL_MODEL_SERVERS[0].id);
+  const [port, setPort] = useState("");
+  const provider = providersOf(data.settings, data.modelCatalog).find(
+    (candidate) => candidate.packageId === props.packageId,
+  );
+  useEffect(() => {
+    void api<unknown>("/api/machines")
+      .then(macsOf)
+      .catch(() => [])
+      .then((found) => {
+        setMacs(found);
+        setMacId(found[0]?.machineId);
+      });
+    if (!provider || provider.installed) return;
+    void adding.run(async () => {
+      await addProvider(data.settings.revision, provider.packageId);
+      await reload();
+    });
+    // Once, as the dialog opens.
+  }, []);
+  if (!provider) return null;
+  const known = LOCAL_MODEL_SERVERS.find((each) => each.id === server);
+  const connect = () =>
+    action.run(async () => {
+      const type = provider.types[0];
+      if (!provider.installed || !type)
+        throw new Error(
+          "Local models are still being added. Try again in a moment.",
+        );
+      const mac = macs?.find((each) => each.machineId === macId);
+      if (!mac) throw new Error("Choose the Mac the model server runs on.");
+      const chosen = known ? known.port : localModelPort(port);
+      if (chosen === undefined)
+        throw new Error("Enter the port the server listens on.");
+      const connectionId = await connectLocalModel({
+        type,
+        label: `${known?.name ?? "Model server"} on ${mac.label}`,
+        machineId: mac.machineId,
+        endpoint: localModelEndpoint(chosen),
+      });
+      const latest = await loadSetup();
+      await reload();
+      const connection = latest.settings.connections.find(
+        (c) => c.connectionId === connectionId,
+      );
+      if (connection?.state !== "ready")
+        throw new Error(
+          connection?.failure ?? "That model server didn’t connect. Try again.",
+        );
+      props.onConnected(
+        providersOf(latest.settings, latest.modelCatalog).find(
+          (candidate) => candidate.packageId === provider.packageId,
+        ) ?? provider,
+      );
+    });
+  return (
+    <Dialog title="Connect a model on your Mac" onClose={props.onClose}>
+      <div class="stack-16">
+        <p class="body muted">
+          Your bots reach it through FrockBot on your Mac, and it’s free. While
+          the Mac is asleep or the app is closed, a bot using it says your Mac
+          is offline.
+        </p>
+        {macs === undefined ? (
+          <p class="small" role="status">
+            Looking for your Macs…
+          </p>
+        ) : macs.length === 0 ? (
+          <Notice tone="info" title="No Mac is paired yet">
+            Open FrockBot on your Mac and pair it in Machines, then come back
+            here.
+          </Notice>
+        ) : (
+          <label class="field">
+            <span>Mac</span>
+            <select
+              class="pick"
+              value={macId}
+              onChange={(event) => setMacId(event.currentTarget.value)}
+            >
+              {macs.map((mac) => (
+                <option key={mac.machineId} value={mac.machineId}>
+                  {mac.connected ? mac.label : `${mac.label} (offline)`}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <Segmented
+          label="Model server"
+          value={server}
+          options={[
+            ...LOCAL_MODEL_SERVERS.map((each) => ({
+              value: each.id as string,
+              label: each.name,
+            })),
+            { value: "other", label: "Another port" },
+          ]}
+          onChange={setServer}
+        />
+        {known ? (
+          <p class="small">
+            Reached at {localModelEndpoint(known.port)} on your Mac.
+          </p>
+        ) : (
+          <Field
+            label="Port"
+            value={port}
+            onInput={setPort}
+            hint="Any OpenAI-compatible server on your Mac, at http://localhost:<port>/v1."
+          />
+        )}
+        {!provider.installed ? (
+          <p class="small" role="status">
+            {adding.problem ?? "Adding local models to your account…"}
+          </p>
+        ) : null}
+        <Problem message={action.problem} />
+        <div class="row-actions">
+          <button type="button" class="btn outline" onClick={props.onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="btn primary"
+            disabled={action.busy || !provider.installed || !macs?.length}
+            onClick={() => void connect()}
+          >
+            {action.busy ? "Testing…" : "Test and connect"}
+          </button>
+        </div>
+      </div>
+    </Dialog>
+  );
+}
+
 export function ReplaceKey(props: {
   connection: Connection;
   name: string;
@@ -766,7 +925,17 @@ export function AiPage() {
           />
         </Dialog>
       ) : null}
-      {connecting ? (
+      {connecting?.packageId === LOCAL_MODEL_PACKAGE_ID ? (
+        <ConnectLocalModel
+          packageId={connecting.packageId}
+          onClose={() => setConnecting(undefined)}
+          onConnected={(provider) => {
+            setConnecting(undefined);
+            setMode("custom");
+            setModelsOf(provider);
+          }}
+        />
+      ) : connecting ? (
         <ConnectProvider
           packageId={connecting.packageId}
           onClose={() => setConnecting(undefined)}

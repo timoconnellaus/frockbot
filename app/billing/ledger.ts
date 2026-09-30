@@ -505,7 +505,9 @@ export class BillingLedger {
       const subscribed = this.subscribed();
       if (!free && this.get<boolean>("suspended"))
         throw new BillingError(subscriptionRequiredReasonV1(this.productName));
-      const grants = free ? [] : this.spendable(subscribed, input.kind === "jev");
+      const grants = free
+        ? []
+        : this.spendable(subscribed, input.kind === "jev");
       const available = grants.reduce((total, g) => total + g.remaining, 0);
       if (
         !free &&
