@@ -13,7 +13,7 @@
     "frockbot-deployment-config": "./deployment-config/cli.ts"
   },
   "scripts": {
-    "client:build": "bun run build-flutter-web.ts",
+    "client:build": "bun run build-flutter-web.ts && bun run build-setup.ts",
     "artifact:build": "bun run client:build && bun run build-artifact.ts",
     "build": "bun run artifact:build && bun ../../scripts/deployment-config.ts hosted && wrangler deploy --dry-run -c ../../.deployment/hosted/app/wrangler.jsonc --outdir dist/gateway",
     "dev": "bun run dev.ts",
@@ -21,7 +21,7 @@
     "test:workerd": "vitest run --config vitest.config.ts",
     "test:integration": "bun run artifact:build && vitest run --config vitest.integration.config.ts",
     "test:e2e": "playwright test -c e2e/playwright.config.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.access.json && tsc --noEmit -p tsconfig.payments-none.json && tsc --noEmit -p test/tsconfig.json && tsc --noEmit -p e2e/tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p setup/tsconfig.json && tsc --noEmit -p tsconfig.access.json && tsc --noEmit -p tsconfig.payments-none.json && tsc --noEmit -p test/tsconfig.json && tsc --noEmit -p e2e/tsconfig.json"
   },
   "dependencies": {
     "@frockbot/app": "workspace:*",
@@ -41,6 +41,7 @@
     "@cloudflare/workers-types": "5.20260920.1",
     "@playwright/test": "1.63.0",
     "@types/bun": "1.4.2",
+    "preact": "10",
     "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2",
     "vitest": "^4.1.0",
     "wrangler": "4.129.0"
@@ -52,6 +53,8 @@
     "wrangler.jsonc",
     "build-artifact.ts",
     "build-flutter-web.ts",
+    "build-setup.ts",
+    "setup",
     "release-version.ts",
     "!**/*.test.ts",
     "!**/*.type-test.ts",

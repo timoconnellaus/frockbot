@@ -785,6 +785,8 @@ export interface GatewayDependencies {
   };
   /** Explicit Slice 2 prototype; absent until signed-target qualification. */
   nativeAuth?: import("./native-auth.js").NativeAuth;
+  /** Mints and reads the credential a framed Setup page reads the account with. */
+  setupReader?: import("./setup-reader.js").SetupReader;
   loader: WorkerLoader;
   artifacts: ApplicationArtifactStore;
   auth: AuthPackageV1;

@@ -14,6 +14,7 @@
   "include": [
     "build-artifact.ts",
     "build-flutter-web.ts",
+    "build-setup.ts",
     "release-version.ts",
     "src/**/*.ts"
   ]

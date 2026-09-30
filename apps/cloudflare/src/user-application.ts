@@ -156,12 +156,15 @@ function appHtml(
 
 /**
  * What the app frames: a Plugin's pages, which are served from this origin
- * but only under `/plugin-pages/` and each sandboxed by its own policy, and
- * the Computer host's viewer origins.
+ * but only under `/plugin-pages/` and each sandboxed by its own policy, the
+ * account's Setup page (`/setup` and its pages), and the Computer host's
+ * viewer origins.
  */
 function frameSources(applicationUrl: URL): string {
   return [
     `${applicationUrl.origin}/plugin-pages/`,
+    `${applicationUrl.origin}/setup`,
+    `${applicationUrl.origin}/setup/`,
     ...COMPUTER_HOST_CAPABILITIES_V1.viewerFrameOrigins,
   ].join(" ");
 }

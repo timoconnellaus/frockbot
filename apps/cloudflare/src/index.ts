@@ -165,6 +165,7 @@ import {
   nativeDevelopmentReturnUriV1,
   nativeReturnUris,
 } from "./native-auth.js";
+import { createSetupReader } from "./setup-reader.js";
 import {
   DEVELOPMENT_USER_ID,
   isDeploymentAdminV1,
@@ -2781,6 +2782,14 @@ export default {
               }
             : {}),
           admitAccount: (identity) => admitAccount(env, identity),
+          ...(nativeTokenSecret
+            ? {
+                setupReader: createSetupReader({
+                  secret: nativeTokenSecret,
+                  admit: (userId) => admitStoredAccount(env, userId),
+                }),
+              }
+            : {}),
           ...(env.FROCKBOT_ADMIN_EMAILS
             ? { adminEmails: env.FROCKBOT_ADMIN_EMAILS }
             : {}),
