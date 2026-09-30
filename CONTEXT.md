@@ -8,6 +8,10 @@ FrockBot is a hosted application for creating and operating persistent conversat
 A person who owns Bots, enabled Packages, authorized Connections, and preferences shared across their Bots. What a user enables is available to all of that user's bots.
 _Avoid_: Account, tenant
 
+**App account**:
+One sign-in in a native app: a server's origin — frockbot.com or a self-hosted install — and the User it signed in as, with that sign-in's token, caches and unread kept apart from every other. An app holds several and switches between them; the switcher calls each an account. A browser is the one App account of the origin that served it.
+_Avoid_: Workspace, profile, User
+
 **Bot**:
 A persistent, configured conversational actor with its own identity, sessions, routines, and optional computer. Its extensible behavior comes from its user's shared package setup.
 _Avoid_: Agent, assistant instance

@@ -66,8 +66,7 @@ class AccountsUnread extends ChangeNotifier {
   }
 
   /// Every watched account's count together, which the badge adds.
-  int get total =>
-      _watched.keys.fold(0, (sum, id) => sum + unreadOf(id));
+  int get total => _watched.keys.fold(0, (sum, id) => sum + unreadOf(id));
 
   void _drop(String id) {
     final watched = _watched.remove(id);

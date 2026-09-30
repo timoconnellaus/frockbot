@@ -42,10 +42,10 @@ A debug build carries `--dart-define=FROCKBOT_ORIGIN=…` and
 `/native/authorize` issues the code for the `development` User instead of
 bouncing to Google (a signed-in browser is asked on the consent page first, as
 everywhere), and the app receives it on
-`frockbot-dev://native/return/android` — a custom scheme, because a plain-HTTP
-loopback origin can never be an App Link. The exchange, the bearer
-and the session are production's. The scheme is declared in the debug manifest
-only, so a release build cannot receive it.
+`frockbot-dev://native/return/android`, the development scheme every
+deployment's native door serves. The exchange, the bearer and the session are
+production's. A production-identity build registers that scheme in its debug
+manifest only, so a release build of the released app cannot receive it.
 
 The Worker answers native sign-in on `BETTER_AUTH_URL`, which is the deployment's
 own origin and nothing it hardcodes — here, the emulator's view of this machine.

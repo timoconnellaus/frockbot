@@ -64,41 +64,45 @@ void main() {
     expect(store.values['sign-in'], isNull);
     api.close();
   });
-  test('the return comes back on the app’s own scheme, from any server', () async {
-    final store = MemoryStore();
-    final api = ExchangeApi(store);
-    final auth = NativeSignIn(api, store);
-    // One registration covers every server: the host is always `native`.
-    expect(await auth.returnUri(), matches(RegExp(r'^frockbot://native/return/(android|ios|macos)$')));
-    final state = List.filled(64, 'a').join();
-    await store.write(
-      'sign-in',
-      jsonEncode({
-        'version': 1,
-        'state': state,
-        'verifier': List.filled(64, 'b').join(),
-        'returnUri': await auth.returnUri(),
-        'exchangeId': 'exchange-1',
-        'createdAt': DateTime.now().toUtc().toIso8601String(),
-      }),
-    );
-    final query = {'state': state, 'code': List.filled(80, 'c').join()};
-    // The verified-link form of the same return is not this app's.
-    final hosted = Uri.parse(
-      'https://bot.frockbot.com/native/return/macos',
-    ).replace(queryParameters: query);
-    expect(await auth.accept(hosted), isFalse);
-    final returned = Uri.parse(
-      await auth.returnUri(),
-    ).replace(queryParameters: query);
-    expect(await auth.accept(returned), isTrue);
-    expect(api.requests, hasLength(1));
-    expect(
-      (api.requests.single as Map<String, dynamic>)['returnUri'],
-      await auth.returnUri(),
-    );
-    api.close();
-  });
+  test(
+    'the return comes back on the app’s own scheme, from any server',
+    () async {
+      final store = MemoryStore();
+      final api = ExchangeApi(store);
+      final auth = NativeSignIn(api, store);
+      // One registration covers every server: the host is always `native`.
+      expect(
+        await auth.returnUri(),
+        matches(RegExp(r'^frockbot://native/return/(android|ios|macos)$')),
+      );
+      final state = List.filled(64, 'a').join();
+      await store.write(
+        'sign-in',
+        jsonEncode({
+          'version': 1,
+          'state': state,
+          'verifier': List.filled(64, 'b').join(),
+          'returnUri': await auth.returnUri(),
+          'exchangeId': 'exchange-1',
+          'createdAt': DateTime.now().toUtc().toIso8601String(),
+        }),
+      );
+      final query = {'state': state, 'code': List.filled(80, 'c').join()};
+      // The verified-link form of the same return is not this app's.
+      final hosted = Uri.parse('https://bot.frockbot.com/native/return/macos')
+          .replace(queryParameters: query);
+      expect(await auth.accept(hosted), isFalse);
+      final returned = Uri.parse(await auth.returnUri())
+          .replace(queryParameters: query);
+      expect(await auth.accept(returned), isTrue);
+      expect(api.requests, hasLength(1));
+      expect(
+        (api.requests.single as Map<String, dynamic>)['returnUri'],
+        await auth.returnUri(),
+      );
+      api.close();
+    },
+  );
   test(
     'wrong state, unverified return and duplicate query cannot dispatch',
     () async {
@@ -108,11 +112,7 @@ void main() {
       final returnUri = await auth.returnUri();
       await store.write(
         'sign-in',
-        jsonEncode({
-          'version': 1,
-          'state': 'expected',
-          'returnUri': returnUri,
-        }),
+        jsonEncode({'version': 1, 'state': 'expected', 'returnUri': returnUri}),
       );
       expect(
         await auth.accept(

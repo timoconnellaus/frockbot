@@ -129,6 +129,11 @@ class AccountSwitcher extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
                 selected: account.id == activeId,
+                // The server's mark keeps its colour on the open account.
+                selectedTileColor: Theme.of(sheet)
+                    .colorScheme
+                    .surfaceContainerHighest,
+                selectedColor: Theme.of(sheet).colorScheme.onSurface,
                 onTap: () {
                   Navigator.of(sheet).pop();
                   if (account.id != activeId) onSwitch(account);

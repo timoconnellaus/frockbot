@@ -212,9 +212,7 @@ class _FrockBotAppState extends State<FrockBotApp> {
     super.initState();
     otherUnread.addListener(_countElsewhere);
     if (!holdsAccounts) {
-      _adopt(
-        AccountSession(store: store, api: widget.api ?? NativeApi(store)),
-      );
+      _adopt(AccountSession(store: store, api: widget.api ?? NativeApi(store)));
     }
     links = AppLinks().uriLinkStream.listen(
       (uri) => unawaited(accept(uri)),
@@ -340,8 +338,7 @@ class _FrockBotAppState extends State<FrockBotApp> {
       // left: the account it is adding is kept for exactly this.
       final pending = directory.pending;
       final session =
-          adding ??
-          (pending == null ? null : adding = _sessionFor(pending));
+          adding ?? (pending == null ? null : adding = _sessionFor(pending));
       if (session != null && await session.auth.accept(uri)) {
         await _added(session);
       }

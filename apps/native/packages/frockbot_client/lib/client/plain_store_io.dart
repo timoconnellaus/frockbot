@@ -113,8 +113,7 @@ class PlainStore implements SnapshotStore, CheckpointStore, AccountsStore {
 
 /// Routes each key to the store that suits it and migrates values written by
 /// the released shape that kept everything in the keystore.
-class SplitStore
-    implements SnapshotStore, CheckpointStore, AccountsStore {
+class SplitStore implements SnapshotStore, CheckpointStore, AccountsStore {
   static const migrationKey = 'store.migrated.v1';
   final LocalStore secrets;
   final PlainStore plain;
