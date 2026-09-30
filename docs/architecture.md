@@ -462,9 +462,14 @@ Widening `script-src` was rejected in favour of serving the bytes; the loader is
 additionally given a deadline in `lib/main.dart`, past which a missing runtime
 costs the animation rather than the window.
 
-There is no service worker. Every URL under the prefix is content-addressed and
-served `immutable`, so a cache the page managed itself would duplicate the
-browser's with a second staleness rule to get wrong.
+No service worker caches anything. Every URL under the prefix is
+content-addressed and served `immutable`, so a cache the page managed itself
+would duplicate the browser's with a second staleness rule to get wrong. The one
+service worker, `/push-worker.js`, receives Web Push and has no fetch handler;
+it is staged at the origin's root, outside the prefix, because a push
+subscription is bound to its URL ([notifications](notifications.md)). The
+document also links `/manifest.webmanifest`, which makes an iPhone's Home Screen
+copy a standalone app, the only place Safari delivers Web Push.
 
 ### The app
 
@@ -1294,7 +1299,7 @@ Analytics Engine holds product events only, bound as `ANALYTICS` on the deployed
 
 Top-level vars: `NATIVE_SLICE_2_AUTH`, `DEFAULT_APPLICATION_HASH`, `FROCK_AI_GATEWAY_ID`, `FROCK_AI_ACCOUNT_ID`, `FROCK_AI_AUTO_ROUTE`, and `EMAIL_DOMAIN` where the profile names `email` (§3, "By email"), which also binds `send_email` `SEND_EMAIL`. `ALLOWED_CLIENT_ORIGINS` is read but set nowhere: the web app is same-origin and the Flutter app sends no `Origin`.
 
-Secrets are declared in `apps/cloudflare/src/production-secrets.ts`, where a required secret may belong to one auth Package: the hosted build requires `BETTER_AUTH_*` and `GOOGLE_*`, and an Access build requires `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` instead. Required of the hosted build: `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SPRITES_TOKEN`, `COMPUTER_HOST_TOKEN`, `CREDENTIAL_KEYRING`, `ROUTINE_HOOK_SECRET`, `MACHINE_TOKEN_SECRET`, `APPLET_BUILD_TOKEN`, `OPENAI_API_KEY` (composer dictation), `GEMINI_API_KEY` (the voice session). Jev needs no secret: it runs on the `AI` binding. Optional: `FROCKBOT_ADMIN_EMAILS`, `FROCKBOT_ADMIN_USER_IDS`, `DEBUG_TOKEN`, `COMPOSIO_API_KEY` (Connected apps, §8), `COMPOSIO_WEBHOOK_SECRET` (Connected-app Routine events, §8), `BRAVE_SEARCH_API_KEY` (FrockBot's web search, §7), `FROCK_AI_GATEWAY_TOKEN`. `VOICE_ASSISTANT_MODEL` and `VOICE_DICTATION_CLEANUP_MODEL` are optional vars; `VOICE_DICTATION_UPSTREAM_URL`, `VOICE_ASSISTANT_UPSTREAM_URL` and `JEV_BASE_URL` (Jev over HTTP to a stand-in the workerd suites script) are harness-only doors the release gate refuses to find live.
+Secrets are declared in `apps/cloudflare/src/production-secrets.ts`, where a required secret may belong to one auth Package: the hosted build requires `BETTER_AUTH_*` and `GOOGLE_*`, and an Access build requires `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` instead. Required of the hosted build: `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SPRITES_TOKEN`, `COMPUTER_HOST_TOKEN`, `CREDENTIAL_KEYRING`, `ROUTINE_HOOK_SECRET`, `MACHINE_TOKEN_SECRET`, `APPLET_BUILD_TOKEN`, `WEB_PUSH_VAPID_KEYS` (browser notifications, [notifications](notifications.md)), `OPENAI_API_KEY` (composer dictation), `GEMINI_API_KEY` (the voice session). Jev needs no secret: it runs on the `AI` binding. Optional: `FROCKBOT_ADMIN_EMAILS`, `FROCKBOT_ADMIN_USER_IDS`, `DEBUG_TOKEN`, `COMPOSIO_API_KEY` (Connected apps, §8), `COMPOSIO_WEBHOOK_SECRET` (Connected-app Routine events, §8), `BRAVE_SEARCH_API_KEY` (FrockBot's web search, §7), `FROCK_AI_GATEWAY_TOKEN`. `VOICE_ASSISTANT_MODEL` and `VOICE_DICTATION_CLEANUP_MODEL` are optional vars; `VOICE_DICTATION_UPSTREAM_URL`, `VOICE_ASSISTANT_UPSTREAM_URL` and `JEV_BASE_URL` (Jev over HTTP to a stand-in the workerd suites script) are harness-only doors the release gate refuses to find live.
 
 ---
 

@@ -121,7 +121,7 @@ say(
 try {
   const chosen = await chooseAccountV1(context, hostedAccountIdV1());
   let written = await writeProfileV1(context, chosen);
-  const minted = await mintInternalSecretsV1(context);
+  const minted = await mintInternalSecretsV1(context, written);
   const human = await askHumanSecretsV1(context, written);
   const secrets = { ...minted, ...human.values };
   const access = await configureAccessV1(context, written);

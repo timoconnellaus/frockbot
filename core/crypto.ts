@@ -48,7 +48,7 @@ export function base64urlEncodeV1(bytes: Uint8Array): string {
  * trailing bits, and other non-canonical spellings are refused rather than
  * silently normalised. An empty string is the canonical encoding of no bytes.
  */
-export function base64urlDecodeV1(value: string): Uint8Array {
+export function base64urlDecodeV1(value: string): Uint8Array<ArrayBuffer> {
   if (
     typeof value !== "string" ||
     !/^[A-Za-z0-9_-]*$/.test(value) ||

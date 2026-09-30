@@ -120,6 +120,8 @@ const productionEnvironment = {
   MACHINE_TOKEN_SECRET:
     "9f2c4a6e8d0b1357913579bdf02468ace13579bdf02468ace13579bdf02468ac",
   FCM_SERVICE_ACCOUNT: '{"project_id":"frockbot-test"}',
+  WEB_PUSH_VAPID_KEYS:
+    '{"subject":"https://bot.frockbot.com","publicKey":"BJMIuLL8nNpXUgU9n0waSRspgwHOsAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","privateKey":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}',
   STRIPE_SECRET_KEY: "sk_test_production",
   STRIPE_WEBHOOK_SECRET: "whsec_production",
   STRIPE_MONTHLY_PRICE_ID: "price_production_monthly",
@@ -243,6 +245,14 @@ describe("production setup", () => {
     expect(
       calls.some((call) => call.startsWith("secret-value:CREDENTIAL_KEYRING:")),
     ).toBe(true);
+    // Browser subscriptions are bound to the key pair, minted for production's
+    // own origin.
+    const vapid = calls.find((call) =>
+      call.startsWith("secret-value:WEB_PUSH_VAPID_KEYS:"),
+    );
+    expect(
+      JSON.parse(vapid!.slice("secret-value:WEB_PUSH_VAPID_KEYS:".length)),
+    ).toMatchObject({ subject: "https://bot.frockbot.com" });
   });
 
   test("aborts when the production keyring cannot be inspected", async () => {

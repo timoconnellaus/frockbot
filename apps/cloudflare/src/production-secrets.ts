@@ -136,6 +136,10 @@ export const REQUIRED_PRODUCTION_SECRETS_V1: readonly ProductionSecretV1[] = [
     why: "Authorizes Firebase push delivery to registered Android devices.",
   },
   {
+    name: "WEB_PUSH_VAPID_KEYS",
+    why: "The deployment's own VAPID key pair: signs and encrypts Web Push to browsers. Absent, the web app cannot turn on notifications.",
+  },
+  {
     name: "BETTER_AUTH_URL",
     why: "The deployment's own origin; every sign-in redirect is built from it.",
     authPackage: "better-auth",

@@ -791,6 +791,7 @@ jobs:
           ROUTINE_HOOK_SECRET: ${{ secrets.ROUTINE_HOOK_SECRET }}
           MACHINE_TOKEN_SECRET: ${{ secrets.MACHINE_TOKEN_SECRET }}
           FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
+          WEB_PUSH_VAPID_KEYS: ${{ secrets.WEB_PUSH_VAPID_KEYS }}
           DEBUG_TOKEN: ${{ secrets.DEBUG_TOKEN }}
           # Voice (docs/voice.md). Required for a production release; carried
           # here when present so staging speaks as soon as the secrets exist,
@@ -823,6 +824,7 @@ jobs:
             'ROUTINE_HOOK_SECRET',
             'MACHINE_TOKEN_SECRET',
             'FCM_SERVICE_ACCOUNT',
+            'WEB_PUSH_VAPID_KEYS',
           ];
           const optional = [
             'FROCKBOT_ADMIN_USER_IDS',

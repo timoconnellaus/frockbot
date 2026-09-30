@@ -2,6 +2,7 @@ import { billingRoutes, type BillingAccountRpc } from "./billing.js";
 import { decodeHostedModelRatesV1 } from "@frockbot/app/billing/rates";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { BOT_STATE_CHANNEL_INTERNAL_PATH } from "./bot-state-channel.js";
+import { parseVapidKeysV1 } from "./web-push.js";
 import { internalMachineSocketRequestV1 } from "./machine-socket.js";
 import {
   decodeMachineResultDeliveryV1,
@@ -274,6 +275,8 @@ interface Env {
   STRIPE_PLUS_PRICE_ID?: string;
   STRIPE_BYO_PRICE_ID?: string;
   FCM_SERVICE_ACCOUNT?: string;
+  /** The deployment's VAPID key pair, as JSON (`web-push.ts`). */
+  WEB_PUSH_VAPID_KEYS?: string;
   /** Explicit qualification gate; not enabled by the production configuration. */
   NATIVE_SLICE_2_AUTH?: string;
   /** The profile's `nativeApps`, as JSON: what the association files name. */
@@ -477,6 +480,30 @@ function debugSurface(env: Env): DebugGatewaySurface {
         ),
       ),
   };
+}
+
+/**
+ * The public half of the deployment's VAPID keys, read once per secret rather
+ * than on every request. A malformed secret turns web push off, logged once,
+ * rather than failing every request that builds a gateway.
+ */
+const webPushPublicKeys = new Map<string, string | undefined>();
+function webPushPublicKeyV1(secret: string | undefined): string | undefined {
+  if (!secret) return undefined;
+  if (webPushPublicKeys.has(secret)) return webPushPublicKeys.get(secret);
+  let publicKey: string | undefined;
+  try {
+    publicKey = parseVapidKeysV1(secret).publicKey;
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: "web-push-keys-invalid",
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    );
+  }
+  webPushPublicKeys.set(secret, publicKey);
+  return publicKey;
 }
 
 function allowedClientOrigins(env: Env): string[] | undefined {
@@ -2723,6 +2750,7 @@ export default {
             env.USER_CONFIGURATIONS.get(
               env.USER_CONFIGURATIONS.idFromName(userId),
             ).registerPush({ userId, registration }),
+          webPushPublicKey: webPushPublicKeyV1(env.WEB_PUSH_VAPID_KEYS),
           deletion: {
             deleteAccount: async (userId, command) =>
               rpcJsonSnapshotV1(

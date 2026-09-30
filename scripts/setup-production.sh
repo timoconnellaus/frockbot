@@ -365,6 +365,18 @@ else
   set_required_production_secret MACHINE_TOKEN_SECRET "$MACHINE_TOKEN_SECRET"
   unset MACHINE_TOKEN_SECRET
 fi
+if awk '{print $1}' <<<"$PRODUCTION_SECRETS" | grep -qx WEB_PUSH_VAPID_KEYS; then
+  note "Preserving the existing WEB_PUSH_VAPID_KEYS so browsers that turned on notifications keep receiving them."
+else
+  say "Provision the deployment's own VAPID key pair for browser notifications."
+  WEB_PUSH_VAPID_KEYS="$(bun "$(dirname "${BASH_SOURCE[0]}")/web-push-keys.ts" hosted 2>/dev/null)"
+  [[ -n "$WEB_PUSH_VAPID_KEYS" ]] || {
+    warn "VAPID key generation failed"
+    exit 1
+  }
+  set_required_production_secret WEB_PUSH_VAPID_KEYS "$WEB_PUSH_VAPID_KEYS"
+  unset WEB_PUSH_VAPID_KEYS
+fi
 unset PRODUCTION_SECRETS
 
 stage "GitHub: verify production configuration"

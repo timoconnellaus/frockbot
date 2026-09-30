@@ -45,7 +45,7 @@ import {
   readBackV1,
   type LocalBundleV1,
 } from "./deploy-bundle/local.ts";
-import { credentialKeyringV1, randomHexV1 } from "./setup/plan.ts";
+import { credentialKeyringV1, randomHexV1, vapidKeysV1 } from "./setup/plan.ts";
 
 const say = (line: string) => console.log(line);
 
@@ -75,10 +75,11 @@ function flags(args: readonly string[]) {
  * the only record of them: minting a second value later would invalidate what
  * the first one encrypted and signed.
  */
-function secretsFor(
+async function secretsFor(
   bundle: LocalBundleV1,
   file: string,
-): Record<string, string> {
+  hostname: string,
+): Promise<Record<string, string>> {
   const secrets = existsSync(file)
     ? (JSON.parse(readFileSync(file, "utf8")) as Record<string, string>)
     : {};
@@ -87,7 +88,11 @@ function secretsFor(
     for (const secret of worker.secrets) {
       if (!secret.mint || secrets[secret.name]) continue;
       secrets[secret.name] =
-        secret.mint === "keyring" ? credentialKeyringV1() : randomHexV1();
+        secret.mint === "keyring"
+          ? credentialKeyringV1()
+          : secret.mint === "vapid"
+            ? await vapidKeysV1(hostname)
+            : randomHexV1();
       minted = true;
       say(`  minted     ${secret.name}`);
     }
@@ -110,16 +115,17 @@ async function deploy(
     mkdtempSync(join(tmpdir(), "frockbot-bundle-")),
   );
   say(`▸ ${bundle.manifest.version}`);
+  const hostname = args.required("--hostname");
   const install: InstallV1 = {
     accountId: args.required("--account", "CLOUDFLARE_ACCOUNT_ID"),
     name: args.required("--install"),
-    hostnames: [args.required("--hostname")],
+    hostnames: [hostname],
     computerHost: !args.switches.has("--no-computer-host"),
     vars: {
       ACCESS_TEAM_DOMAIN: args.required("--access-team"),
       ACCESS_AUD: args.required("--access-aud"),
     },
-    secrets: secretsFor(bundle, args.required("--secrets")),
+    secrets: await secretsFor(bundle, args.required("--secrets"), hostname),
     ...(args.values.get("--location")
       ? { location: args.values.get("--location")! }
       : {}),

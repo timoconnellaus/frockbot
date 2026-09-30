@@ -9,10 +9,22 @@ import {
   sealPushV1,
   sendFcmMessageV1,
   type PushKeyV1,
-  type PushPlatformV1,
+  type PushPlatformV1 as AppPushPlatformV1,
 } from "@frockbot/core/push";
+import { decodeWebPushSubscriptionV1 } from "./web-push.js";
 
-export { RetryablePushError, type PushPlatformV1 };
+export { RetryablePushError };
+
+/**
+ * Which app holds a token: the apps' FCM tokens (`@frockbot/core/push`), or a
+ * browser's Web Push subscription, which this deployment reaches itself with
+ * its own VAPID keys and never through FCM or the relay.
+ */
+export type PushPlatformV1 = AppPushPlatformV1 | "web";
+const DEVICE_PLATFORMS_V1: readonly PushPlatformV1[] = [
+  ...PUSH_PLATFORMS_V1,
+  "web",
+];
 
 /**
  * Where a deployment with no FCM credentials of its own sends its pushes: the
@@ -96,9 +108,11 @@ export function decodePushRegistration(input: unknown): PushRegistration {
   if (
     value.platform !== undefined &&
     (value.token === undefined ||
-      !PUSH_PLATFORMS_V1.includes(value.platform as PushPlatformV1))
+      !DEVICE_PLATFORMS_V1.includes(value.platform as PushPlatformV1))
   )
     throw new Error("Invalid push platform");
+  if (value.platform === "web")
+    decodeWebPushSubscriptionV1(value.token as string);
   // A relay registration is the device's address in place of a token.
   if (value.relay !== undefined) {
     const relay = value.relay as Record<string, unknown> | null;
@@ -256,7 +270,7 @@ function apnsMessage(
 
 export async function sendFcm(
   secret: string,
-  target: { token: string; platform?: PushPlatformV1 },
+  target: { token: string; platform?: AppPushPlatformV1 },
   data: Record<string, string>,
   notify: boolean,
   request: typeof fetch = fetch,
@@ -340,6 +354,15 @@ export async function deliverPush(
     notify: boolean,
   ) => Promise<"sent" | "unregistered"> = (address, data, notify) =>
     sendRelay(DEFAULT_PUSH_RELAY_URL, address, data, notify),
+  /**
+   * A browser's own push service, present when the deployment holds its
+   * VAPID keys; without them a browser's subscription is unreachable.
+   */
+  web?: (
+    subscription: string,
+    data: Record<string, string>,
+    notify: boolean,
+  ) => Promise<"sent" | "unregistered">,
 ): Promise<void> {
   const devices = await storage.list<PushDevice>({ prefix: DEVICE_PREFIX });
   const now = Date.now();
@@ -355,8 +378,13 @@ export async function deliverPush(
   // A token needs this deployment's own FCM credentials. Without them it is an
   // address nothing here can reach, and the app replaces it with a relay
   // handle once its registration is answered `delivery: "relay"`.
+  // A browser subscribes with `userVisibleOnly`, so every push it receives
+  // must draw a notification: it is sent only messages it is to be told
+  // about, never a read or a quiet message, and clears its own on read.
   const reachable = (device: PushDevice) =>
-    device.relay !== undefined || (device.token !== undefined && !!secret);
+    device.relay !== undefined ||
+    (device.token !== undefined &&
+      (device.platform === "web" ? !!web : !!secret));
   if (![...devices.values()].some(reachable)) return;
   const target = update.groupId ?? update.botId;
   const beingRead = [...devices.values()].some(
@@ -369,8 +397,10 @@ export async function deliverPush(
     throw new RetryablePushError(
       "Waiting for the visible message's read receipt",
     );
+  const notify =
+    update.kind === "message" && update.notify === true && !beingRead;
   for (const [deviceKey, device] of devices) {
-    if (!reachable(device)) continue;
+    if (!reachable(device) || (device.platform === "web" && !notify)) continue;
     const key = update.groupId
       ? `${DELIVERY_PREFIX}group:${update.groupId}:${update.kind}:${device.deviceId}`
       : `${DELIVERY_PREFIX}${update.botId}:${update.kind}:${device.deviceId}`;
@@ -409,8 +439,6 @@ export async function deliverPush(
       return true;
     });
     if (!claimed) continue;
-    const notify =
-      update.kind === "message" && update.notify === true && !beingRead;
     const data = {
       userId,
       botId: update.botId,
@@ -424,15 +452,17 @@ export async function deliverPush(
     try {
       const result = device.relay
         ? await relay(device.relay, data, notify)
-        : await sender(
-            secret!,
-            {
-              token: device.token!,
-              ...(device.platform ? { platform: device.platform } : {}),
-            },
-            data,
-            notify,
-          );
+        : device.platform === "web"
+          ? await web!(device.token!, data, notify)
+          : await sender(
+              secret!,
+              {
+                token: device.token!,
+                ...(device.platform ? { platform: device.platform } : {}),
+              },
+              data,
+              notify,
+            );
       if (result === "unregistered") {
         // Only the address this attempt used is dropped: a device that
         // re-registered meanwhile keeps its new one.

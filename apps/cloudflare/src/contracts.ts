@@ -785,6 +785,8 @@ export interface GatewayDependencies {
   /** Where product events go (app/analytics/events.ts); absent writes none. */
   analytics?: ProductEventSinkV1;
   registerPush?(userId: string, registration: unknown): Promise<unknown>;
+  /** What a browser subscribes with; absent, the web client offers no push. */
+  webPushPublicKey?: string;
   /**
    * The two things a person may delete outright: their account and their
    * Computer. The gateway checks the confirmation; these only carry it out.

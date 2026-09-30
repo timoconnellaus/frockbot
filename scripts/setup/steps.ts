@@ -46,6 +46,9 @@ import {
   parseWhoamiAccountsV1,
   randomHexV1,
   setupInstallV1,
+  vapidKeysV1,
+  appHostnameV1,
+  type MintedSecretV1,
   simpleProfileV1,
   SIMPLE_PROFILE_NAME_V1,
   UNISSUED_ACCESS_AUD_V1,
@@ -330,6 +333,7 @@ export interface SecretValuesV1 {
 
 export async function mintInternalSecretsV1(
   context: SetupContextV1,
+  profile: DeploymentProfileV1,
 ): Promise<Record<string, string>> {
   stage(context, 3, "Internal secrets");
   const recordPath = join(context.repoRoot, MINTED_SECRETS_FILE_V1);
@@ -347,11 +351,11 @@ export async function mintInternalSecretsV1(
     // A dry run mints placeholders. It prints every value it would write, and
     // real key material printed to a terminal ends up in scrollback and logs —
     // where a value that is never going to be set has no business being.
-    values[secret.name] = context.runner.dryRun
-      ? dryRunPlaceholderV1(secret.name, secret.shape)
-      : secret.shape === "keyring"
-        ? credentialKeyringV1()
-        : randomHexV1();
+    values[secret.name] = await mintedValueV1(
+      secret,
+      profile,
+      context.runner.dryRun,
+    );
     context.runner.say(`  ${secret.name} minted`);
   }
   context.runner.writeFile(recordPath, formatMintedSecretsV1(values), 0o600);
@@ -361,11 +365,27 @@ export async function mintInternalSecretsV1(
   return values;
 }
 
-/** A value of the right shape and no secrecy, for a run that writes nothing. */
-function dryRunPlaceholderV1(name: string, shape: "keyring" | "hex"): string {
-  return shape === "keyring"
-    ? credentialKeyringV1(new Date(0), (length) => new Uint8Array(length))
-    : `dry-run-placeholder-for-${name}`;
+/**
+ * A fresh value in the secret's shape. A dry run gets one of the right shape
+ * and no secrecy, since it prints what it would write.
+ */
+async function mintedValueV1(
+  secret: MintedSecretV1,
+  profile: DeploymentProfileV1,
+  dryRun: boolean,
+): Promise<string> {
+  switch (secret.shape) {
+    case "keyring":
+      return dryRun
+        ? credentialKeyringV1(new Date(0), (length) => new Uint8Array(length))
+        : credentialKeyringV1();
+    case "vapid":
+      return dryRun
+        ? `dry-run-placeholder-for-${secret.name}`
+        : await vapidKeysV1(appHostnameV1(profile));
+    case "hex":
+      return dryRun ? `dry-run-placeholder-for-${secret.name}` : randomHexV1();
+  }
 }
 
 export async function askHumanSecretsV1(
@@ -434,8 +454,7 @@ export async function configureAccessV1(
   profile: DeploymentProfileV1,
 ): Promise<{ profile: DeploymentProfileV1; byHand: string[] }> {
   stage(context, 5, "Cloudflare Access");
-  const appHostname = profile.workers?.app?.hostnames?.[0];
-  if (!appHostname) throw new Error("The profile gives the app no hostname.");
+  const appHostname = appHostnameV1(profile);
   const applications = accessApplicationsV1(appHostname, profile.prefix);
   const token = context.env.CLOUDFLARE_API_TOKEN;
 
