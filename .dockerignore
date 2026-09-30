@@ -2,7 +2,8 @@
 # because each needs a workspace module alongside its own app directory:
 # `apps/computer-host` needs `computer/host-protocol`, the Bot path-key leaf
 # and `computer/fly`, and `apps/applet-build` needs `applets/sdk` and the
-# build contract. Both images also use the shared core crypto primitives.
+# build contract. Both images also use the shared core crypto primitives,
+# and `computer/egress.ts` needs core's canonical JSON leaf.
 # Everything else stays out of the context.
 *
 !apps/computer-host
@@ -20,6 +21,7 @@
 !applets/sdk
 !core/package.json
 !core/crypto.ts
+!core/contracts/canonical-json.ts
 **/node_modules
 **/dist
 **/out

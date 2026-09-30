@@ -98,6 +98,15 @@ jobs:
       # fakes, then the same in workerd against a Worker at the outbound seam.
       # The Cloudflare app's own workerd and integration suites are minutes
       # each and belong to `main.yml`.
+      # The container image runs Node 24, and one Computer host test loads its
+      # modules under Node the way the image lays them out.
+      - name: Set up Node.js
+        if: steps.scope.outputs.slow-tier != 'false'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+
       - name: Test Computer host
         if: steps.scope.outputs.slow-tier != 'false'
         run: bun run --filter @frockbot/computer-host test
