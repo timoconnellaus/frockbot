@@ -3,7 +3,7 @@ import { useSetup } from "../state.ts";
 import { microsToDollars } from "../model.ts";
 import { PageHead, Pill, Soon } from "../ui.tsx";
 
-type Host = "frockbot" | "sprites" | "server" | "mac";
+type Host = "frockbot" | "fly" | "server" | "mac";
 
 const HOSTS: { id: Host; name: string; detail: string }[] = [
   {
@@ -13,8 +13,8 @@ const HOSTS: { id: Host; name: string; detail: string }[] = [
       "A cloud Linux desktop we run. Always on, paid from credit while it works.",
   },
   {
-    id: "sprites",
-    name: "Your Sprites",
+    id: "fly",
+    name: "Your Fly.io",
     detail: "The same computer on your own Fly.io account.",
   },
   {
@@ -64,7 +64,7 @@ function Steps({ host }: { host: Host }) {
         </div>
       </div>
     );
-  if (host === "sprites")
+  if (host === "fly")
     return (
       <div class="stack-8">
         <h3 class="h3">Connect your Fly.io account</h3>

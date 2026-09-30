@@ -233,7 +233,7 @@ export function AccountsPage() {
         <div class="card rows">
           <ComingRow
             name="Fly.io"
-            detail="For Your Sprites"
+            detail="For a computer on your own Fly.io account"
             uses="Not used: your computer is FrockBot’s"
           />
           <ComingRow
