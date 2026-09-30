@@ -10,7 +10,11 @@ import type {
   PluginFitJudgeV1,
   PluginFitVerdictV1,
 } from "../plugins/authoring-check.js";
-import { hostedJevClientV1, JEV_TURN_BUDGET_V1 } from "./jev.js";
+import {
+  hostedJevClientV1,
+  JEV_TURN_BUDGET_V1,
+  type HostedJevEnvV1,
+} from "./jev.js";
 import {
   RESPONSE_REVIEW_EVAL_BUDGET_V1,
   RESPONSE_REVIEW_MODEL_V1,
@@ -168,7 +172,7 @@ export function createJevPluginFitJudgeV1(options: {
 }
 
 export function createHostedPluginFitJudgeV1(
-  env: Record<string, string | undefined>,
+  env: HostedJevEnvV1,
   fetch?: Fetch,
 ): PluginFitJudgeV1 | undefined {
   const client = hostedJevClientV1(env, fetch);

@@ -467,14 +467,6 @@ export const HUMAN_SECRETS_V1: readonly HumanSecretV1[] = [
     enables: "the read-only /api/debug operator surface",
     workers: ["app"],
   },
-  {
-    name: "JEV_API_KEY",
-    enables:
-      "Turn supervision: without it no Bot runs a Turn, because every Turn is supervised",
-    where: "https://typesafe.ai — an API key for Jev",
-    required: true,
-    workers: ["app"],
-  },
 ];
 
 /**

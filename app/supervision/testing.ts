@@ -1,4 +1,5 @@
-// A stand-in for Jev's HTTP API, for harnesses that run whole Turns.
+// A stand-in for Jev, for harnesses that run whole Turns: over HTTP as
+// TypeSafe's API, or as Workers AI's `run("typesafe/jev", input)`.
 //
 // It answers Turn supervision and nothing else. Every answer is the safe
 // reading: a choice picks its first option, which every supervision question
@@ -135,4 +136,25 @@ export async function fakeJevFetchV1(request: Request): Promise<Response> {
     );
   }
   return Response.json(fakeJevAnswersV1(body));
+}
+
+/** Jev's model id on Workers AI, written out for the same reason as above. */
+const WORKERS_AI_JEV_MODEL = "typesafe/jev";
+
+/**
+ * Whether an `AI.run` call is Jev, and its answer: a fake `AI` binding
+ * answers Jev with this and everything else as it did.
+ */
+export function fakeWorkersAiJevRunV1(
+  model: string,
+  input: unknown,
+): JsonRecord | undefined {
+  if (model !== WORKERS_AI_JEV_MODEL) return undefined;
+  if (isRecord(input) && "model" in input) {
+    throw new Error("Workers AI refuses `model` in Jev's input");
+  }
+  if (!isSupervisionBodyV1(input)) {
+    throw new Error("The Jev fake answers Turn supervision only");
+  }
+  return { ...fakeJevAnswersV1(input), model: "jev-1.13.0" };
 }

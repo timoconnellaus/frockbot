@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { TypeSafeClient } from "@typesafe-ai/sdk";
+import { requiredEvalJevClientV1 } from "./jev-client.js";
 import type { PluginFitEvidenceV1 } from "../plugins/authoring-check.js";
 import {
   composePluginFitV1,
@@ -135,21 +135,8 @@ export default definePlugin({ tools: [
   },
 ];
 
-const apiKey = (
-  process.env.JEV_API_KEY ??
-  process.env.TYPESAFE_API_KEY ??
-  ""
-).trim();
-if (!apiKey) {
-  console.error("Set JEV_API_KEY in the main checkout's .dev.vars");
-  process.exit(2);
-}
-const client = new TypeSafeClient({
-  apiKey,
+const client = requiredEvalJevClientV1(process.env, {
   defaultModel: RESPONSE_REVIEW_MODEL_V1,
-  retry: { maxRetries: 0 },
-  timeout: 30_000,
-  logLevel: "off",
 });
 const cases = [];
 for (const fixture of fixtures) {

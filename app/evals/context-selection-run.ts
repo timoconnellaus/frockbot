@@ -1,23 +1,8 @@
-import { TypeSafeClient } from "@typesafe-ai/sdk";
+import { requiredEvalJevClientV1 } from "./jev-client.js";
 import { contextFixturesV1, runContextCaseV1 } from "./context-selection.js";
 
-const apiKey = (
-  process.env.JEV_API_KEY ??
-  process.env.TYPESAFE_API_KEY ??
-  ""
-).trim();
-if (!apiKey) {
-  console.error(
-    "Set JEV_API_KEY, or TYPESAFE_API_KEY, in the main checkout's .dev.vars",
-  );
-  process.exit(2);
-}
-const client = new TypeSafeClient({
-  apiKey,
+const client = requiredEvalJevClientV1(process.env, {
   defaultModel: "jev-1.13.0",
-  retry: { maxRetries: 0 },
-  timeout: 30_000,
-  logLevel: "off",
 });
 let passed = 0;
 for (const fixture of contextFixturesV1) {

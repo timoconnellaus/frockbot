@@ -13,9 +13,9 @@ import type { JevMeterV1 } from "../billing/jev.js";
 import { RESPONSE_REVIEW_MODEL_V1 } from "./response-review.js";
 
 // Jev for the Computer's terminal, reached at `jev.internal`. The request is a
-// System One body the command wrote; the platform's key answers it, pinned to
-// the platform's model, and the account pays for the input tokens Jev counts.
-// The key never reaches the Computer.
+// System One body the command wrote; the platform's Jev on Workers AI answers
+// it, and the account pays for the input tokens Jev counts. The Computer holds
+// no Jev credential.
 
 /** Largest body a command may send: a page's worth of state and its questions. */
 export const JEV_EGRESS_BODY_MAX_BYTES_V1 = 65_536;

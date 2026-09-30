@@ -1,5 +1,5 @@
 import { choice, type JsonValue, type TypeSafeClient } from "@typesafe-ai/sdk";
-import { hostedJevClientV1 } from "./jev.js";
+import { hostedJevClientV1, type HostedJevEnvV1 } from "./jev.js";
 import { RESPONSE_REVIEW_MODEL_V1 } from "./response-review.js";
 
 // What an email the person sent their Bot is for. Only the owner's own
@@ -85,7 +85,7 @@ export function createJevEmailTriageJudgeV1(
 }
 
 export function createHostedEmailTriageJudgeV1(
-  env: Record<string, string | undefined>,
+  env: HostedJevEnvV1,
 ): EmailTriageJudgeV1 | undefined {
   const client = hostedJevClientV1(env);
   return client ? createJevEmailTriageJudgeV1(client) : undefined;

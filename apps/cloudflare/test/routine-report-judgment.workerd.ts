@@ -29,7 +29,7 @@ type Jev = { worth: number; urgency: number } | { status: number };
 // The production client, with Jev's answers scripted behind its fetch.
 function scriptedJev(answer: Jev, calls: unknown[]) {
   return hostedJevClientV1(
-    { JEV_API_KEY: "workerd-jev-key" },
+    { JEV_BASE_URL: "https://api.typesafe.ai" },
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = new Request(input, init);
       const body = (await request.json()) as {

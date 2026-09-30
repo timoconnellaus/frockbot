@@ -701,11 +701,11 @@ export async function agentRuntime(
                 },
               };
             })(),
-            // Jev for the terminal, answered with the platform's key and
+            // Jev for the terminal, answered on the platform's Workers AI and
             // charged to the account the Turn bills, where it bills.
             ...(() => {
               const client = hostedJevClientV1({
-                JEV_API_KEY: state.env.JEV_API_KEY,
+                AI: state.env.AI,
                 JEV_BASE_URL: state.env.JEV_BASE_URL,
               });
               if (!client) return {};

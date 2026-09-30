@@ -57,8 +57,10 @@ export interface GroupChatEnv {
   BOT_STATES: DurableObjectNamespace;
   USER_CONFIGURATIONS: DurableObjectNamespace;
   GROUP_CHATS: DurableObjectNamespace;
-  /** Jev, who judges who answers each message. Absent, nobody extra is asked. */
-  JEV_API_KEY?: string;
+  /** Workers AI, where Jev judges who answers each message. Absent, nobody extra is asked. */
+  AI?: unknown;
+  /** A stand-in for Jev's API; only a test harness names one. */
+  JEV_BASE_URL?: string;
 }
 
 /** How long one judgment may take before the group goes on without it. */
@@ -93,7 +95,8 @@ export class GroupChat extends DurableObject<GroupChatEnv> {
   /** Jev when this deployment has it; the unavailable judge otherwise. */
   private judge(): GroupReplyJudgeV1 {
     this.judgeInstance ??= createHostedGroupReplyJudgeV1({
-      JEV_API_KEY: this.env.JEV_API_KEY,
+      AI: this.env.AI,
+      JEV_BASE_URL: this.env.JEV_BASE_URL,
     });
     return this.judgeInstance;
   }

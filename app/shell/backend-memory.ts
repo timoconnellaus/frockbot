@@ -83,7 +83,7 @@ export function createBotMemoryHost(
   if (!files) return undefined;
   const owner = { userId: identity.userId, botId: identity.botId };
   const group = groupIdOfSessionV1(turn.sessionId);
-  const jev = hostedJevClientV1(env as Record<string, string | undefined>);
+  const jev = hostedJevClientV1(env);
   return {
     owner,
     store: new MemoryStore({

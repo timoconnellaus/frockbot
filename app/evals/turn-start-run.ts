@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
+import { EVAL_JEV_SETUP_HINT_V1, evalJevClientV1 } from "./jev-client.js";
 import { mkdir, writeFile } from "node:fs/promises";
-import { TypeSafeClient } from "@typesafe-ai/sdk";
 import { turnStartFixturesV1 } from "./turn-start.fixtures.js";
 import { gradeTurnStartV1, turnStartReportCaseV1 } from "./turn-start.js";
 import { describeFailureV1 } from "./failure.js";
@@ -17,30 +17,21 @@ import {
 /** Configuration the eval cannot run without. Reported, never graded. */
 class TurnStartSetupError extends Error {}
 
-/**
- * Production names the credential `JEV_API_KEY`. `TYPESAFE_API_KEY` remains a
- * local alias. The key is passed explicitly and never printed.
- */
 function turnStartClientV1(env: Record<string, string | undefined>) {
-  const apiKey = (env.JEV_API_KEY ?? env.TYPESAFE_API_KEY ?? "").trim();
-  if (!apiKey)
-    throw new TurnStartSetupError(
-      "Set JEV_API_KEY, or TYPESAFE_API_KEY, in the main checkout's .dev.vars",
-    );
+  let client;
   try {
-    return new TypeSafeClient({
-      apiKey,
+    client = evalJevClientV1(env, {
       defaultModel: TURN_START_MODEL_V1,
       retry: TURN_START_RETRY_V1,
       timeout: TURN_START_ATTEMPT_TIMEOUT_MS_V1,
-      // `debug` logs request bodies, which are conversation evidence.
-      logLevel: "off",
     });
   } catch (error) {
     throw new TurnStartSetupError(
       `TypeSafe client setup failed: ${describeFailureV1(error).message}`,
     );
   }
+  if (!client) throw new TurnStartSetupError(EVAL_JEV_SETUP_HINT_V1);
+  return client;
 }
 
 async function runTurnStartEvalV1() {

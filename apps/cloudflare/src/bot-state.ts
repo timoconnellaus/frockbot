@@ -1187,9 +1187,7 @@ export class BotState
         : {}),
       ...(this.backendEnv.BILLING ? { billing: this.backendEnv.BILLING } : {}),
     });
-    const jev = hostedJevClientV1(
-      this.backendEnv as unknown as Record<string, string | undefined>,
-    );
+    const jev = hostedJevClientV1(this.backendEnv);
     await drainDurableMemoryV1(this.memoryEngine(), {
       ...(this.env.MEMORY_INDEX
         ? { vectors: this.env.MEMORY_INDEX as MemoryVectorIndex }

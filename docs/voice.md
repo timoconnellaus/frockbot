@@ -257,7 +257,7 @@ capture, booked against the account's own voice object before Groq is asked
 (400 per UTC day, never refunded, and deliberately not part of the cap that
 decides whether a voice call may go on), plus one Jev call when the cheap
 checks pass. `VOICE_DICTATION_CLEANUP_MODEL` pins Groq; unset is
-`groq/llama-3.1-8b-instant`. The review uses the deployment's `JEV_API_KEY`.
+`groq/llama-3.1-8b-instant`. The review uses the deployment's Jev, on the `AI` binding.
 
 On the client, `cleaned` is applied through the same `DictationDraftRange`
 that every segment goes through, which is what makes it safe rather than
@@ -1169,7 +1169,6 @@ anywhere.
 | `GEMINI_API_KEY`                | Worker secret     | yes      | The continuous voice session: one Gemini Live socket per call, ears, words and voice together. Absent: starting a session is refused.              |
 | `VOICE_ASSISTANT_MODEL`         | Worker var        | optional | Pins the gateway model the end-of-call memory update is asked; the platform's Auto route when unset. The call has no chat model.                   |
 | `VOICE_DICTATION_CLEANUP_MODEL` | Worker var        | optional | The model that tidies a dictated transcript. Unset is `groq/llama-3.1-8b-instant`; no `AI` binding means no tidying and the raw transcript stands. |
-| `JEV_API_KEY`                   | Worker secret     | yes      | Reviews a Groq tidy before it replaces the draft; a failed call keeps the raw transcript. Required because every Turn is supervised by it.         |
 | `VOICE_DICTATION_UPSTREAM_URL`  | test harness only | —        | Points dictation at a local fake; never set in production.                                                                                         |
 | `VOICE_ASSISTANT_UPSTREAM_URL`  | test harness only | —        | Points the voice session at a local fake; never set in production.                                                                                 |
 

@@ -189,9 +189,7 @@ export async function createBotSkillsHost(
         pluginSkills,
       }
     : await botSkillGatesV1(state, identity, features);
-  const jev = hostedJevClientV1(
-    state.env as unknown as Record<string, string | undefined>,
-  );
+  const jev = hostedJevClientV1(state.env);
   return {
     owner: { userId: identity.userId, botId: identity.botId },
     reads: files,

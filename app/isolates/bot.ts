@@ -808,7 +808,7 @@ export async function isolateJevDecide(
     return { status: "unavailable", reason: "Jev is not granted" };
   }
   const client = hostedJevClientV1({
-    JEV_API_KEY: state.env.JEV_API_KEY,
+    AI: state.env.AI,
     JEV_BASE_URL: state.env.JEV_BASE_URL,
   });
   if (!client) return { status: "unavailable", reason: "Jev is unavailable" };

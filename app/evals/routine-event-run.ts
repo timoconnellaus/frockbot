@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
+import { EVAL_JEV_SETUP_HINT_V1, evalJevClientV1 } from "./jev-client.js";
 import { mkdir, writeFile } from "node:fs/promises";
-import { TypeSafeClient } from "@typesafe-ai/sdk";
 import { routineEventFixturesV1 } from "./routine-event.fixtures.js";
 import {
   describeRoutineEventFailureV1,
@@ -16,24 +16,20 @@ import {
 class RoutineEventSetupError extends Error {}
 
 function routineEventClientV1(env: Record<string, string | undefined>) {
-  const apiKey = (env.JEV_API_KEY ?? env.TYPESAFE_API_KEY ?? "").trim();
-  if (!apiKey)
-    throw new RoutineEventSetupError(
-      "Set JEV_API_KEY, or TYPESAFE_API_KEY, in the main checkout's .dev.vars",
-    );
+  let client;
   try {
-    return new TypeSafeClient({
-      apiKey,
+    client = evalJevClientV1(env, {
       defaultModel: ROUTINE_EVENT_MODEL_V1,
       retry: ROUTINE_EVENT_RETRY_V1,
       timeout: ROUTINE_EVENT_ATTEMPT_TIMEOUT_MS_V1,
-      logLevel: "off",
     });
   } catch (error) {
     throw new RoutineEventSetupError(
       `TypeSafe client setup failed: ${describeRoutineEventFailureV1(error).message}`,
     );
   }
+  if (!client) throw new RoutineEventSetupError(EVAL_JEV_SETUP_HINT_V1);
+  return client;
 }
 
 async function runRoutineEventEvalV1() {

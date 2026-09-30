@@ -804,7 +804,6 @@ describe("a Plugin's Jev decision", () => {
   const recorded: unknown[] = [];
   const withJev = (target: ShellBotStateV1) => {
     (target as unknown as { env: Record<string, unknown> }).env = {
-      JEV_API_KEY: "k",
       JEV_BASE_URL: "http://jev.test",
     };
     // The Turn's log, where the call is itemised under the Plugin.
@@ -912,7 +911,7 @@ describe("a Plugin's Jev decision", () => {
       env: Record<string, unknown>;
       ctx: { storage: MemoryStorage };
     };
-    target.env = { JEV_API_KEY: "k", JEV_BASE_URL: "http://jev.test" };
+    target.env = { JEV_BASE_URL: "http://jev.test" };
     target.ctx = { storage: new MemoryStorage() };
     const bot = target as unknown as ShellBotStateV1;
     const outcome = await withFakeJev([], () =>

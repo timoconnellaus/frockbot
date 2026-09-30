@@ -1090,7 +1090,6 @@ function braveSearchStub(request: Request, url: URL): Response {
 
 /** Jev's API. Turn supervision is required, so every Turn here reaches it. */
 export const JEV_STUB_ORIGIN = "https://api.typesafe.ai";
-export const JEV_TEST_API_KEY = "workerd-jev-key";
 
 export async function ollamaCloudStub(request: Request): Promise<Response> {
   const url = new URL(request.url);
