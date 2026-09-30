@@ -89,6 +89,7 @@ const FIXTURE_FILES: Record<DeployableWorkerV1, string> = {
   appletBuild: "applet-build.wrangler.jsonc",
   marketing: "marketing.wrangler.jsonc",
   adminPortal: "admin-portal.wrangler.jsonc",
+  pushRelay: "push-relay.wrangler.jsonc",
 };
 
 /**

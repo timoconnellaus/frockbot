@@ -56,8 +56,12 @@ import {
 } from "@frockbot/app/admin/shared";
 import {
   decodePushRegistration,
+  DEFAULT_PUSH_RELAY_URL,
   registerPushDevice,
   deliverPush,
+  sendFcm,
+  sendRelay,
+  type PushRelayAddressV1,
   type PushUpdate,
 } from "./push.js";
 import { decodeThemeDocumentV1, decodeBotLookV1 } from "@frockbot/core/theme";
@@ -375,6 +379,8 @@ interface UserConfigurationEnv
   /** Product events (app/analytics/events.ts); absent writes none. */
   ANALYTICS?: AnalyticsEngineDataset;
   FCM_SERVICE_ACCOUNT?: string;
+  /** The push relay a deployment without FCM credentials sends through. */
+  PUSH_RELAY_URL?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
   /** Where every Bot's email address is, and what it sends from. */
   EMAIL_DOMAIN?: string;
@@ -946,7 +952,20 @@ export class UserConfiguration
           : { platform: registration.platform }),
       });
     }
-    return { ok: true };
+    // A deployment with no FCM credentials of its own cannot reach a token,
+    // so the app registers with the relay and hands this deployment a handle.
+    return this.env.FCM_SERVICE_ACCOUNT
+      ? { ok: true }
+      : { ok: true, delivery: "relay" as const };
+  }
+
+  private relaySender() {
+    const relayUrl = this.env.PUSH_RELAY_URL || DEFAULT_PUSH_RELAY_URL;
+    return (
+      address: PushRelayAddressV1,
+      data: Record<string, string>,
+      notify: boolean,
+    ) => sendRelay(relayUrl, address, data, notify);
   }
 
   async deliverPush(input: { userId: string; update: PushUpdate }) {
@@ -963,6 +982,8 @@ export class UserConfiguration
       input.userId,
       input.update,
       this.env.FCM_SERVICE_ACCOUNT,
+      sendFcm,
+      this.relaySender(),
     );
   }
 
@@ -995,6 +1016,8 @@ export class UserConfiguration
         notify: true,
       },
       this.env.FCM_SERVICE_ACCOUNT,
+      sendFcm,
+      this.relaySender(),
     );
     return { schemaVersion: 1 } as const;
   }

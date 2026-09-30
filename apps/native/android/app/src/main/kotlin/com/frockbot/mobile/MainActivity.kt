@@ -50,6 +50,7 @@ class MainActivity : FlutterActivity() {
                     PushNotifications.badge(this, bots, silenced, suppressed)
                     result.success(null)
                 }
+                "relayKey" -> result.success(PushNotifications.relayKey(this))
                 "logout" -> { PushNotifications.account(this,null); result.success(null) }
                 else -> result.notImplemented()
             }

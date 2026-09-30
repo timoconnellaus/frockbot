@@ -1,0 +1,19 @@
+// The push relay: hosted-only, at `push.frockbot.com`. No deployment identity:
+// the account, the Worker name and the hostname belong to
+// `deployments/hosted.json`, and `bun run deployment:config` joins the two into
+// the config `wrangler deploy -c` takes (ADR 0028).
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "frockbot-push-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-27",
+  // The relay's one door is its hostname.
+  "workers_dev": false,
+  "durable_objects": {
+    "bindings": [{ "name": "RELAY", "class_name": "RelayObject" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RelayObject"] }],
+  "observability": {
+    "enabled": true,
+  },
+}

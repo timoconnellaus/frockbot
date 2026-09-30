@@ -58,6 +58,9 @@ export const DEPLOYMENT_PROFILE_SCHEMA_V1 = {
         adminPortal: {
           $ref: "#/$defs/worker",
         },
+        pushRelay: {
+          $ref: "#/$defs/worker",
+        },
       },
     },
     images: {
