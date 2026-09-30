@@ -123,6 +123,10 @@ The flip served the Flutter web build at `/` and took the Vue client out in the 
 
 A second deployment profile anyone installs into their own Cloudflare account with `bun run setup`: Cloudflare Access sign-in, no billing, no release ceremony, the Computer included. The hosted deployment is unchanged. The decisions and the staged plan are [ADR 0028](adr/0028-open-deployment.md).
 
+## Planned: enthusiast setup
+
+Choose where the Computer runs (FrockBot's, your own Sprites, your own server, or a VM on your Mac), choose how each model role is connected on one AI setup screen, and a setup chooser on the marketing site. Proposed, with open questions: [`enthusiast-setup-plan.md`](enthusiast-setup-plan.md).
+
 ## Startup and Memory implementation handoff
 
 The walkthrough decisions below now have [prescriptive implementation packets](startup-implementation/README.md), written for agents that do not have this conversation. Use the task order, prerequisites, source entry points, record shapes, transaction/retry instructions and acceptance cases there when assigning work. The packets distinguish agreed behavior, selected engineering defaults and the remaining product decisions. Preparing this handoff does not implement the changes or authorize a release.
