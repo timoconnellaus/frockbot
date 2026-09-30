@@ -237,6 +237,12 @@ Modelled on how Cloudflare OS deploys ([repo](https://github.com/cloudflare/clou
 - **Updates** are offered by the deploy flow: "A new release is available", one click to deploy it over the same Workers.
 - **The repository stays the advanced path:** `bun run setup` for a custom domain, code changes or reusing existing resources, with a checklist for moving an install made by the Deploy button into it.
 
+### One person first, then several
+
+- **A self-hosted install is single-user at first.** The person who deploys it is its only user; the Access policy admits them alone, and every choice in AI setup is theirs.
+- **Multi-user comes later, in two layers.** An admin sets the install's defaults: the computer, a provider and model for each job, search and connected apps. For each job or service the admin marks the default **fixed** or **open**; people may override only what is open. The admin's connected accounts serve everyone, and a person adds their own keys only where overrides are open.
+- **Where the line sits.** Several people on one install with the admin's defaults is part of the MIT core. Fixed-or-open locks, SSO and SCIM, audit and per-person policy are FrockBot for Teams ([§7](#7-enterprise)).
+
 ### Cuts
 
 1. **Jev on Workers AI** (shared with §4 cut 2).
