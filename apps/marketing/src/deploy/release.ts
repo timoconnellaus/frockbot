@@ -145,15 +145,26 @@ export async function stageBundleV1(
     );
   }
   const sink = (options.digestSink ?? workersDigestSinkV1)();
-  const [forDigest, forFiles] = response.body.tee();
-  const digesting = forDigest.pipeTo(sink.writable);
+  const digestWriter = sink.writable.getWriter();
+  // Each chunk is hashed as it passes, rather than teed: a tee lets the fast
+  // side run ahead and buffers the whole archive for the slow one.
+  const hashed = response.body.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array<ArrayBuffer>>({
+      async transform(chunk, controller) {
+        await digestWriter.write(chunk);
+        controller.enqueue(chunk as Uint8Array<ArrayBuffer>);
+      },
+      async flush() {
+        await digestWriter.close();
+      },
+    }),
+  );
   await readTarV1(
-    forFiles.pipeThrough(new DecompressionStream("gzip")),
+    hashed.pipeThrough(new DecompressionStream("gzip")),
     async (path, bytes) => {
       await bucket.put(stagedKey(manifest.version, path), bytes);
     },
   );
-  await digesting;
   const digest = hex(await sink.digest);
   if (digest !== manifest.archive.sha256) {
     throw new Error(
@@ -200,6 +211,13 @@ class ByteReaderV1 {
     this.reader = stream.getReader();
   }
 
+  /** Reads to the end, so whatever the stream passes through sees all of it. */
+  async drain(): Promise<void> {
+    while (!(await this.reader.read()).done) {
+      // Discarded: the padding after the end-of-archive blocks.
+    }
+  }
+
   async read(length: number): Promise<Uint8Array> {
     while (this.buffered < length) {
       const { done, value } = await this.reader.read();
@@ -242,7 +260,10 @@ export async function readTarV1(
   let longName: string | undefined;
   for (;;) {
     const header = await reader.read(512);
-    if (header.length < 512 || header.every((b) => b === 0)) return;
+    if (header.length < 512 || header.every((b) => b === 0)) {
+      await reader.drain();
+      return;
+    }
     const size = Number.parseInt(field(header, 124, 12).trim() || "0", 8);
     const type = String.fromCharCode(header[156] ?? 0);
     const body = await reader.read(size);
