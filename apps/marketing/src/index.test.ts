@@ -238,6 +238,7 @@ describe("marketing worker", () => {
       (match) => match[1]!,
     );
     expect(zones).toEqual([
+      "run",
       "why",
       "teaser",
       "how",
@@ -697,6 +698,55 @@ describe("hero downloads", () => {
     expect(declarations(".store-badge")["white-space"]).toBe("nowrap");
     expect(declarations(".hero-actions")["flex-wrap"]).toBe("wrap");
     expect(declarations(".store-badge svg").fill).toBe("currentColor");
+  });
+});
+
+describe("hosted or self-hosted", () => {
+  test("follows the hero, and the hero note links to it", async () => {
+    const homepage = await publicFile("index.html");
+    const heroEnd = homepage.indexOf(
+      "</section>",
+      homepage.indexOf('<section class="hero"'),
+    );
+    const next = homepage.indexOf("<section", heroEnd);
+    expect(homepage.slice(next, homepage.indexOf(">", next))).toContain(
+      'id="run-your-own"',
+    );
+    const note = homepage.slice(
+      homepage.indexOf('<p class="hero-note">'),
+      homepage.indexOf("</p>", homepage.indexOf('<p class="hero-note">')),
+    );
+    expect(note).toContain('href="#run-your-own"');
+    expect(note.replace(/<[^>]+>/g, "").replace(/\s+/g, " ")).toContain(
+      "Early access · 7-day trial · From US$20 a month · Open source, or run your own →",
+    );
+  });
+
+  test("starts the trial where the hero does and never links the deploy page yet", async () => {
+    const homepage = await publicFile("index.html");
+    const heroButton = homepage.match(
+      /<div class="hero-actions">\s*<a class="button" href="([^"]+)"/,
+    )?.[1];
+    const start = homepage.indexOf('id="run-your-own"');
+    const section = homepage.slice(
+      start,
+      homepage.indexOf("</section>", start),
+    );
+    const hrefs = [...section.matchAll(/href="([^"]+)"/g)].map(
+      (match) => match[1],
+    );
+    expect(heroButton).toBeDefined();
+    expect(section).toMatch(
+      new RegExp(`<a class="button" href="${heroButton}"\\s*>Start free trial`),
+    );
+    expect(hrefs.some((href) => href?.includes("/deploy"))).toBe(false);
+    expect(section).toMatch(
+      /<span class="button run-own-soon"\s*>Deploy to Cloudflare<\/span/,
+    );
+    expect(section).toContain("Coming soon");
+    for (const name of ["sunny", "guardian"]) {
+      expect(section).toContain(`src="/assets/characters/${name}.png"`);
+    }
   });
 });
 
