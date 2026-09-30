@@ -247,6 +247,55 @@ describe("release leg", () => {
     expect(report.detail?.join(" ")).toContain("Deploy Worker");
   });
 
+  test("a marketing-only release has shipped once marketing deployed", async () => {
+    const workflow = readFileSync(
+      new URL("../.github/workflows/release.yml", import.meta.url),
+      "utf8",
+    );
+    const nameOf = (id: string) =>
+      workflow.match(new RegExp(`^  ${id}:\\n    name: (.+)$`, "m"))?.[1];
+    const jobs = (marketing: string) => [
+      { name: nameOf("scope"), conclusion: "success" },
+      { name: nameOf("verify"), conclusion: "skipped" },
+      { name: nameOf("deploy-marketing"), conclusion: marketing },
+      { name: nameOf("deploy-backend"), conclusion: "skipped" },
+    ];
+    for (const job of jobs("success")) expect(job.name).toBeDefined();
+
+    const shipped = await releaseReport(
+      fakeGitHub({ runs, run: { jobs: jobs("success") } }),
+      "v0.2.0",
+    );
+    expect(shipped.status).toBe("passed");
+
+    const notDeployed = await releaseReport(
+      fakeGitHub({ runs, run: { jobs: jobs("skipped") } }),
+      "v0.2.0",
+    );
+    expect(notDeployed.status).toBe("failed");
+  });
+
+  test("a skipped backend deploy is not a pass when verify ran", async () => {
+    const report = await releaseReport(
+      fakeGitHub({
+        runs,
+        run: {
+          jobs: [
+            { name: "Scope", conclusion: "success" },
+            { name: "Verify the release tag", conclusion: "success" },
+            {
+              name: "Deploy marketing site and admin portal",
+              conclusion: "success",
+            },
+            { name: "Deploy FrockBot app", conclusion: "skipped" },
+          ],
+        },
+      }),
+      "v0.2.0",
+    );
+    expect(report.status).toBe("failed");
+  });
+
   test("a completed run that never deployed is a failure, not a pass", async () => {
     const report = await releaseReport(
       fakeGitHub({

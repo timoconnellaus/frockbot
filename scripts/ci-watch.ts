@@ -61,6 +61,14 @@ const PRODUCTION_JOBS = [
   "Deploy FrockBot app",
 ];
 
+/**
+ * A tag whose changes touch only the marketing site and admin portal skips
+ * `release.yml`'s `verify`, and with it everything but the marketing deploy.
+ * `Scope` succeeding and `verify` skipped is that decision; `verify` is never
+ * skipped otherwise, because it runs even when `Scope` failed.
+ */
+const MARKETING_ONLY_JOBS = ["Deploy marketing site and admin portal"];
+
 function record(value: unknown, what: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`${what} is not an object: ${JSON.stringify(value)}`);
@@ -201,7 +209,7 @@ export async function releaseReport(
   tag: string,
 ): Promise<WatchReport> {
   const mac = tag.startsWith("mac-v");
-  const requiredJobs = mac
+  let requiredJobs = mac
     ? ["Qualify Mac desktop", "Create Mac release draft"]
     : PRODUCTION_JOBS;
   const runs = list(
@@ -282,6 +290,13 @@ export async function releaseReport(
   // A completed, unfailed run still has to have deployed. A release that
   // published packages and never ran the deploy jobs looks like a success
   // everywhere except production.
+  const conclusionOf = (name: string) =>
+    text(jobs.find((job) => text(job.name) === name)?.conclusion).toUpperCase();
+  const marketingOnly =
+    !mac &&
+    conclusionOf("Scope") === "SUCCESS" &&
+    conclusionOf("Verify the release tag") === "SKIPPED";
+  if (marketingOnly) requiredJobs = MARKETING_ONLY_JOBS;
   const deployed = requiredJobs.filter((name) =>
     jobs.some(
       (job) =>

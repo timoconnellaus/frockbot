@@ -13,6 +13,13 @@ name: Check
 #
 # The `main` ruleset requires a check by each job's exact name: `Check` and
 # `Flutter`.
+#
+# A pull request that touches only the marketing site, the admin portal or
+# documentation keeps the fast tier and skips the rest: the Flutter job and the
+# package runtime suites cannot see those files. The rule is
+# `scripts/ci-change-scope.ts`, measured against the pull request's base. A
+# job skipped by its `if` reports as passing to the ruleset, so `Flutter` stays
+# required.
 
 on:
   pull_request:
@@ -25,8 +32,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  scope:
+    name: Scope
+    # Whether the Flutter job has anything to check.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      slow-tier: ${{ steps.decide.outputs.slow-tier }}
+
+    steps:
+      # The pull request's merge commit, whose first parent is its base, so
+      # `HEAD^1..HEAD` is exactly what merging would change.
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Decide what this pull request obliges
+        id: decide
+        run: bun scripts/ci-change-scope.ts --base HEAD^1
+
   check:
     name: Check
+    # Decides for itself rather than waiting on `scope`: that would put the
+    # scope job in front of the fast tier, and a failed `scope` would skip this
+    # job, which the ruleset reads as passing.
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -34,12 +70,17 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 2
           persist-credentials: false
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.2
+
+      - name: Decide what this pull request obliges
+        id: scope
+        run: bun scripts/ci-change-scope.ts --base HEAD^1
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -58,15 +99,19 @@ jobs:
       # The Cloudflare app's own workerd and integration suites are minutes
       # each and belong to `main.yml`.
       - name: Test Computer host
+        if: steps.scope.outputs.slow-tier != 'false'
         run: bun run --filter @frockbot/computer-host test
 
       - name: Test Computer host runtime
+        if: steps.scope.outputs.slow-tier != 'false'
         run: bun run --filter @frockbot/computer-host test:workerd
 
       - name: Test Plugin build service
+        if: steps.scope.outputs.slow-tier != 'false'
         run: bun run --filter @frockbot/applet-build test
 
       - name: Test Plugin build service runtime
+        if: steps.scope.outputs.slow-tier != 'false'
         run: bun run --filter @frockbot/applet-build test:workerd
 
   # The Flutter client's own analysis and tests. `apps/native` is the phone
@@ -79,6 +124,11 @@ jobs:
   # than after it.
   flutter:
     name: Flutter
+    # Only the word `false` skips it. A `scope` job that failed publishes
+    # nothing, and `!cancelled()` keeps this job from being skipped with it —
+    # a skipped required check would pass.
+    needs: scope
+    if: ${{ !cancelled() && needs.scope.outputs.slow-tier != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
