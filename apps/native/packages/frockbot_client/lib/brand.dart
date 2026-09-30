@@ -119,10 +119,15 @@ class ClientBrand {
   /// default character there.
   final ImageProvider? signInIcon;
 
-  /// Who the person signs in with, as the sign-in page names it ("Continue
-  /// with Google"). The deployment's auth Package decides that, so null says
-  /// only "sign in".
+  /// Who the person signs in with on the deployment the build names, as the
+  /// sign-in page says it ("Continue with Google"). The deployment's auth
+  /// Package decides that, so null — and any other server — says only "sign
+  /// in".
   final String? signInProvider;
+
+  /// What the account switcher calls the deployment the build names
+  /// ("frockbot.com"). Null shows its host, as every other server's is.
+  final String? hostedServiceName;
 
   /// The custom URL scheme the application's Mac and iPhone projects
   /// register, which the server brand's `nativeScheme` names too: a browser
@@ -163,6 +168,7 @@ class ClientBrand {
     required this.accentDeep,
     this.signInIcon,
     this.signInProvider,
+    this.hostedServiceName,
     this.fontFamilies = const [],
     this.releaseChannel,
   });

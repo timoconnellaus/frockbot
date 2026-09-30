@@ -169,6 +169,19 @@ abstract final class SignInIds {
   static const page = 'sign-in';
   static const submit = 'sign-in-submit';
   static const note = 'sign-in-note';
+  static const otherServer = 'sign-in-other-server';
+  static const cancel = 'sign-in-cancel';
+  static const serverAddress = 'sign-in-server-address';
+  static const serverCheck = 'sign-in-server-check';
+}
+
+/// The account switcher: the row at the top of the Bot list, and the sheet
+/// it opens.
+abstract final class AccountIds {
+  static const switcher = 'account-switcher';
+  static const add = 'account-add';
+  static String row(String accountId) => 'account-$accountId';
+  static String signOut(String accountId) => 'account-sign-out-$accountId';
 }
 
 /// Voice: the control that starts it, and the surfaces that are it.

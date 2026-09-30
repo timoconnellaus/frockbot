@@ -51,19 +51,27 @@ class AppBadge {
 
   /// The focused eligible Bot when it has unread messages.
   final Set<String> suppressed;
+
+  /// Unread on the app's other accounts, which the dock and the iPhone icon
+  /// count too. An Android launcher badges from notifications alone, so it
+  /// learns of them when the push relay notifies for them.
+  final int elsewhere;
   const AppBadge({
     this.bots = const {},
     this.silenced = const {},
     this.suppressed = const {},
+    this.elsewhere = 0,
   });
 
   static const empty = AppBadge();
 
-  int get total => bots.entries.fold(
-    0,
-    (sum, entry) =>
-        sum + (suppressed.contains(entry.key) ? 0 : entry.value.count),
-  );
+  int get total =>
+      elsewhere +
+      bots.entries.fold(
+        0,
+        (sum, entry) =>
+            sum + (suppressed.contains(entry.key) ? 0 : entry.value.count),
+      );
 
   /// The dock's text, or null for no badge.
   String? get label {
@@ -83,11 +91,14 @@ class AppBadge {
 
   /// The number an iPhone icon shows, which iOS draws without saturating:
   /// the sum of each counting Bot's best launcher number.
-  int get iconCount => bots.entries.fold(
-    0,
-    (sum, entry) =>
-        sum + (suppressed.contains(entry.key) ? 0 : entry.value.launcherCount),
-  );
+  int get iconCount =>
+      elsewhere +
+      bots.entries.fold(
+        0,
+        (sum, entry) =>
+            sum +
+            (suppressed.contains(entry.key) ? 0 : entry.value.launcherCount),
+      );
 
   @override
   bool operator ==(Object other) =>
@@ -95,7 +106,8 @@ class AppBadge {
       other is AppBadge &&
           mapEquals(bots, other.bots) &&
           setEquals(silenced, other.silenced) &&
-          setEquals(suppressed, other.suppressed);
+          setEquals(suppressed, other.suppressed) &&
+          elsewhere == other.elsewhere;
 
   @override
   int get hashCode => Object.hash(
@@ -104,6 +116,7 @@ class AppBadge {
     ]),
     Object.hashAllUnordered(silenced),
     Object.hashAllUnordered(suppressed),
+    elsewhere,
   );
 }
 
@@ -116,11 +129,13 @@ class AppBadge {
 /// outside both directories is left alone rather than guessed at.
 /// [focusedBotId] is the Bot the shell says is being read. Its positive cloud
 /// count is preserved while its local contribution is suppressed.
+/// [elsewhere] is what the app's other accounts have unread.
 AppBadge appBadgeFor({
   required Map<String, wire.UnreadView> unread,
   required Iterable<String> botIds,
   Set<String> archived = const {},
   required String? focusedBotId,
+  int elsewhere = 0,
 }) {
   final bots = <String, BotBadge>{};
   final silenced = <String>{...archived};
@@ -135,7 +150,12 @@ AppBadge appBadgeFor({
     bots[botId] = BotBadge(view.count, capped: view.capped);
     if (botId == focusedBotId && view.count > 0) suppressed.add(botId);
   }
-  return AppBadge(bots: bots, silenced: silenced, suppressed: suppressed);
+  return AppBadge(
+    bots: bots,
+    silenced: silenced,
+    suppressed: suppressed,
+    elsewhere: elsewhere,
+  );
 }
 
 /// What draws the badge on one platform.

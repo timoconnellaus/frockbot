@@ -82,7 +82,9 @@
           "$ref": "#/$defs/HttpsUrl"
         },
         {
-          "const": "frockbot-dev://native/return/android"
+          "type": "string",
+          "maxLength": 96,
+          "pattern": "^[a-z][a-z0-9+.-]{0,62}://native/return/(android|ios|macos)$"
         }
       ]
     },

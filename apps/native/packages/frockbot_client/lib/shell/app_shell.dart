@@ -9,6 +9,7 @@ library;
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter/services.dart';
 
@@ -115,6 +116,14 @@ class AppShell extends StatefulWidget {
   final ValueNotifier<String?> botLinks;
   final Future<void> Function() onSignOut;
 
+  /// The app's account switcher, which the Bot list places under its header.
+  /// The shell knows nothing of other accounts but this and [elsewhere].
+  final Widget? accountSwitcher;
+
+  /// What the app's other accounts have unread, which the application badge
+  /// counts beside this account's.
+  final ValueListenable<int>? elsewhere;
+
   /// What the Profile page says this program is. The entry hands over the
   /// update controller's answer, which also knows the booted Shorebird patch;
   /// without one the compiled version alone is shown.
@@ -128,6 +137,8 @@ class AppShell extends StatefulWidget {
     required this.botLinks,
     required this.onSignOut,
     this.version = compiledVersion,
+    this.accountSwitcher,
+    this.elsewhere,
   });
 
   static Future<AppVersion> compiledVersion() async => const AppVersion();
@@ -363,6 +374,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     microphone.stopDictation = _stopDictation;
     activity.addListener(_repaint);
     activity.addListener(_reconcileBadge);
+    widget.elsewhere?.addListener(_reconcileBadge);
     widget.sessions.lookChanged = _lookChanged;
     groupDirectory.addListener(_groupsChanged);
     unawaited(groupDirectory.load());
@@ -420,6 +432,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         botIds: [for (final registration in bots) registration.botId.value],
         archived: archived,
         focusedBotId: _focusedBotId,
+        elsewhere: widget.elsewhere?.value ?? 0,
       ),
       authoritative: activity.loaded && directoryLoaded,
     );
@@ -880,7 +893,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _push(
       WhatsNewPage(
         api: widget.api,
-        origin: hostedOrigin,
+        origin: widget.api.origin,
         feed: whatsNew,
         seenId: whatsNewSeenId,
         onSeen: (id) async {
@@ -3062,6 +3075,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     rightPanel: rightPanel,
                     panelTheme: ownLook ? botTheme : null,
                     sidebar: ShellSidebar(
+                      accounts: widget.accountSwitcher,
                       bots: searchableBots,
                       groupChats: _sidebarGroups,
                       activeGroupId: single ? null : selectedGroupId,
@@ -3786,7 +3800,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   @override
   void dispose() {
-    unawaited(deviceHost.stop(widget.userId));
+    unawaited(deviceHost.stop(widget.userId, widget.api.origin));
     unawaited(appBadge.clear());
     push.onFocus = null;
     push.onNotificationsChanged = null;
@@ -3798,6 +3812,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _activityTimer?.cancel();
     activity.removeListener(_repaint);
     activity.removeListener(_reconcileBadge);
+    widget.elsewhere?.removeListener(_reconcileBadge);
     activity.dispose();
     groupDirectory.removeListener(_groupsChanged);
     _closeGroup();

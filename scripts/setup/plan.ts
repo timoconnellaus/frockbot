@@ -504,7 +504,7 @@ export interface AccessApplicationSpecV1 {
 /**
  * The Access applications a simple deployment needs.
  *
- * Two, because Access matches by path prefix and there is no way to say "the
+ * Three, because Access matches by path prefix and there is no way to say "the
  * document and nothing under it". The app's own hostname is protected, which
  * covers the document, the client's assets, `/sign-out` and the whole native
  * sign-in flow; `/api` is then bypassed so it reaches the Worker, which is what
@@ -528,6 +528,12 @@ export function accessApplicationsV1(
       destination: `${appHostname}/api`,
       decision: "bypass",
       why: "Reaches the Worker, which authenticates every one of these itself — from the Access cookie a browser sends, or the bearer token a phone exchanged. Without this, no native client could sign in.",
+    },
+    {
+      name: `${prefix} discovery`,
+      destination: `${appHostname}/.well-known/frockbot.json`,
+      decision: "bypass",
+      why: "The public file an app reads when someone adds this server by its address: the server's name, the app versions it serves and how to sign in. It holds nothing secret.",
     },
   ];
 }

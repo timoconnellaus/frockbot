@@ -8,6 +8,7 @@ import {
   BrandDecodeError,
   brandUserAgentV1,
   decodeBrandV1,
+  nativeAppReturnUriV1,
   nativeReturnSchemeV1,
   type BrandV1,
 } from "./brand.js";
@@ -45,6 +46,12 @@ describe("a brand", () => {
   test("hands a sign-in back on its own scheme", () => {
     expect(nativeReturnSchemeV1(brand, "released")).toBe("walletpal");
     expect(nativeReturnSchemeV1(brand, "development")).toBe("walletpal-dev");
+    expect(nativeAppReturnUriV1(brand, "released", "ios")).toBe(
+      "walletpal://native/return/ios",
+    );
+    expect(nativeAppReturnUriV1(brand, "development", "android")).toBe(
+      "walletpal-dev://native/return/android",
+    );
     for (const nativeScheme of [
       "",
       "WalletPal",

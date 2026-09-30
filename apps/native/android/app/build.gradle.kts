@@ -60,6 +60,9 @@ android {
         applicationId = if (productionIdentity) "com.frockbot.mobile" else "com.frockbot.mobile.dev"
         manifestPlaceholders["appLabel"] = if (productionIdentity) "FrockBot" else "FrockBot (Dev)"
         manifestPlaceholders["cleartext"] = localDevelopment.toString()
+        // The scheme sign-in and Connect return on, for any server: the released
+        // app's, or the development identity's, so neither answers the other's.
+        manifestPlaceholders["nativeScheme"] = if (productionIdentity) "frockbot" else "frockbot-dev"
         // A build that names no deployment claims no App Link. `.invalid` never
         // resolves, so a forgotten define cannot claim another deployment's links;
         // the Dart client refuses such a build outright at its first request.
@@ -86,6 +89,11 @@ android {
             "String",
             "LINK_HOST",
             "\"" + manifestPlaceholders["linkHost"] + "\"",
+        )
+        buildConfigField(
+            "String",
+            "NATIVE_SCHEME",
+            "\"" + manifestPlaceholders["nativeScheme"] + "\"",
         )
     }
 

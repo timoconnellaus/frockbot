@@ -3,7 +3,12 @@ import {
   type WebSearchChoiceInputV1,
   type WebSearchChoiceViewV1,
 } from "@frockbot/app/web/search-choice";
-import type { SettingsFrame } from "@frockbot/core/protocol-schemas";
+import {
+  SUPPORTED_PROTOCOL_MAX,
+  SUPPORTED_PROTOCOL_MIN,
+  type SettingsFrame,
+} from "@frockbot/core/protocol-schemas";
+import { serverDiscoveryV1 } from "./server-discovery.js";
 import type {
   ApprovalDecisionReceiptV1,
   ApprovalListViewV1,
@@ -1194,6 +1199,11 @@ function createTestGateway(
     webPushPublicKey,
     artifacts: { load: () => Promise.resolve("export default {}") },
     auth,
+    serverDiscovery: serverDiscoveryV1({
+      brand: BRAND_V1,
+      nativeSignIn: true,
+      version: "v9.9.9",
+    }),
     admitAccount:
       access?.admitAccount ?? (() => Promise.resolve(activeAccount)),
     ...(access?.adminEmails ? { adminEmails: access.adminEmails } : {}),
@@ -3416,6 +3426,48 @@ test("native compatibility refusal precedes authentication and application routi
   expect(await response.text()).toBe(
     "Update the app to continue using FrockBot.",
   );
+});
+
+test("an app reads what the server is before signing in, whatever protocol it speaks", async () => {
+  const { gateway } = createTestGateway(() => {
+    throw new Error("must not load the application");
+  });
+  const response = await gateway(
+    new Request("https://bot.example/.well-known/frockbot.json", {
+      headers: {
+        "x-frockbot-client": JSON.stringify({
+          schemaVersion: 1,
+          protocolVersion: 99,
+          catalogs: [],
+        }),
+      },
+    }),
+  );
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("public, max-age=300");
+  expect((await response.json()) as unknown).toEqual({
+    schemaVersion: 1,
+    name: "FrockBot",
+    protocol: { min: SUPPORTED_PROTOCOL_MIN, max: SUPPORTED_PROTOCOL_MAX },
+    signIn: { method: "browser-pkce", scheme: "frockbot" },
+    version: "v9.9.9",
+  });
+  const refused = await gateway(
+    new Request("https://bot.example/.well-known/frockbot.json", {
+      method: "POST",
+      body: "{}",
+    }),
+  );
+  expect(refused.status).toBe(405);
+});
+
+test("a deployment with no native door says so", () => {
+  expect(
+    serverDiscoveryV1({ brand: BRAND_V1, nativeSignIn: false }),
+  ).toMatchObject({ signIn: { method: "unavailable" } });
+  expect(
+    serverDiscoveryV1({ brand: BRAND_V1, nativeSignIn: false }),
+  ).not.toHaveProperty("version");
 });
 
 test("Profile settings hold personal details, and no account-wide Plugins list remains", async () => {

@@ -216,10 +216,9 @@ export interface StartConnectionCommandV1 {
   nativeReturnNonce?: string;
   /**
    * The app the person is pressing from, when it is one a hosted flow can
-   * hand back to: the verified link on Android, the custom scheme on a Mac or
-   * an iPhone (`macos-dev` and `ios-dev` for the FrockBot Dev builds, which
-   * have their own scheme). A browser tab names nothing and is told to return
-   * by hand.
+   * hand back to on the app's own scheme (`macos-dev` and `ios-dev` for the
+   * FrockBot Dev builds, which have their own). A browser tab names nothing
+   * and is told to return by hand.
    */
   returnClient?: ConnectionReturnClientV1;
 }

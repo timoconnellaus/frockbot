@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../brand.dart';
@@ -12,23 +13,53 @@ import 'desktop_build.dart';
 import 'ios_build.dart';
 import 'transport.dart';
 
+/// The app signs in to whichever server its account is on, in the browser
+/// with PKCE (RFC 8252), and comes back on its own scheme: a verified link
+/// could only ever name the one deployment a build was made for. On an iPhone
+/// or a Mac the system's authentication session hands the return straight
+/// back; on Android a Custom Tab opens and the return arrives as a link.
 class NativeSignIn implements SignIn {
   final NativeApi api;
   final LocalStore store;
+  final MethodChannel channel;
   bool _exchanging = false;
-  NativeSignIn(this.api, this.store);
+  NativeSignIn(
+    this.api,
+    this.store, {
+    this.channel = const MethodChannel('frockbot/web-auth'),
+  });
 
-  /// A development sign-in comes back on a custom scheme: the local stack's
-  /// origin is plain HTTP on a private address, which no App Link can name.
-  String get returnUri => developmentAuth
-      ? '${clientBrand.nativeScheme}-dev://native/return/android'
-      : '$hostedOrigin/native/return/${Platform.isAndroid
-            ? 'android'
-            : Platform.isIOS
-            ? iosReturnSegmentV1
-            : macosReturnSegmentV1}';
+  /// The scheme this build answers. A development sign-in on the local stack
+  /// comes back on the development scheme its debug manifest registers; an
+  /// Android build asks which identity it was built as, because the released
+  /// app and the development one must not answer each other's returns.
+  Future<String> scheme() async {
+    if (developmentAuth) return '${clientBrand.nativeScheme}-dev';
+    if (Platform.isIOS) return iosSchemeV1;
+    if (Platform.isMacOS) return macosSchemeV1;
+    if (!Platform.isAndroid) return clientBrand.nativeScheme;
+    try {
+      return await channel.invokeMethod<String>('scheme') ??
+          clientBrand.nativeScheme;
+    } on MissingPluginException {
+      return clientBrand.nativeScheme;
+    }
+  }
+
+  static String get _platform => Platform.isAndroid
+      ? 'android'
+      : Platform.isIOS
+      ? 'ios'
+      : 'macos';
+
+  /// Where the server sends this build back. The host is always `native`, so
+  /// the one registration covers every server the app signs in to.
+  Future<String> returnUri() async =>
+      '${await scheme()}://native/return/$_platform';
+
   @override
-  Future<void> start() async {
+  Future<bool?> start() async {
+    final returnUri = await this.returnUri();
     final verifier = '${randomId()}${randomId()}';
     final state = '${randomId()}${randomId()}';
     final command = wire.AuthStartCommand.fromJson({
@@ -61,58 +92,60 @@ class NativeSignIn implements SignIn {
       ),
     );
     final uri = Uri.parse(response.authorizationUrl.value as String);
-    if (uri.origin != hostedOrigin || uri.path != '/native/authorize') {
+    if (uri.origin != api.origin || uri.path != '/native/authorize') {
       throw const RequestFailure('Couldn’t open sign-in. Please try again.');
     }
     // The local smoke completes the browser leg itself from this line rather
     // than driving Chrome's first-run screens on a fresh emulator.
     if (developmentAuth) debugPrint('FROCKBOT_DEV_AUTHORIZE $uri');
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+    if (Platform.isIOS || Platform.isMacOS) {
+      final String? link;
+      try {
+        link = await channel.invokeMethod<String>('authenticate', {
+          'url': uri.toString(),
+          'scheme': await scheme(),
+        });
+      } on PlatformException {
+        throw const RequestFailure('Couldn’t open sign-in. Please try again.');
+      }
+      if (link == null) return false;
+      if (!await accept(Uri.parse(link))) {
+        throw const RequestFailure(
+          'That sign-in link has expired. Please sign in again.',
+        );
+      }
+      return true;
+    }
+    // A Custom Tab where the browser offers one, the browser itself where not.
+    if (!await launchUrl(uri, mode: LaunchMode.inAppBrowserView) &&
+        !await launchUrl(uri, mode: LaunchMode.externalApplication)) {
       throw const RequestFailure(
         'Couldn’t open your browser. Please try again.',
       );
     }
+    return null;
   }
 
-  /// The Mac app's custom scheme. Safari alone dispatches a Universal Link, and
-  /// only on the user's own click; the return page hands the same code and
-  /// state to this scheme so every browser reaches the app. The local
-  /// FrockBot Dev build has its own, so the released app never answers it.
-  static String get macosScheme => macosSchemeV1;
-
-  /// The iPhone app's, for the same reason as the Mac's.
-  static String get iosScheme => iosSchemeV1;
-
-  /// The return as the app would have received it on its verified link.
-  ///
-  /// Only the scheme differs: the host and path must still name the hosted
-  /// return exactly, so a link on the custom scheme is checked like any other.
-  static Uri canonical(Uri uri) =>
-      (Platform.isMacOS && uri.scheme == macosScheme) ||
-          (Platform.isIOS && uri.scheme == iosScheme)
-      ? uri.replace(scheme: 'https')
-      : uri;
-
   @override
-  Future<bool> accept(Uri incoming) async {
-    final expected = Uri.parse(returnUri);
-    final uri = canonical(incoming);
-    if (uri.scheme != expected.scheme ||
-        uri.host != expected.host ||
-        uri.port != expected.port ||
-        uri.path != expected.path ||
-        uri.fragment.isNotEmpty ||
-        uri.userInfo.isNotEmpty) {
-      return false;
-    }
+  Future<bool> accept(Uri uri) async {
     if (_exchanging) return false;
     _exchanging = true;
     try {
       final stored = await store.read('sign-in');
       if (stored == null) return false;
       final pending = jsonDecode(stored) as Map<String, dynamic>;
+      final returnUri = pending['returnUri'];
+      if (returnUri is! String) return false;
+      final expected = Uri.parse(returnUri);
+      if (uri.scheme != expected.scheme ||
+          uri.host != expected.host ||
+          uri.port != expected.port ||
+          uri.path != expected.path ||
+          uri.fragment.isNotEmpty ||
+          uri.userInfo.isNotEmpty) {
+        return false;
+      }
       if (pending['version'] != 1 ||
-          pending['returnUri'] != returnUri ||
           pending['state'] != uri.queryParameters['state'] ||
           uri.queryParametersAll.values.any((v) => v.length != 1) ||
           uri.queryParameters.keys.toSet().difference({

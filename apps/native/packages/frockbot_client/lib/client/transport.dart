@@ -116,9 +116,18 @@ class NativeApi {
   final LocalStore store;
   final AuthCredential credential;
   final http.Client _client;
-  NativeApi(this.store, {AuthCredential? credential, http.Client? client})
-    : credential = credential ?? authCredentialV1(store),
-      _client = client ?? httpClientV1();
+
+  /// The server this client talks to. The browser's is the page's own; an app
+  /// holds one client per account, each on the server it signed in to.
+  final String origin;
+  NativeApi(
+    this.store, {
+    AuthCredential? credential,
+    http.Client? client,
+    String? origin,
+  }) : credential = credential ?? authCredentialV1(store),
+       _client = client ?? httpClientV1(),
+       origin = origin ?? hostedOrigin;
 
   /// Told when a request this client authenticated with its own bearer was
   /// refused as unauthenticated. The token is the one thing a retry cannot
@@ -201,7 +210,7 @@ class NativeApi {
     try {
       final request = http.Request(
         body == null && raw == null ? 'GET' : 'POST',
-        Uri.parse('$hostedOrigin$path'),
+        Uri.parse('$origin$path'),
       )..followRedirects = false;
       final sent = authenticated
           ? await headers()
@@ -308,7 +317,7 @@ class NativeApi {
     String? cursor,
     String? epoch,
   }) async {
-    final origin = Uri.parse(hostedOrigin);
+    final origin = Uri.parse(this.origin);
     final uri = origin.replace(
       // Plain HTTP only ever names the local stack.
       scheme: origin.scheme == 'http' ? 'ws' : 'wss',
@@ -332,7 +341,7 @@ class NativeApi {
   /// A Group Chat's channel: it says where the thread is and who is working,
   /// and the thread itself is read over HTTP.
   Future<WebSocketChannel> groupSocket(String groupId) async {
-    final origin = Uri.parse(hostedOrigin);
+    final origin = Uri.parse(this.origin);
     final uri = origin.replace(
       scheme: origin.scheme == 'http' ? 'ws' : 'wss',
       path: '/api/groups/$groupId/channel',

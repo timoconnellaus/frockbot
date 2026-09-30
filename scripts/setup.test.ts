@@ -359,8 +359,8 @@ describe("the keys only a deployer has", () => {
 describe("the Access applications", () => {
   const applications = accessApplicationsV1("bot.example.com", "example");
 
-  test("protects the app and lets /api reach the Worker", () => {
-    expect(applications).toHaveLength(2);
+  test("protects the app and lets /api and discovery reach the Worker", () => {
+    expect(applications).toHaveLength(3);
     expect(applications[0]).toMatchObject({
       destination: "bot.example.com",
       decision: "allow",
@@ -369,6 +369,10 @@ describe("the Access applications", () => {
     // instead of by the Worker.
     expect(applications[1]).toMatchObject({
       destination: "bot.example.com/api",
+      decision: "bypass",
+    }); // An app reads what the server is before anyone has signed in to it.
+    expect(applications[2]).toMatchObject({
+      destination: "bot.example.com/.well-known/frockbot.json",
       decision: "bypass",
     });
   });

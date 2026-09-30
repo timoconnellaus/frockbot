@@ -2085,9 +2085,12 @@ jobs:
           # credential keyring) would reach the Worker mangled.
           bun "$GITHUB_WORKSPACE/scripts/check-production-secrets.ts" write-secrets-file "$secrets_file" || exit 1
 
+          # The tag is what `/.well-known/frockbot.json` tells an app this
+          # server is.
           bunx wrangler deploy \
             -c ../../.deployment/hosted/app/wrangler.jsonc \
-            --secrets-file "$secrets_file"
+            --secrets-file "$secrets_file" \
+            --var "FROCKBOT_RELEASE:$GITHUB_REF_NAME"
 
   promote-android:
     name: Promote Android patch

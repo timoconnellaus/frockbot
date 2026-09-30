@@ -10,7 +10,7 @@ import {
   createNativeAuth,
   readNativeJsonBody,
   nativeAppsV1,
-  nativeDevelopmentReturnUriV1,
+  nativeAppReturnUrisV1,
   nativeReturnUris,
   nativeReturnUriV1,
   type NativeAuthOptions,
@@ -851,14 +851,34 @@ describe("consent before code", () => {
       "form-action 'self' frockbot-dev:;",
     );
     const html = await page!.text();
-    expect(html).toContain(
-      "Sign in to the FrockBot development build on this device?",
-    );
+    expect(html).toContain("Sign in to FrockBot Dev on this Android device?");
     const pressed = await f.press(consentOf(html));
     expect(pressed?.status).toBe(303);
     expect(pressed?.headers.get("location")).toStartWith(
       `${NATIVE_RETURN_DEVELOPMENT}?code=`,
     );
+  });
+
+  test("an app signs in on its own scheme, which any deployment serves", async () => {
+    const macos = "frockbot://native/return/macos";
+    const f = fixture({ returnUris: nativeAppReturnUrisV1(BRAND_V1) });
+    const page = await f.auth.route(
+      new Request(await started(f, macos), {
+        headers: { cookie: "test=signed-in" },
+      }),
+    );
+    expect(page?.headers.get("content-security-policy")).toContain(
+      "form-action 'self' frockbot:;",
+    );
+    const html = await page!.text();
+    expect(html).toContain("Sign in to the FrockBot app on this Mac?");
+    const pressed = await f.press(consentOf(html));
+    expect(pressed?.status).toBe(303);
+    const location = new URL(pressed!.headers.get("location")!);
+    expect(`${location.protocol}//${location.host}${location.pathname}`).toBe(
+      macos,
+    );
+    expect([...location.searchParams.keys()]).toEqual(["code", "state"]);
   });
 });
 
@@ -1701,12 +1721,15 @@ test("the pages name the product the brand names", async () => {
 
 test("the Apple returns hand over on the brand's scheme", async () => {
   const brand = { ...BRAND_V1, nativeScheme: "walletpal" };
-  expect(nativeDevelopmentReturnUriV1(BRAND_V1)).toBe(
-    NATIVE_RETURN_DEVELOPMENT,
-  );
-  expect(nativeDevelopmentReturnUriV1(brand)).toBe(
+  expect(nativeAppReturnUrisV1(BRAND_V1)).toContain(NATIVE_RETURN_DEVELOPMENT);
+  expect(nativeAppReturnUrisV1(brand)).toEqual([
+    "walletpal://native/return/android",
+    "walletpal://native/return/ios",
+    "walletpal://native/return/macos",
     "walletpal-dev://native/return/android",
-  );
+    "walletpal-dev://native/return/ios",
+    "walletpal-dev://native/return/macos",
+  ]);
   const f = fixture({
     brand,
     returnUris: nativeReturnUris("ios,ios-dev", NATIVE_ORIGIN),

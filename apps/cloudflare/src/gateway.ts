@@ -27,6 +27,10 @@ import {
 import { isNativeAuthPath, readNativeJsonBody } from "./native-auth.js";
 import { clientCompatibilityResponse } from "./client-compatibility.js";
 import {
+  SERVER_DISCOVERY_PATH_V1,
+  serverDiscoveryResponseV1,
+} from "./server-discovery.js";
+import {
   ConfigurationConflictError,
   ConfigurationDecodeError,
   decodeBotIdV1,
@@ -607,6 +611,12 @@ export function createGateway(
   );
 
   const route = async (request: Request, url: URL): Promise<Response> => {
+    if (
+      url.pathname === SERVER_DISCOVERY_PATH_V1 &&
+      dependencies.serverDiscovery
+    ) {
+      return serverDiscoveryResponseV1(request, dependencies.serverDiscovery);
+    }
     const incompatible = clientCompatibilityResponse(request, url);
     if (incompatible) return incompatible;
     const nativeResponse = await dependencies.nativeAuth?.route(request);

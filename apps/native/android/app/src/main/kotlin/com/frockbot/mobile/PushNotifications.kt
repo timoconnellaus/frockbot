@@ -167,8 +167,10 @@ object PushNotifications {
             val message = messages.getJSONObject(i)
             style.addMessage(message.getString("body"),message.getLong("at"),person)
         }
+        // The account it is for: the app may hold several.
         val uri = Uri.Builder().scheme("https").authority(BuildConfig.LINK_HOST).path("/")
-            .appendQueryParameter(if (botId.startsWith("group:")) "group" else "bot", botId.removePrefix("group:")).build()
+            .appendQueryParameter(if (botId.startsWith("group:")) "group" else "bot", botId.removePrefix("group:"))
+            .appendQueryParameter("user", prefs(context).getString("userId", null) ?: "").build()
         val intent = Intent(context, MainActivity::class.java).setAction(Intent.ACTION_VIEW).setData(uri).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         val pending = PendingIntent.getActivity(context,0,intent,PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val notification = NotificationCompat.Builder(context,CHANNEL)

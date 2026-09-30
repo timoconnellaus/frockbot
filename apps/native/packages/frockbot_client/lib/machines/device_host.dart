@@ -39,6 +39,10 @@ class DeviceHostController extends ChangeNotifier {
 
   String? _userId;
   NativeApi? _api;
+
+  /// The server the account this Mac serves is on. The host is one per app,
+  /// so it serves the account on screen.
+  String? _origin;
   int _generation = 0;
 
   /// Pairing is tried once per sign-in; a failure is shown, not retried.
@@ -49,6 +53,7 @@ class DeviceHostController extends ChangeNotifier {
     _generation++;
     _userId = userId;
     _api = api;
+    _origin = api.origin;
     _attempted = false;
     _reset();
     channel.setMethodCallHandler((call) async {
@@ -71,7 +76,7 @@ class DeviceHostController extends ChangeNotifier {
   void _adopt(Object? value) {
     if (value is! Map ||
         value['userId'] != _userId ||
-        value['origin'] != hostedOrigin) {
+        value['origin'] != _origin) {
       return;
     }
     available = value['available'] == true;
@@ -104,7 +109,7 @@ class DeviceHostController extends ChangeNotifier {
       final result = await channel.invokeMethod<Object?>(method, {
         ...?input,
         'userId': _userId,
-        'origin': hostedOrigin,
+        'origin': _origin,
       });
       if (generation == _generation) _adopt(result);
     } catch (_) {
@@ -145,17 +150,20 @@ class DeviceHostController extends ChangeNotifier {
 
   Future<void> forget() => _command('forget');
 
-  Future<void> stop(String userId) async {
-    if (!supported || _userId != userId) return;
+  /// Stops serving [userId] on [origin]; a Mac already serving the account
+  /// switched to is left alone.
+  Future<void> stop(String userId, String origin) async {
+    if (!supported || _userId != userId || _origin != origin) return;
     _generation++;
     _userId = null;
     _api = null;
+    _origin = null;
     _reset();
     notifyListeners();
     try {
       await channel.invokeMethod<Object?>('stop', {
         'userId': userId,
-        'origin': hostedOrigin,
+        'origin': origin,
       });
     } catch (_) {
       /* Quitting the app stops the host too. */

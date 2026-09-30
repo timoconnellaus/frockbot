@@ -249,6 +249,10 @@ class ShellSidebar extends StatelessWidget {
   final String? profileName;
   final String? profileImageUrl;
 
+  /// The account switcher, drawn under the header where the app holds
+  /// accounts; null in a browser, which is one account.
+  final Widget? accounts;
+
   /// Opens What’s New, from the megaphone beside the You control, which
   /// wears the unread mark while [whatsNewUnread].
   final VoidCallback onWhatsNew;
@@ -317,6 +321,7 @@ class ShellSidebar extends StatelessWidget {
     this.profileName,
     this.profileImageUrl,
     this.whatsNewUnread = false,
+    this.accounts,
   });
 
   String _id(wire.BotRegistration bot) => bot.botId.value;
@@ -434,6 +439,7 @@ class ShellSidebar extends StatelessWidget {
           whatsNewUnread: whatsNewUnread,
           onSetup: phone ? onSetup : null,
         ),
+        ?accounts,
         if (!phone)
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),

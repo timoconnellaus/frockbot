@@ -10,6 +10,7 @@ const frockbotBrand = ClientBrand(
   builtInModelName: 'Frock AI',
   defaultCharacterId: 'pixel',
   signInProvider: 'Google',
+  hostedServiceName: 'frockbot.com',
   nativeScheme: 'frockbot',
   looks: ClientLooks(
     ink: ThemeTokens(

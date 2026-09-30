@@ -58,6 +58,11 @@
     "value": "frockbot-dev://native/return/android"
   },
   {
+    "name": "NativeReturnUri app scheme",
+    "schema": "NativeReturnUri",
+    "value": "frockbot://native/return/macos"
+  },
+  {
     "name": "AuthorizationUrl production",
     "schema": "AuthorizationUrl",
     "value": "https://bot.frockbot.com/native/authorize?request=abc"
