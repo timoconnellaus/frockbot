@@ -76,9 +76,9 @@ Two host implementations cover all four choices, not four.
 
 **A. Fly, with the account's own token.** `FlyComputerHostV1` gains a per-assignment credential. The User's Fly token is an account secret, stored encrypted like a model API key. On `open`, the app passes the computer-host Worker a short-lived lease that resolves to the token server-side. The container builds a `SpritesClient` per assignment rather than once at boot. Nothing else about the Fly host changes.
 
-**B. A tethered host, `computer/tether`.** A small agent program, `frockbot-computer`, is installed on the User's machine. It dials **out** to FrockBot over a WebSocket, so it works behind NAT and needs no open ports, DNS or TLS certificate. It serves the same primitives the on-Sprite runtime does today: exec, files, processes, browser, screenshot and, when installed with a desktop, the viewer and control. The cloud side is a `ComputerHostV1` whose session calls travel over that socket.
+**B. A tethered host, `computer/tether`.** A small agent program, `frockbot-computer`, is installed on the User's machine. It dials **out** to FrockBot over a WebSocket, so it works behind NAT and needs no open ports, DNS or TLS certificate. It serves the same primitives the on-Sprite runtime does today: exec, files, processes, browser, screenshot, the desktop viewer and control. The cloud side is a `ComputerHostV1` whose session calls travel over that socket.
 
-- **Your server:** a one-line installer (`curl … | sh`) installs the agent and its packages (Chromium, and optionally Xvfb, a window manager and a VNC server for the desktop), then prints a pairing code. It runs as its own unprivileged user under systemd.
+- **Your server:** a one-line installer (`curl … | sh`) installs the agent and its packages (Chromium, Xvfb, a window manager and a VNC server for the desktop), then prints a pairing code. Every Computer has a desktop; there is no headless option. It runs as its own unprivileged user under systemd.
 - **Your Mac:** the Mac app creates a Linux VM with Apple's Virtualization framework, from an image FrockBot publishes, and runs the same agent inside it. Pairing is automatic because the app is already signed in. The Bot's commands run inside the VM, never on the Mac itself, so untrusted code still gets its own boundary.
 
 The same socket carries local model calls ([§4](#local-models)): the agent on Your server, and the Mac app itself, can pass a model request to a local OpenAI-compatible endpoint.
@@ -102,7 +102,7 @@ The Computer page (`computer/settings.dart`) gains a **Where it runs** section a
 
 - **FrockBot's Computer:** nothing to set up.
 - **Your Sprites:** paste a Fly token, test it, done.
-- **Your server:** shows the install command and waits for the pairing, then shows the machine's name, OS and whether it has a desktop.
+- **Your server:** shows the install command and waits for the pairing, then shows the machine's name and OS.
 - **Your Mac:** desktop app only. It shows the disk and memory the VM will use, downloads the image, and starts it.
 
 ### Cuts
@@ -112,8 +112,8 @@ Each cut leaves `main` shippable.
 1. **Per-account host choice.** The `computerHost` record on the User, `assign` driven by it, capabilities per session, and the Where it runs section with only FrockBot's Computer enabled. No behaviour changes.
 2. **Your Sprites.** The per-assignment credential in the Fly host and computer-host container, the Fly-token secret, and its setup card.
 3. **Shared Linux runtime.** `computer/fly/runtime.ts` moves to `computer/linux-runtime`, with no behaviour change, proven by the existing Fly tests.
-4. **Tether host and agent, headless.** `computer/tether`, the `frockbot-computer` agent and the installer, running exec, files, processes, browser and screenshot. It must pass `computer/host-contract.test.ts`. Offline handling ships here.
-5. **Tether desktop.** The viewer relay and control on a tethered host installed with a desktop.
+4. **Tether host and agent.** `computer/tether`, the `frockbot-computer` agent and the installer, running exec, files, processes, browser and screenshot. It must pass `computer/host-contract.test.ts`. Offline handling ships here.
+5. **Tether desktop.** The viewer relay and control on a tethered host.
 6. **Your Mac.** The Mac app's VM on the Virtualization framework, running the cut 4–5 agent.
 
 ---
@@ -272,7 +272,7 @@ Setup moves out of the Flutter app into a web app at `bot.frockbot.com/setup` (a
 - **Sign-in is the browser with PKCE,** returning on the app's custom scheme. No device-code flow.
 - **Push to the released apps goes through a free relay at `push.frockbot.com`,** like Matrix's push gateway: the app registers its token and hands its server an opaque handle; the relay alone holds FrockBot's Apple and Firebase credentials. Pushes are content-free and the app fetches the text from its own server, so the relay never sees messages. No FrockBot account is needed.
 - **The web app uses Web Push** straight from any server with the deployment's own VAPID keys. UnifiedPush on Android may follow if people ask.
-- **Desktop enrolment drops the pairing code:** the signed-in Mac app enrols its own device agent with its session. A pairing code stays only for a headless Your server.
+- **Desktop enrolment drops the pairing code:** the signed-in Mac app enrols its own device agent with its session. A pairing code stays only for Your server, which has no signed-in app.
 
 ## 10. Enterprise
 
