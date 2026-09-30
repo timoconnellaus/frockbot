@@ -590,15 +590,17 @@ export function setupInstallV1(
       `The profile names ${named.join(", ")} by hand; a simple install names everything from its prefix.`,
     );
   }
+  const hostnames = profile.workers?.app?.hostnames ?? [];
   return {
     accountId: profile.accountId,
     name: profile.prefix,
-    hostnames: profile.workers?.app?.hostnames ?? [],
+    hostnames,
     // The Computer is in every simple deployment (ADR 0028).
     computerHost: true,
     vars: {
       ACCESS_TEAM_DOMAIN: profile.access.teamDomain,
       ACCESS_AUD: profile.access.aud,
+      ...(hostnames[0] ? { APP_ORIGIN: `https://${hostnames[0]}` } : {}),
     },
     secrets,
     ...(profile.region ? { location: profile.region } : {}),

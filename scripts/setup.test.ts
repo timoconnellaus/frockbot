@@ -191,6 +191,7 @@ describe("the install a profile deploys", () => {
       vars: {
         ACCESS_TEAM_DOMAIN: "example.cloudflareaccess.com",
         ACCESS_AUD: UNISSUED_ACCESS_AUD_V1,
+        APP_ORIGIN: "https://bot.example.com",
       },
       secrets: { JEV_API_KEY: "k" },
       location: "enam",
