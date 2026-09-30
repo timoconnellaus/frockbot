@@ -1,0 +1,21 @@
+{
+  "name": "@frockbot/push-relay",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "dev": "wrangler dev --port 8796",
+    "test": "bun test src",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@frockbot/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260920.1",
+    "@types/bun": "1.4.2",
+    "typescript": "^7.0.2",
+    "wrangler": "4.129.0"
+  }
+}

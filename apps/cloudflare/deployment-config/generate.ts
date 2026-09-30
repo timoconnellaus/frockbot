@@ -31,6 +31,7 @@ export const DEPLOYABLE_WORKERS_V1 = {
   appletBuild: { directory: "applet-build" },
   marketing: { directory: "marketing" },
   adminPortal: { directory: "admin-portal" },
+  pushRelay: { directory: "push-relay" },
 } as const;
 
 export type DeployableWorkerV1 = keyof typeof DEPLOYABLE_WORKERS_V1;
@@ -43,6 +44,7 @@ export const WORKER_OUTPUT_DIRECTORIES_V1: Record<DeployableWorkerV1, string> =
     appletBuild: "applet-build",
     marketing: "marketing",
     adminPortal: "admin-portal",
+    pushRelay: "push-relay",
   };
 
 /**
@@ -187,6 +189,8 @@ function derivedWorkerNameV1(
       return `${profile.prefix}-marketing`;
     case "adminPortal":
       return `${profile.prefix}-admin-portal`;
+    case "pushRelay":
+      return `${profile.prefix}-push-relay`;
   }
 }
 

@@ -1,11 +1,81 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 
 import '../client/transport.dart';
 import 'controller.dart';
 import 'window_focus.dart';
+
+/// The push relay the released apps' FCM project is reached through by a
+/// server that holds no FCM credentials of its own (`apps/push-relay`).
+///
+/// Compiled in rather than taken from the server: the relay is the one party
+/// that may hold this phone's FCM token, so a server cannot name another.
+const pushRelayOrigin = String.fromEnvironment(
+  'FROCKBOT_PUSH_RELAY',
+  defaultValue: 'https://push.frockbot.com',
+);
+
+/// The relay said the handle is gone; registering afresh gets a new one.
+class PushRelayGone implements Exception {
+  const PushRelayGone();
+}
+
+/// The relay's two doors an app uses.
+class PushRelay {
+  final Uri origin;
+  final http.Client client;
+  PushRelay({Uri? origin, http.Client? client})
+    : origin = origin ?? Uri.parse(pushRelayOrigin),
+      client = client ?? http.Client();
+
+  /// A handle for [token], or the same [handle] pointed at a rotated token.
+  Future<String> register({
+    required String token,
+    required String platform,
+    required String server,
+    String? handle,
+  }) async {
+    final response = await client
+        .post(
+          origin.replace(path: '/register'),
+          headers: const {'content-type': 'application/json'},
+          body: jsonEncode({
+            'token': token,
+            'platform': platform,
+            'server': server,
+            'handle': ?handle,
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    if (response.statusCode == 404 && handle != null) {
+      throw const PushRelayGone();
+    }
+    if (response.statusCode != 200) {
+      throw http.ClientException('Push relay refused (${response.statusCode})');
+    }
+    final value = jsonDecode(response.body);
+    final issued = value is Map ? value['handle'] : null;
+    if (issued is! String ||
+        !RegExp(r'^ph_[A-Za-z0-9_-]{43}$').hasMatch(issued)) {
+      throw const FormatException('Invalid push relay handle');
+    }
+    return issued;
+  }
+
+  Future<void> unregister(String handle) async {
+    await client
+        .post(
+          origin.replace(path: '/unregister'),
+          headers: const {'content-type': 'application/json'},
+          body: jsonEncode({'handle': handle}),
+        )
+        .timeout(const Duration(seconds: 10));
+  }
+}
 
 /// The platform owns delivery while Dart is stopped; the cloud owns read state.
 class PushController {
@@ -14,13 +84,15 @@ class PushController {
   final String userId;
   final ActivityController activity;
   final MethodChannel channel;
+  final PushRelay relay;
   PushController(
     this.api,
     this.store,
     this.userId,
     this.activity, {
     this.channel = const MethodChannel('frockbot/push'),
-  });
+    PushRelay? relay,
+  }) : relay = relay ?? PushRelay();
 
   /// The phones, where push reaches the person while Dart is stopped.
   bool get mobile =>
@@ -36,6 +108,19 @@ class PushController {
   String? deviceId;
   String? token;
   String? readingBot;
+
+  /// How this account's server reaches the phone, as its last registration
+  /// answered: `direct` with the FCM token, or `relay` through a handle. The
+  /// token goes only to a server that answered `direct`.
+  String? delivery;
+
+  /// This account's relay handle and the key its server seals alerts to.
+  String? relayHandle;
+  Map<String, String>? relayKey;
+
+  /// The token [relayHandle] was last pointed at in this process.
+  String? _relayToken;
+  DateTime? _relayRetryAt;
   bool focused = true;
   bool disposed = false;
 
@@ -59,6 +144,8 @@ class PushController {
     deviceId = await store.read('push-device');
     deviceId ??= randomId();
     await store.write('push-device', deviceId!);
+    delivery = await store.read('push-delivery:$userId');
+    relayHandle = await store.read('push-relay-handle:$userId');
     if (disposed) return;
     if (mobile) {
       channel.setMethodCallHandler((call) async {
@@ -135,21 +222,98 @@ class PushController {
 
   Future<void> register({bool remove = false}) {
     if (deviceId == null || (disposed && !remove)) return Future.value();
-    final body = <String, Object>{
-      'deviceId': deviceId!,
-      'token': ?token,
-      if (token != null) 'platform': platform,
-      if (focused && readingBot != null && !remove) 'activeBotId': readingBot!,
-      if (remove) 'remove': true,
-    };
-    _registration = _registration.catchError((Object _) {}).then((_) async {
-      try {
-        await api.request('/api/push/device', body: body);
-      } catch (_) {
-        /* Presence expires if the device cannot renew it. */
-      }
-    });
+    _registration = _registration
+        .catchError((Object _) {})
+        .then((_) => _register(remove));
     return _registration;
+  }
+
+  /// This device's address for its server: the token for one that sends to
+  /// FCM itself, the relay handle and sealing key for one that sends through
+  /// the relay, or nothing until the server has said which.
+  Map<String, Object> _body(bool remove) => {
+    'deviceId': deviceId!,
+    if (delivery == 'direct' && token != null) ...{
+      'token': token!,
+      'platform': platform,
+    },
+    if (delivery == 'relay' && relayHandle != null && relayKey != null)
+      'relay': {'handle': relayHandle!, ...relayKey!},
+    if (focused && readingBot != null && !remove) 'activeBotId': readingBot!,
+    if (remove) 'remove': true,
+  };
+
+  Future<void> _register(bool remove) async {
+    final body = _body(remove);
+    Object? answer;
+    try {
+      answer = await api.request('/api/push/device', body: body);
+    } catch (_) {
+      /* Presence expires if the device cannot renew it. */
+      return;
+    }
+    if (remove || disposed) return;
+    final learned = answer is Map && answer['delivery'] == 'relay'
+        ? 'relay'
+        : 'direct';
+    if (learned != delivery) {
+      delivery = learned;
+      await store.write('push-delivery:$userId', learned);
+    }
+    if (learned == 'relay') await _ensureRelay();
+    // What the server was told was a presence update, or an address this
+    // answer has just changed: tell it the address now.
+    final next = _body(false);
+    if (jsonEncode(next['token']) != jsonEncode(body['token']) ||
+        jsonEncode(next['relay']) != jsonEncode(body['relay'])) {
+      try {
+        await api.request('/api/push/device', body: next);
+      } catch (_) {
+        /* The next registration carries it again. */
+      }
+    }
+  }
+
+  /// Points this account's relay handle at the current token: a new handle
+  /// the first time, the same one after a rotation. A failure leaves the
+  /// server without an address, and is tried again a few minutes later.
+  Future<void> _ensureRelay() async {
+    final current = token;
+    if (!platformReady || current == null || _relayToken == current) return;
+    final retryAt = _relayRetryAt;
+    if (retryAt != null && DateTime.now().isBefore(retryAt)) return;
+    try {
+      relayKey ??= Map<String, String>.from(
+        await channel.invokeMapMethod<String, String>('relayKey') ?? const {},
+      );
+      if (relayKey!['p256dh'] == null || relayKey!['auth'] == null) {
+        relayKey = null;
+        return;
+      }
+      String handle;
+      try {
+        handle = await relay.register(
+          token: current,
+          platform: platform,
+          server: hostedOrigin,
+          handle: relayHandle,
+        );
+      } on PushRelayGone {
+        handle = await relay.register(
+          token: current,
+          platform: platform,
+          server: hostedOrigin,
+        );
+      }
+      if (handle != relayHandle) {
+        relayHandle = handle;
+        await store.write('push-relay-handle:$userId', handle);
+      }
+      _relayToken = current;
+      _relayRetryAt = null;
+    } catch (_) {
+      _relayRetryAt = DateTime.now().add(const Duration(minutes: 5));
+    }
   }
 
   void lifecycle(bool active) {
@@ -196,11 +360,26 @@ class PushController {
     timer?.cancel();
     timer = null;
     if (platformReady) await channel.invokeMethod<void>('logout');
+    // Signing out deletes the handle, so nothing reaches this phone for the
+    // account even if the server never hears the removal below.
+    final handle = relayHandle;
+    relayHandle = null;
+    relayKey = null;
+    _relayToken = null;
+    await store.delete('push-relay-handle:$userId');
+    if (handle != null) {
+      try {
+        await relay.unregister(handle);
+      } catch (_) {
+        /* The server's removal still stops it sending. */
+      }
+    }
     await register(remove: true);
   }
 
   void dispose() {
     disposed = true;
+    relay.client.close();
     windowFocus.dispose();
     timer?.cancel();
     if (mobile) channel.setMethodCallHandler(null);

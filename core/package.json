@@ -11,6 +11,7 @@
     "./contracts": "./contracts/index.ts",
     "./deadline": "./deadline.ts",
     "./contracts/canonical-json": "./contracts/canonical-json.ts",
+    "./push": "./push/index.ts",
     "./contracts/contributions": "./contracts/contributions.ts",
     "./durable": "./durable/index.ts",
     "./durable/composition-failure": "./durable/composition/failure.ts",

@@ -1,0 +1,17 @@
+// The Notification Service Extension that opens relayed alerts
+// (docs/notifications.md). It follows the app's identity switch and version,
+// so it is read after the app's own settings and overrides only its own.
+#include "../Flutter/Generated.xcconfig"
+#include "../Runner/Configs/AppInfo.xcconfig"
+
+PRODUCT_BUNDLE_IDENTIFIER = $(FROCKBOT_APP_ID).NotificationService
+CODE_SIGN_ENTITLEMENTS = NotificationService/NotificationService.entitlements
+INFOPLIST_FILE = NotificationService/Info.plist
+PRODUCT_NAME = NotificationService
+SWIFT_VERSION = 5.0
+IPHONEOS_DEPLOYMENT_TARGET = 15.0
+TARGETED_DEVICE_FAMILY = 1
+SKIP_INSTALL = YES
+APPLICATION_EXTENSION_API_ONLY = YES
+CODE_SIGN_STYLE = Automatic
+LD_RUNPATH_SEARCH_PATHS = $(inherited) @executable_path/Frameworks @executable_path/../../Frameworks

@@ -26,6 +26,26 @@ Each User holds a bounded device registry. Tokens rotate under a stable installa
 
 The server records an external attempt before calling FCM. A known service rejection is retried with backoff. An ambiguous network outcome or interrupted attempt is recorded as uncertain and is not blindly repeated; the message remains available in the conversation. Delivery receipt cursors are bounded to one per Bot/device/update kind. Push is an alert transport, never message history authority.
 
+## The push relay
+
+A server with no FCM credentials of its own — a self-hosted one — reaches the released apps through the push relay at `push.frockbot.com` ([`apps/push-relay`](../apps/push-relay/README.md)), the way a Matrix homeserver reaches Element through its push gateway. The relay is the only party besides Google that holds the phone's FCM token, and only it holds the service account that can reach the apps. It is free, needs no FrockBot account, and is rate-limited per handle and per sending server.
+
+Which way a server delivers is its own answer to `/api/push/device`: `{ ok: true }` from one that holds `FCM_SERVICE_ACCOUNT` and sends to FCM itself, as frockbot.com does, and `{ ok: true, delivery: "relay" }` from one that does not. The app remembers the answer per account and sends its token only to a server that answered the first. To one that answered the second it sends nothing until it has:
+
+1. asked its native half for this account's key (`relayKey`): a P-256 key pair and a 16-byte auth secret, made once per account, whose private half never leaves the phone — Android's app-private preferences (backup is off), or on an iPhone a keychain item in a group the app shares with its Notification Service Extension;
+2. registered its token with the relay (`POST /register` with the token, the platform and the server's origin), which answers an opaque handle;
+3. registered `relay: { handle, p256dh, auth }` with its server in place of a token.
+
+A rotated token is sent to the relay under the same handle, so the server needs telling nothing; a handle the relay no longer knows is replaced by a fresh one. The relay's origin is compiled into the app (`FROCKBOT_PUSH_RELAY`, default `https://push.frockbot.com`), never taken from a server, so no server can name another place for the token to go.
+
+The alert's words never pass through the relay. The server seals `{ title, body }` to the account's key with RFC 8291 message encryption (`aes128gcm`, [`core/push/seal.ts`](../core/push/seal.ts)) and sends only the fields the apps read — `userId`, `botId`, `groupId`, `cursor`, `kind`, `notify` and `sealed` — which is all the relay accepts. A read carries nothing sealed and collapses per conversation. Android opens `sealed` in `FirebaseMessagingService` before it draws the `MessagingStyle` notification (`PushSeal.kt`); an iPhone is sent a placeholder alert with `mutable-content`, which the Notification Service Extension replaces with what it opens (`PushSeal.swift`). An alert that cannot be opened is drawn as the placeholder, "New message".
+
+Sealing rather than fetching was chosen because neither phone can reasonably fetch the text itself: the session is a full-authority bearer bound to the client hello, held by the Flutter half, which is not running when FCM wakes the app, and on an iPhone it would have to be copied into a keychain group the extension shares. Sealing needs only a key the extension can read, costs no round trip inside the extension's time limit, and keeps a stored preview off the server.
+
+The delivery rules are the same as FCM's. The attempt is recorded before the call. The relay answers 200 sent, 410 when the handle is gone — revoked, expired, or dropped because FCM said the token is unregistered — which removes the device, 429 or 503 for a refusal that sent nothing, retried with backoff, and 502 when its call to FCM had an outcome nobody can know, which is recorded as uncertain and never repeated.
+
+Signing out deletes the handle at the relay, drops the key, and removes the device from the server; either of the first and the last alone stops the alerts. A handle unused for 90 days is forgotten.
+
 ## Application icon badge
 
 The app icon shows the account's unread messages: the sum of the unread counts of every non-archived Bot whose Notifications setting is on. Each view in `/api/bots/unread`, and the view a read receipt returns, carries `notificationsEnabled`, which the Bot Durable Object reads from its current settings; the cloud stays the only authority on both the count and the eligibility. A muted Bot still counts on its sidebar row and adds nothing to the icon. A Bot marked unread by hand with no unread messages adds nothing either, because the manual flag is a reminder rather than a count. The focused conversation is suppressed exactly as the sidebar suppresses it, so a reply settling into the chat being read does not flash on the icon while its read receipt is in flight.
@@ -48,11 +68,15 @@ The Android configuration is `apps/native/android/app/google-services.json`, for
 
 The iPhone's configuration is `apps/native/ios/Runner/GoogleService-Info.plist`, which exists once the iOS app `com.frockbot.mobile` is registered in project `frock-bot` and an APNs authentication key is uploaded there (`apps/native/README.md`, iOS). The Runner's `Firebase configuration` build phase copies it into the released identity's bundle only. A build without it, and every FrockBot Dev build, answers `unconfigured` and has no push; the app says nothing about that, as it says nothing on a platform without push.
 
-The authenticated `/api/push/device` endpoint registers tokens, renews focused-viewer presence, and removes an installation. A token is registered with the `platform` that holds it, `android` or `ios`, which is kept and replaced with the token; a token registered without one is Android's. The User identity comes from gateway authentication, not request JSON.
+The authenticated `/api/push/device` endpoint registers tokens, renews focused-viewer presence, and removes an installation. A token is registered with the `platform` that holds it, `android` or `ios`, which is kept and replaced with the token; a token registered without one is Android's. A relay registration (`relay: { handle, p256dh, auth }`) takes a token's place, and whichever came last is the installation's one address. The User identity comes from gateway authentication, not request JSON.
+
+A deployment with no `FCM_SERVICE_ACCOUNT` sends through the push relay with nothing to configure. `PUSH_RELAY_URL` points it at another relay, such as a staging one. The relay Worker's own `FCM_SERVICE_ACCOUNT` is the same `frockbot-push` service account, deployed by `release.yml` with the hosted profile only.
 
 ## Release verification
 
 The one-time, repeatable `notification-state-cleanup.ts` cleanup removes disposable old Turn-based unread state and pending notification projections when each Bot is loaded. It retains conversations and settings. The one-time `hidden-bot-notifications-cleanup.ts` cleanup, also run as each Bot is loaded, turns notifications off for a Bot that was hidden before hiding muted it, moving its settings revision. A release must visit the unread directory to load existing Bots and verify a fresh conversation before declaring the change ready.
+
+The push relay's native half — `PushSeal.kt`, the `relayKey` method, and the iPhone's Notification Service Extension — is native code and ships only in a full release, never a Shorebird patch. A self-hosted server reaches only an app that carries it; one that predates it is still registered by token and cannot be reached by such a server. Verify a relayed alert on a phone against a server without FCM credentials: the notification shows the words, a tap opens the right Bot, and signing out stops them.
 
 Android native Firebase changes require a full Shorebird release through `scripts/native-update.py release`, followed by publishing and `adb install -r`; they cannot ship as a Dart-only patch. Deploy the backend before installing the message-cursor client.
 

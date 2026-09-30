@@ -129,6 +129,9 @@ jobs:
       - name: Build the admin portal
         run: bun run build:admin-portal
 
+      - name: Build the push relay
+        run: bun run build:push-relay
+
       # ADR 0038's gate: every published workspace, packed and installed by
       # npm into a stub white-label that names its own brand and auth Package,
       # then `wrangler deploy --dry-run` from its own generated config. Needs

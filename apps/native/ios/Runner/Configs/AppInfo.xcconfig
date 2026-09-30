@@ -21,7 +21,12 @@ FROCKBOT_APP_ICON_YES = AppIconDev
 FROCKBOT_DISPLAY_NAME = $(FROCKBOT_DISPLAY_NAME_$(FROCKBOT_IOS_DEV))
 
 // The application's bundle identifier. The release shares the Mac app's.
-PRODUCT_BUNDLE_IDENTIFIER = com.frockbot.mobile$(FROCKBOT_BUNDLE_SUFFIX_$(FROCKBOT_IOS_DEV))
+FROCKBOT_APP_ID = com.frockbot.mobile$(FROCKBOT_BUNDLE_SUFFIX_$(FROCKBOT_IOS_DEV))
+PRODUCT_BUNDLE_IDENTIFIER = $(FROCKBOT_APP_ID)
+
+// The keychain group the app shares with its Notification Service Extension,
+// which holds the key relayed alerts are sealed to (PushKeychain.swift).
+FROCKBOT_KEYCHAIN_GROUP = $(AppIdentifierPrefix)$(FROCKBOT_APP_ID).push
 
 // The custom scheme the browser's sign-in and Connect returns hand over on (Info.plist).
 FROCKBOT_URL_SCHEME = frockbot$(FROCKBOT_SCHEME_SUFFIX_$(FROCKBOT_IOS_DEV))

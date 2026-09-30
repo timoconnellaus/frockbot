@@ -24,7 +24,7 @@ Optional keys. Each is asked for once and each can be skipped with Enter; a skip
 | ------------------------- | ------------------------------------------------------------------ |
 | `OPENAI_API_KEY`          | dictation in the composer                                          |
 | `GEMINI_API_KEY`          | the voice session on Gemini Live, the default provider             |
-| `FCM_SERVICE_ACCOUNT`     | push notifications to an Android app you build yourself            |
+| `FCM_SERVICE_ACCOUNT`     | push sent to FCM yourself; without it, push goes through the relay |
 | `COMPOSIO_API_KEY`        | Connected apps: a Bot using your Gmail, Slack, Notion and the rest |
 | `COMPOSIO_WEBHOOK_SECRET` | Routines that fire on a connected-app event                        |
 | `BRAVE_SEARCH_API_KEY`    | web search: a Bot that searches the public web                     |
@@ -402,12 +402,13 @@ Register `https://staging-bot.frockbot.com/api/auth/callback/google` as an autho
 
 ### Production deployment
 
-Once a version tag verifies, `release.yml` deploys five Cloudflare Workers — marketing, the admin portal, the Plugin build service, the Computer host and the app — through the GitHub `production` environment, and only then publishes the `scripts/npm-publish.ts` workspaces to npm. Publishing waits on the backend deploy because a package published for a release whose deploy then failed would sit on the registry ahead of a production that never moved. Merging to `main` deploys nothing — a tag is the only thing that reaches production, so code can be integrated freely and released deliberately:
+Once a version tag verifies, `release.yml` deploys six Cloudflare Workers — marketing, the admin portal, the Plugin build service, the Computer host, the push relay and the app — through the GitHub `production` environment, and only then publishes the `scripts/npm-publish.ts` workspaces to npm. Publishing waits on the backend deploy because a package published for a release whose deploy then failed would sit on the registry ahead of a production that never moved. Merging to `main` deploys nothing — a tag is the only thing that reaches production, so code can be integrated freely and released deliberately:
 
 - `apps/marketing` serves the public marketing site at `https://frockbot.com` and redirects `www.frockbot.com` to the apex domain;
 - `apps/admin-portal` serves the administrative surface at `https://admin.frockbot.com`; see [The admin portal](#the-admin-portal);
 - `apps/applet-build` is the Plugin build service: an internal Worker with no public route and a Cloudflare Container that type-checks a Plugin's source, bundles it into one module and reads its exports by running it. It deploys before the app because that binding must resolve;
 - `apps/computer-host` is the shared Computer host: an internal Worker with no public route, a bounded pool of Cloudflare Containers, and the only place `SPRITES_TOKEN` is used. It deploys before the app because that binding must resolve, and because a stale host would be serving a current app;
+- `apps/push-relay` is the push relay at `https://push.frockbot.com`, through which servers without FCM credentials of their own, self-hosted ones included, notify the released apps; it holds `FCM_SERVICE_ACCOUNT` and nothing else. See [the push relay](docs/notifications.md#the-push-relay);
 - `apps/cloudflare` serves the authenticated application and API at `https://bot.frockbot.com`.
 
 The Computer host and the Plugin build service both run Containers, which require the **Workers Paid plan**; each hosted deploy step builds and pushes its container image from the Dockerfile, so the runner needs Docker (`ubuntu-latest` has it). The images `publish-images` pushes to Docker Hub are for the simple profile; switching this deploy to pull them instead is its own later tag, with the previous tag as the rollback, since staging shares the production Computer host.
@@ -426,22 +427,22 @@ The tracked Wrangler files declare Cloudflare's `AI` binding for production and 
 
 Configure these GitHub `production` environment values:
 
-| Type     | Name                      | Purpose                                                                                                               |
-| -------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Secret   | `CLOUDFLARE_API_TOKEN`    | Cloudflare token permitted to edit Workers, D1, and R2 for the target account                                         |
-| Secret   | `CLOUDFLARE_ACCOUNT_ID`   | Cloudflare account containing the production resources                                                                |
-| Variable | `BETTER_AUTH_URL`         | Set to `https://bot.frockbot.com`                                                                                     |
-| Secret   | `BETTER_AUTH_SECRET`      | Better Auth secret with at least 32 random characters                                                                 |
-| Secret   | `GOOGLE_CLIENT_ID`        | Google Web application OAuth client ID                                                                                |
-| Secret   | `GOOGLE_CLIENT_SECRET`    | Google Web application OAuth client secret                                                                            |
-| Secret   | `FROCKBOT_ADMIN_EMAILS`   | Comma-separated owner emails allowed to administer deployment policy (optional; warns)                                |
-| Secret   | `FROCKBOT_ADMIN_USER_IDS` | Comma-separated User ids that are admins too, for people with no verified email (optional; warns)                     |
-| Secret   | `SPRITES_TOKEN`           | Fly Sprites token used only by the backend Computer provider                                                          |
-| Secret   | `COMPUTER_HOST_TOKEN`     | Shared secret the app Worker presents to the Computer host; generate it                                               |
-| Secret   | `CREDENTIAL_KEYRING`      | Versioned AES-GCM keyring for per-User Connection credentials                                                         |
-| Secret   | `ROUTINE_HOOK_SECRET`     | HMAC secret every Routine webhook key is signed with; generate it                                                     |
-| Secret   | `MACHINE_TOKEN_SECRET`    | HMAC secret every registered-machine token and pairing code is signed with; generate it                               |
-| Secret   | `FCM_SERVICE_ACCOUNT`     | Firebase service-account JSON authorizing Android push delivery; see [`docs/notifications.md`](docs/notifications.md) |
+| Type     | Name                      | Purpose                                                                                                                                       |
+| -------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Secret   | `CLOUDFLARE_API_TOKEN`    | Cloudflare token permitted to edit Workers, D1, and R2 for the target account                                                                 |
+| Secret   | `CLOUDFLARE_ACCOUNT_ID`   | Cloudflare account containing the production resources                                                                                        |
+| Variable | `BETTER_AUTH_URL`         | Set to `https://bot.frockbot.com`                                                                                                             |
+| Secret   | `BETTER_AUTH_SECRET`      | Better Auth secret with at least 32 random characters                                                                                         |
+| Secret   | `GOOGLE_CLIENT_ID`        | Google Web application OAuth client ID                                                                                                        |
+| Secret   | `GOOGLE_CLIENT_SECRET`    | Google Web application OAuth client secret                                                                                                    |
+| Secret   | `FROCKBOT_ADMIN_EMAILS`   | Comma-separated owner emails allowed to administer deployment policy (optional; warns)                                                        |
+| Secret   | `FROCKBOT_ADMIN_USER_IDS` | Comma-separated User ids that are admins too, for people with no verified email (optional; warns)                                             |
+| Secret   | `SPRITES_TOKEN`           | Fly Sprites token used only by the backend Computer provider                                                                                  |
+| Secret   | `COMPUTER_HOST_TOKEN`     | Shared secret the app Worker presents to the Computer host; generate it                                                                       |
+| Secret   | `CREDENTIAL_KEYRING`      | Versioned AES-GCM keyring for per-User Connection credentials                                                                                 |
+| Secret   | `ROUTINE_HOOK_SECRET`     | HMAC secret every Routine webhook key is signed with; generate it                                                                             |
+| Secret   | `MACHINE_TOKEN_SECRET`    | HMAC secret every registered-machine token and pairing code is signed with; generate it                                                       |
+| Secret   | `FCM_SERVICE_ACCOUNT`     | Firebase service-account JSON authorizing push delivery, for the app and the push relay; see [`docs/notifications.md`](docs/notifications.md) |
 
 Admission is closed by default. Set `FROCKBOT_ADMIN_EMAILS` to one or more comma-separated email addresses in the GitHub `production` environment; those identities are always admitted and may open the operator surface. Administration itself is not in the app: it is the [admin portal](#the-admin-portal) at `admin.frockbot.com`, and the same list says who may use it. Every other account needs access from the beta-access authority, and having signed in before is not access; see [`docs/beta-access.md`](docs/beta-access.md), including the release step that retired the signups switch.
 
@@ -543,6 +544,7 @@ apps/
   cloudflare/       User application loader, Dynamic Worker artifact, the client's web build, and bot state
   computer-host/    Shared Computer host Worker and its Node container
   marketing/        Public frockbot.com site and static-assets Worker
+  push-relay/       Hosted-only push relay: servers without FCM credentials notify the released apps through it
   native/           The client: the phone app, and the web build the app Worker serves
 computer/          The Computer: tools, prompt, state, and the ComputerHostV1 interface
   core/            The host interface, its capabilities, the registry, and the shared helpers

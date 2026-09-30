@@ -3,6 +3,11 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'dart:convert';
+
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:frockbot_client/activity/controller.dart';
 import 'package:frockbot_client/activity/push.dart';
 import 'package:frockbot_client/client/transport.dart' show hostedOrigin;
@@ -357,4 +362,169 @@ void main() {
           .setMockMethodCallHandler(channel, null);
     },
   );
+
+  group('a server with no FCM credentials of its own', () {
+    const handle = 'ph_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+    const key = {
+      'p256dh': 'BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4',
+      'auth': 'BTBZMqHH6r4Tts7J_aSIgg',
+    };
+
+    ({
+      MethodChannel channel,
+      List<MethodCall> bridge,
+      List<Map<String, dynamic>> registrations,
+      List<(String, Map<String, dynamic>)> relayed,
+      MemoryStore store,
+      ActivityController activity,
+      SettingsApi api,
+      PushController push,
+    })
+    harness({int Function(String path, Map<String, dynamic> body)? status}) {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      const channel = MethodChannel('frockbot/push');
+      final bridge = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            bridge.add(call);
+            if (call.method == 'configure') return 'token-12345678901234567890';
+            if (call.method == 'focus') return false;
+            if (call.method == 'relayKey') return key;
+            return null;
+          });
+      final store = MemoryStore()..values['push-permission-asked'] = 'true';
+      final registrations = <Map<String, dynamic>>[];
+      final api = SettingsApi(store, (path, body) async {
+        registrations.add(Map<String, dynamic>.from(body as Map));
+        return {'ok': true, 'delivery': 'relay'};
+      });
+      final relayed = <(String, Map<String, dynamic>)>[];
+      final relay = PushRelay(
+        origin: Uri.parse('https://relay.test'),
+        client: MockClient((request) async {
+          final body = Map<String, dynamic>.from(
+            jsonDecode(request.body) as Map,
+          );
+          relayed.add((request.url.path, body));
+          final code = status?.call(request.url.path, body) ?? 200;
+          if (request.url.path == '/register' && code == 200) {
+            return http.Response(jsonEncode({'handle': handle}), 200);
+          }
+          return http.Response('{}', code);
+        }),
+      );
+      final activity = ActivityController(api);
+      final push = PushController(
+        api,
+        store,
+        'tim',
+        activity,
+        channel: channel,
+        relay: relay,
+      );
+      return (
+        channel: channel,
+        bridge: bridge,
+        registrations: registrations,
+        relayed: relayed,
+        store: store,
+        activity: activity,
+        api: api,
+        push: push,
+      );
+    }
+
+    void tearDownHarness(ActivityController activity, SettingsApi api) {
+      activity.dispose();
+      api.close();
+      debugDefaultTargetPlatformOverride = null;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(const MethodChannel('frockbot/push'), null);
+    }
+
+    test('gets a relay handle, and the server never sees the token', () async {
+      final h = harness();
+      await h.push.start();
+
+      expect(h.registrations.where((row) => row.containsKey('token')), isEmpty);
+      expect(h.relayed.single.$1, '/register');
+      expect(h.relayed.single.$2, {
+        'token': 'token-12345678901234567890',
+        'platform': 'android',
+        'server': hostedOrigin,
+      });
+      expect(h.registrations.last['relay'], {'handle': handle, ...key});
+      expect(h.store.values['push-relay-handle:tim'], handle);
+      expect(h.store.values['push-delivery:tim'], 'relay');
+
+      // A presence renewal carries the same address and asks the relay nothing.
+      await h.push.register();
+      expect(h.relayed, hasLength(1));
+      expect(h.registrations.last['relay'], {'handle': handle, ...key});
+
+      h.push.dispose();
+      tearDownHarness(h.activity, h.api);
+    });
+
+    test(
+      'a rotated token keeps the handle, and a lost one is replaced',
+      () async {
+        final h = harness(
+          status: (path, body) => body['handle'] != null ? 404 : 200,
+        );
+        h.store.values['push-delivery:tim'] = 'relay';
+        h.store.values['push-relay-handle:tim'] = 'ph_${'Z' * 43}';
+        await h.push.start();
+        // The stored handle was gone at the relay, so a fresh one was issued.
+        expect(h.relayed.map((call) => call.$1), ['/register', '/register']);
+        expect(h.relayed.first.$2['handle'], 'ph_${'Z' * 43}');
+        expect(h.relayed.last.$2.containsKey('handle'), isFalse);
+        expect(h.push.relayHandle, handle);
+
+        h.push.dispose();
+        tearDownHarness(h.activity, h.api);
+
+        final rotated = harness();
+        await rotated.push.start();
+        await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .handlePlatformMessage(
+              'frockbot/push',
+              const StandardMethodCodec().encodeMethodCall(
+                const MethodCall('token', 'token-rotated-123456789012345'),
+              ),
+              (_) {},
+            );
+        await rotated.push.register();
+        expect(rotated.relayed.last.$1, '/register');
+        expect(rotated.relayed.last.$2, {
+          'token': 'token-rotated-123456789012345',
+          'platform': 'android',
+          'server': hostedOrigin,
+          'handle': handle,
+        });
+        expect(
+          rotated.registrations.where((row) => row.containsKey('token')),
+          isEmpty,
+        );
+        rotated.push.dispose();
+        tearDownHarness(rotated.activity, rotated.api);
+      },
+    );
+
+    test('signing out deletes the handle at the relay', () async {
+      final h = harness();
+      await h.push.start();
+      await h.push.logout();
+
+      expect(h.relayed.last.$1, '/unregister');
+      expect(h.relayed.last.$2, {'handle': handle});
+      expect(h.store.values.containsKey('push-relay-handle:tim'), isFalse);
+      expect(h.push.relayHandle, isNull);
+      expect(h.registrations.last['remove'], isTrue);
+      expect(h.bridge.map((call) => call.method), contains('logout'));
+
+      h.push.dispose();
+      tearDownHarness(h.activity, h.api);
+    });
+  });
 }
