@@ -20,7 +20,11 @@ The check passes, and your signature is recorded in `signatures/cla-v1.0.json` o
 
 Every author of the pull request's commits must have signed, and the check can only match a commit to you when its email is one on your GitHub account (a GitHub noreply address works). A commit with any other email, including one authored by an AI tool under its own name, can never be signed for: amend it to your own identity, push, and comment `recheck`. People credited only in a `Co-authored-by` line are not checked and cannot be recorded, so a co-author should author a commit of their own on the pull request and sign.
 
-Do not sign if you are under 18, or if your employer or anyone else holds rights in your work and has not agreed to the CLA's terms in writing: say so on the pull request and it will be arranged or the contribution declined.
+If you are under 18, a parent or guardian must also agree: they post the same sentence on the pull request from their own GitHub account, adding "on behalf of @yourusername", or email Tim.
+
+If your employer, or a client you are contracting for, holds rights in your work, they sign the [Corporate CLA](CCLA.md) instead and list you in its Schedule A. Email Tim to arrange it. Once you are listed, your pull requests pass the check without your own signature.
+
+Pull requests that change fewer than five lines in total, such as a typo fix, pass the check without a signature.
 
 ## Pull requests
 

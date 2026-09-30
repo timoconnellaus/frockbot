@@ -12,8 +12,9 @@ name: CLA
 #
 # Exemption is by who opened the pull request, which GitHub authenticates,
 # never by commit author: the action matches an unlinked commit on its bare
-# git author name, so any name on a commit can be forged. Tim's and
-# Dependabot's pull requests pass; on everyone else's, every commit author
+# git author name, so any name on a commit can be forged. Pull requests opened
+# by an account in EXEMPT pass, and so do ones changing fewer than five lines,
+# too small to carry much copyright. On everyone else's, every commit author
 # must have signed, so a commit authored as someone else never passes.
 #
 # A contributor signs by commenting the exact sentence below; `recheck` asks
@@ -49,9 +50,33 @@ jobs:
     timeout-minutes: 5
     env:
       OPENED_BY: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      # Tim, Dependabot, and each GitHub username listed in Schedule A of a
+      # countersigned Corporate CLA (CCLA.md), one per line.
+      EXEMPT: >-
+        timoconnellaus
+        dependabot[bot]
     steps:
+      - name: Decide whether this pull request needs a signature
+        id: scope
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+        run: |
+          case " $EXEMPT " in
+            *" $OPENED_BY "*)
+              echo "needed=false" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+          changed=$(gh api "repos/$REPO/pulls/$NUMBER" --jq '.additions + .deletions')
+          if [ "$changed" -lt 5 ]; then
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Create the signatures branch if it is missing
-        if: env.OPENED_BY != 'timoconnellaus' && env.OPENED_BY != 'dependabot[bot]'
+        if: steps.scope.outputs.needed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -62,7 +87,7 @@ jobs:
               gh api "repos/$REPO/branches/cla-signatures" --silent
           fi
       - name: CLA Assistant
-        if: env.OPENED_BY != 'timoconnellaus' && env.OPENED_BY != 'dependabot[bot]'
+        if: steps.scope.outputs.needed == 'true'
         uses: contributor-assistant/github-action@ca4a40a7d1004f18d9960b404b97e5f30a505a08 # v2.6.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
