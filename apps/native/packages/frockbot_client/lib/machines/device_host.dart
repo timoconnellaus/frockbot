@@ -48,8 +48,14 @@ class DeviceHostController extends ChangeNotifier {
   /// Pairing is tried once per sign-in; a failure is shown, not retried.
   bool _attempted = false;
 
+  /// Whether this Mac runs device modules for an account on [origin]: only
+  /// the deployment the build names. A module's code and the paths and Apple
+  /// Events its sandbox allows come from the server, so a server the person
+  /// merely signed in to must not be able to pair this Mac by itself.
+  static bool hostsFor(String origin) => origin == hostedOrigin;
+
   Future<void> configure(String userId, NativeApi api) async {
-    if (!supported) return;
+    if (!supported || !hostsFor(api.origin)) return;
     _generation++;
     _userId = userId;
     _api = api;
