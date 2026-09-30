@@ -105,9 +105,14 @@ class PushController {
   /// The deployment's VAPID public key; null where it offers no web push.
   String? webPushKey;
 
-  /// The phones, where push reaches the person while Dart is stopped.
+  /// The phones, where push reaches the person while Dart is stopped, for an
+  /// account on the deployment this build's Firebase registration belongs to.
+  /// An account on another server registers its presence alone until the
+  /// push relay can deliver for it, and never takes the platform's one push
+  /// account from the account that has it.
   bool get mobile =>
       !kIsWeb &&
+      api.origin == hostedOrigin &&
       (defaultTargetPlatform == TargetPlatform.android ||
           defaultTargetPlatform == TargetPlatform.iOS);
 
@@ -184,7 +189,7 @@ class PushController {
         // itself, from the deployment this build talks to.
         token = await channel.invokeMethod<String>('configure', {
           'userId': userId,
-          'origin': hostedOrigin,
+          'origin': api.origin,
         });
         platformReady = true;
         focused =
@@ -485,5 +490,42 @@ class PushController {
     webPush.dispose();
     timer?.cancel();
     if (mobile) channel.setMethodCallHandler(null);
+  }
+}
+
+/// Signs an account that is not on screen out of push: its registration on
+/// the server, and — when [platform] says it may be the account the platform
+/// delivers for — the platform's account and every alert it drew. The next
+/// shell of an account on this build's deployment configures it afresh.
+Future<void> signOutOfPushV1(
+  NativeApi api,
+  LocalStore store, {
+  required bool platform,
+  MethodChannel channel = const MethodChannel('frockbot/push'),
+}) async {
+  final deviceId = await store.read('push-device');
+  if (deviceId != null) {
+    try {
+      await api.request(
+        '/api/push/device',
+        body: {'deviceId': deviceId, 'remove': true},
+      );
+    } catch (_) {
+      // The registration expires on its own when nothing renews it.
+    }
+  }
+  if (!platform ||
+      kIsWeb ||
+      api.origin != hostedOrigin ||
+      (defaultTargetPlatform != TargetPlatform.android &&
+          defaultTargetPlatform != TargetPlatform.iOS)) {
+    return;
+  }
+  try {
+    await channel.invokeMethod<void>('logout');
+  } on MissingPluginException {
+    // A build without the platform half has nothing to sign out of.
+  } on PlatformException {
+    // Nor does one whose Firebase registration is absent.
   }
 }

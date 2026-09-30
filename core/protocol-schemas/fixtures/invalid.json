@@ -49,9 +49,14 @@
     "value": null
   },
   {
-    "name": "NativeReturnUri other scheme",
+    "name": "NativeReturnUri other path",
     "schema": "NativeReturnUri",
-    "value": "frockbot-dev://native/return/macos"
+    "value": "frockbot://native/return/windows"
+  },
+  {
+    "name": "NativeReturnUri with a host",
+    "schema": "NativeReturnUri",
+    "value": "frockbot://bot.frockbot.com/native/return/android"
   },
   {
     "name": "NativeReturnUri plain http",

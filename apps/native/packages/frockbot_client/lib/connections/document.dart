@@ -78,17 +78,23 @@ ConnectionRequestV1 startConnectionRequestV1(Map<String, Object?> command) {
 /// segment; the page there is what the browser keeps once the app has opened.
 const connectReturnPathV1 = '/api/connect/callback';
 
-/// Whether a link the app was opened with is a hosted door closing. There
-/// are exactly three such links: the verified App Link under this app's own
-/// segment on Android, and the same page handed over on the app's scheme on
-/// a Mac or an iPhone. The next settings read is what settles the Connection;
-/// the one thing read from a link is an MCP server's sign-in answer, which
+/// Whether a link the app was opened with is a hosted door closing: the
+/// page under this app's own segment, handed over on the app's scheme with
+/// the server's host in it, which says which account the door was for. The
+/// next settings read is what settles the Connection; the one thing read
+/// from a link is an MCP server's sign-in answer, which
 /// [mcpSignInCompletionV1] sends back.
 ///
-/// The Mac and iPhone apps share a scheme, so each link is its scheme and its
-/// segment together, never the scheme alone.
+/// The apps share a scheme, so each link is its scheme and its segment
+/// together, never the scheme alone. An Android build answers its own
+/// identity's scheme, the released or the development one, and no other.
 bool isConnectReturnV1(Uri uri) =>
-    (uri.scheme == 'https' && uri.path == '$connectReturnPathV1/android') ||
+    uri.host.isNotEmpty &&
+        ({
+              clientBrand.nativeScheme,
+              '${clientBrand.nativeScheme}-dev',
+            }.contains(uri.scheme) &&
+            uri.path == '$connectReturnPathV1/android') ||
     (uri.scheme == macosSchemeV1 &&
         uri.path == '$connectReturnPathV1/$macosReturnSegmentV1') ||
     (uri.scheme == iosSchemeV1 &&

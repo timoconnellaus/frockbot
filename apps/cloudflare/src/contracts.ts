@@ -798,10 +798,12 @@ export interface GatewayDependencies {
     ): Promise<unknown>;
     deleteComputer(userId: string, commandId: string): Promise<unknown>;
   };
-  /** Explicit Slice 2 prototype; absent until signed-target qualification. */
+  /** The native sign-in door; absent where the deployment names no origin. */
   nativeAuth?: import("./native-auth.js").NativeAuth;
   /** Mints and reads the credential a framed Setup page reads the account with. */
   setupReader?: import("./setup-reader.js").SetupReader;
+  /** What `/.well-known/frockbot.json` tells an app about this server. */
+  serverDiscovery?: import("./server-discovery.js").ServerDiscoveryV1;
   loader: WorkerLoader;
   artifacts: ApplicationArtifactStore;
   auth: AuthPackageV1;

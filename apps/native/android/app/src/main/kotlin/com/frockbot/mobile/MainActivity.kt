@@ -55,6 +55,13 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+        // The scheme this build's sign-in returns on: the released app's, or the
+        // development identity's, so neither answers the other's sign-in.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "frockbot/web-auth")
+            .setMethodCallHandler { call, result ->
+                if (call.method == "scheme") result.success(BuildConfig.NATIVE_SCHEME)
+                else result.notImplemented()
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.frockbot.mobile/display")
             .setMethodCallHandler { call, result ->
                 if (call.method == "fullscreen" && call.arguments is Boolean) {

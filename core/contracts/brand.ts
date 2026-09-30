@@ -214,3 +214,22 @@ export function nativeReturnSchemeV1(
     ? `${brand.nativeScheme}-dev`
     : brand.nativeScheme;
 }
+
+/** The apps that sign in on their own scheme: every native build. */
+export const NATIVE_APP_PLATFORMS_V1 = ["android", "ios", "macos"] as const;
+export type NativeAppPlatformV1 = (typeof NATIVE_APP_PLATFORMS_V1)[number];
+
+/**
+ * Where a native app is sent back after sign-in on any deployment: the app's
+ * own scheme, which needs no link verified against the deployment's host. The
+ * code it carries is useless without the PKCE verifier the app never shares
+ * (RFC 8252). The host is always `native`, so one intent filter or URL type
+ * covers every server the app signs in to.
+ */
+export function nativeAppReturnUriV1(
+  brand: Pick<BrandV1, "nativeScheme">,
+  build: "released" | "development",
+  platform: NativeAppPlatformV1,
+): string {
+  return `${nativeReturnSchemeV1(brand, build)}://native/return/${platform}`;
+}

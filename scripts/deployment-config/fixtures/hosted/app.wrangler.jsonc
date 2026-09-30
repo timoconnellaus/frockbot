@@ -157,6 +157,8 @@
   "vars": {
     // Native sign-in returns for the Android and signed macOS apps.
     "NATIVE_SLICE_2_AUTH": "android,macos,macos-dev,ios",
+    // The deployment's own origin, from the profile's app hostname.
+    "APP_ORIGIN": "https://bot.frockbot.com",
     "DEFAULT_APPLICATION_HASH": "foundation-v1",
     // The provider is Frock AI; these two values are the *Cloudflare dashboard*
     // resource names, which are still spelled `flock`. Renaming them there is a
@@ -404,8 +406,9 @@
         // transport's account id is repeated here (cloudflare/ai#617). The
         // Gateway id and Auto route keep their code defaults.
         "FROCK_AI_ACCOUNT_ID": "374784ce2915a597adcecf9bcb2c5ee6",
-        // The same signed apps. Staging names no native return, so it serves
-        // no association file, exactly as before.
+        "APP_ORIGIN": "https://staging-bot.frockbot.com",
+        // The same signed apps. Staging names no verified return, so it
+        // serves no association file; apps sign in on their own scheme.
         "NATIVE_APPS": "{\"android\":[{\"packageName\":\"com.frockbot.mobile\",\"sha256CertFingerprints\":[\"61:E6:47:9F:9C:57:55:15:4C:1F:93:9C:DE:48:E8:A7:57:EF:F3:13:6E:54:ED:1D:DA:5F:61:E7:8B:3C:1E:37\"]}],\"apple\":[\"Q444L76529.com.frockbot.mobile\"]}",
         "VOICE_PROVIDER": "openai-realtime",
       },

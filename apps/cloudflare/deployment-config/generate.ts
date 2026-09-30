@@ -610,6 +610,10 @@ function identityVarsV1(
   if (profile.nativeAuth) {
     vars.NATIVE_SLICE_2_AUTH = profile.nativeAuth.join(",");
   }
+  // The deployment's own origin, which native sign-in is built from where
+  // the build has no `BETTER_AUTH_URL`.
+  const appHostname = profile.workers?.app?.hostnames?.[0];
+  if (appHostname) vars.APP_ORIGIN = `https://${appHostname}`;
   if (profile.aiGateway?.id) vars.FROCK_AI_GATEWAY_ID = profile.aiGateway.id;
   if (profile.aiGateway) vars.FROCK_AI_ACCOUNT_ID = profile.aiGateway.accountId;
   if (profile.aiGateway?.autoRoute) {

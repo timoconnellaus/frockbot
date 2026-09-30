@@ -70,6 +70,16 @@ Android launchers badge from active notifications, and some draw only a dot, so 
 
 A true cloud zero, including for the focused Bot, removes the stored cloud count before refreshing any retained active notification from its remaining messages; an active notification with no retained messages is cancelled. This prevents stale stored counts from inflating later alerts while read cursors still determine which message entries remain. Sign-out or an account change cancels the account's notifications and clears its stored notification state.
 
+## Several accounts
+
+An app may be signed in to several accounts at once, each on its own server (`apps/native/packages/frockbot_client/lib/client/accounts.dart`). Device registration is per account: each account keeps its own installation id under its own store prefix and registers it, with its presence leases, with its own server's `/api/push/device`, so each server only ever knows the devices signed in to it.
+
+The platform delivers for one account: FCM and APNs are configured for the deployment the build names, so an account on that deployment configures the `frockbot/push` channel with its User and origin, and an account on any other server registers its presence and no token (`PushController.mobile`). When the account on screen is on the build's deployment it takes the channel; an account on another server never does, so a person who switches to a self-hosted account keeps receiving frockbot.com alerts. The push relay, a separate piece of work, is what will deliver for the other servers, and it slots in here: such an account then registers a relay token instead of none.
+
+Every alert names its account. A tapped alert's link carries `user=<userId>` beside `?bot=` or `?group=` on the deployment's origin, and the app opens the account with that origin and User before following the link (`app.dart`, `accept`). Signing out of an account that is not on screen removes its device registration, and, where it may hold the platform's channel, signs the channel out too; the next shell on that deployment configures it again.
+
+The Dock and the iPhone icon add the other accounts' unread to the account on screen's (`AppBadge.elsewhere`), read in the background every minute for the switcher's counts (`lib/activity/accounts_unread.dart`), with muted Bots adding nothing. An Android launcher badges from notifications alone, so it learns of another server's unread when the push relay notifies for it.
+
 ## Configuration
 
 The Android configuration is `apps/native/android/app/google-services.json`, for Firebase project `frock-bot` and package `com.frockbot.mobile`. It contains Firebase's public app configuration. Gradle applies it only to a build that opts into that production identity (`apps/native/README.md`, Android upgrade); the isolated `.dev` package every other build produces carries no Firebase registration and receives no push. The release workflow requires `FCM_SERVICE_ACCOUNT` in GitHub Actions and forwards it to the production Worker. The server's dedicated `frockbot-push` service account has the Firebase Cloud Messaging role. Its private JSON credential belongs only in the Cloudflare Worker secret `FCM_SERVICE_ACCOUNT`, never in the APK or repository.

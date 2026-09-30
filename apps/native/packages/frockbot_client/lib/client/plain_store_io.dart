@@ -10,7 +10,7 @@ import 'transport.dart';
 /// Bot directory, observer cursors, drafts and cached transcripts. It holds one
 /// JSON document read once at startup, so a switch between Bots reads from
 /// memory instead of the platform keystore.
-class PlainStore implements SnapshotStore, CheckpointStore {
+class PlainStore implements SnapshotStore, CheckpointStore, AccountsStore {
   final Future<Directory> Function() location;
   final String name;
   final Map<String, String> _values = {};
@@ -76,6 +76,22 @@ class PlainStore implements SnapshotStore, CheckpointStore {
     return _flush();
   }
 
+  @override
+  Future<void> deletePrefix(String prefix) async {
+    await load();
+    _values.removeWhere((key, _) => key.startsWith(prefix));
+    return _flush();
+  }
+
+  @override
+  Future<void> deleteUnscoped(Set<String> keep) async {
+    await load();
+    _values.removeWhere(
+      (key, _) => !key.startsWith(accountKeyPrefixV1) && !keep.contains(key),
+    );
+    return _flush();
+  }
+
   /// Resolves once the document containing the change is on disk, so callers
   /// that require a durable local write before dispatching keep that guarantee.
   Future<void> _flush() {
@@ -97,7 +113,7 @@ class PlainStore implements SnapshotStore, CheckpointStore {
 
 /// Routes each key to the store that suits it and migrates values written by
 /// the released shape that kept everything in the keystore.
-class SplitStore implements SnapshotStore, CheckpointStore {
+class SplitStore implements SnapshotStore, CheckpointStore, AccountsStore {
   static const migrationKey = 'store.migrated.v1';
   final LocalStore secrets;
   final PlainStore plain;
@@ -111,9 +127,14 @@ class SplitStore implements SnapshotStore, CheckpointStore {
   });
 
   /// The session token and the sign-in verifier are the only secrets this app
-  /// holds; a revoke command carries the session it revokes.
-  static bool secret(String key) =>
-      key == 'session' || key == 'sign-in' || key.startsWith('revoke/');
+  /// holds; a revoke command carries the session it revokes. Each account's
+  /// are under its prefix (`ScopedStore`).
+  static bool secret(String key) {
+    final unscoped = unscopedKeyV1(key);
+    return unscoped == 'session' ||
+        unscoped == 'sign-in' ||
+        unscoped.startsWith('revoke/');
+  }
 
   @override
   bool get resident => _migrated && plain.resident;
@@ -164,6 +185,38 @@ class SplitStore implements SnapshotStore, CheckpointStore {
     await migrate();
     await plain.delete(key);
     if (!_migrated) await secrets.delete(key);
+  }
+
+  /// The plain document's keys go at once; the keystore's are the few
+  /// secrets an account holds, deleted by name.
+  @override
+  Future<void> deletePrefix(String prefix) async {
+    await migrate();
+    await plain.deletePrefix(prefix);
+    for (final key in const ['session', 'sign-in']) {
+      await secrets.delete('$prefix$key');
+    }
+    if (secrets case EnumerableStore enumerable) {
+      for (final key in (await enumerable.readAll()).keys) {
+        if (key.startsWith(prefix)) await secrets.delete(key);
+      }
+    }
+  }
+
+  @override
+  Future<void> deleteUnscoped(Set<String> keep) async {
+    await migrate();
+    await plain.deleteUnscoped({...keep, migrationKey});
+    for (final key in const ['session', 'sign-in']) {
+      await secrets.delete(key);
+    }
+    if (secrets case EnumerableStore enumerable) {
+      for (final key in (await enumerable.readAll()).keys) {
+        if (!key.startsWith(accountKeyPrefixV1) && !keep.contains(key)) {
+          await secrets.delete(key);
+        }
+      }
+    }
   }
 
   @override

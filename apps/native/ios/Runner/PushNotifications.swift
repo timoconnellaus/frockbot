@@ -181,16 +181,19 @@ final class PushNotifications: NSObject, MessagingDelegate {
   }
 
   /// A tapped alert opens its conversation through the same link Android's
-  /// notification carries, on the deployment this build talks to.
+  /// notification carries, on the deployment this build talks to, naming the
+  /// account it is for: the app may hold several.
   func open(_ info: [AnyHashable: Any]) {
     guard let message = message(info),
           let origin = store.string(forKey: "push.origin"),
+          let user = store.string(forKey: "push.userId"),
           var link = URLComponents(string: origin)
     else { return }
     link.path = "/"
     link.queryItems = [
       message.groupId.map { URLQueryItem(name: "group", value: $0) }
-        ?? URLQueryItem(name: "bot", value: message.botId)
+        ?? URLQueryItem(name: "bot", value: message.botId),
+      URLQueryItem(name: "user", value: user),
     ]
     guard let url = link.url else { return }
     AppLinks.shared.handleLink(url: url)

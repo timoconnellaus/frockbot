@@ -34,6 +34,26 @@ void main() {
     'error': '',
   };
 
+  test('an account on another server never reaches the host', () async {
+    final calls = <MethodCall>[];
+    messenger.setMockMethodCallHandler(DeviceHostController.channel, (
+      call,
+    ) async {
+      calls.add(call);
+      return status(call.arguments);
+    });
+    final api = NativeApi(MemoryStore(), origin: 'https://bots.example.org');
+    final controller = DeviceHostController();
+    // A server supplies module code and its sandbox's reach, so one the
+    // person merely signed in to cannot pair this Mac.
+    await controller.configure('mallory', api);
+    await pumpEventQueue();
+    expect(calls, isEmpty);
+    expect(controller.enrolled, false);
+    api.close();
+    controller.dispose();
+  });
+
   test('a Mac the host reports unpaired pairs itself once', () async {
     final calls = <MethodCall>[];
     messenger.setMockMethodCallHandler(DeviceHostController.channel, (

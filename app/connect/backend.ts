@@ -140,11 +140,12 @@ async function deliverConnectEvent(
 }
 
 /**
- * Which build of the Apple apps each page hands over to; the same schemes
- * their sign-in returns use. The development builds are separate apps with
- * their own, so a Connect one started never opens the released app.
+ * Which build of the apps each page hands over to; the same schemes their
+ * sign-in returns use. The development builds are separate apps with their
+ * own, so a Connect one started never opens the released app.
  */
-const APPLE_BUILDS = {
+const APP_BUILDS = {
+  android: "released",
   macos: "released",
   "macos-dev": "development",
   ios: "released",
@@ -155,13 +156,13 @@ const APPLE_BUILDS = {
  * The page a person lands on after the app's sign-in. No session, no state:
  * it says to go back, and the next settings read settles the Connection.
  *
- * Which way back depends on the page they were sent to. On Android the
- * verified App Link has already opened the app by the time this renders, and
- * the page is what the browser keeps. On a Mac or an iPhone no browser but
- * Safari opens a Universal Link from a redirect, so the page hands over on the
- * app's scheme with nothing from the query attached but an MCP server's
- * sign-in answer — `mcpAnswer`, which the app sends back under its own
- * session to finish that sign-in. A browser tab is told to return.
+ * Which way back depends on the page they were sent to. An app's page hands
+ * over on the app's scheme, with this deployment's host in the link so an app
+ * signed in to several servers knows which account it is for, and nothing
+ * from the query attached but an MCP server's sign-in answer — `mcpAnswer`,
+ * which the app sends back under its own session to finish that sign-in. A
+ * verified link would only ever reach the one deployment the app was built
+ * for. A browser tab is told to return.
  */
 export function connectCallbackPageV1(
   client: ConnectionReturnClientV1 | undefined,
@@ -172,10 +173,10 @@ export function connectCallbackPageV1(
   const product = brand.productName;
   const heading = `Back to ${product}`;
   const footnote = `${product} shows whether the app connected. If it did not, connect it again from the Marketplace.`;
-  if (client !== undefined && client !== "android") {
+  if (client !== undefined) {
     const answer = mcpAnswer?.toString();
     const query = answer ? `?${answer}` : "";
-    const target = `${nativeReturnSchemeV1(brand, APPLE_BUILDS[client])}://${new URL(origin).host}${connectCallbackPathV1(client)}${query}`;
+    const target = `${nativeReturnSchemeV1(brand, APP_BUILDS[client])}://${new URL(origin).host}${connectCallbackPathV1(client)}${query}`;
     return returnPageV1({
       brand,
       title: heading,
@@ -185,15 +186,6 @@ export function connectCallbackPageV1(
       action: { label: `Open ${product}`, href: target, id: "open" },
       footnote,
       script: `location.replace(${JSON.stringify(target)});`,
-    });
-  }
-  if (client === "android") {
-    return returnPageV1({
-      brand,
-      title: heading,
-      heading,
-      lead: `Head back to the ${product} app. You can close this page.`,
-      footnote,
     });
   }
   return returnPageV1({

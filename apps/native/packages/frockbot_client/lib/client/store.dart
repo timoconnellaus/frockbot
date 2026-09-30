@@ -71,3 +71,57 @@ class ProtectedStore implements LocalStore, EnumerableStore, CheckpointStore {
   @override
   Future<void> checkpoint() => _writes;
 }
+
+/// Where one account's keys live in the app's store: `account/<id>/<key>`.
+const accountKeyPrefixV1 = 'account/';
+
+/// The key an account-scoped key was written under, without its account.
+String unscopedKeyV1(String key) {
+  if (!key.startsWith(accountKeyPrefixV1)) return key;
+  final end = key.indexOf('/', accountKeyPrefixV1.length);
+  return end < 0 ? key : key.substring(end + 1);
+}
+
+/// One account's view of the app's store. Every key it reads or writes is
+/// under the account's own prefix, so two accounts — on two servers, or two
+/// sign-ins to one — never read each other's session, caches or drafts, and
+/// signing out of one deletes only what is under its prefix.
+class ScopedStore implements SnapshotStore, CheckpointStore {
+  final LocalStore root;
+  final String prefix;
+  ScopedStore(this.root, String accountId)
+    : prefix = '$accountKeyPrefixV1$accountId/';
+
+  @override
+  Future<String?> read(String key) => root.read('$prefix$key');
+  @override
+  Future<void> write(String key, String value) =>
+      root.write('$prefix$key', value);
+  @override
+  Future<void> delete(String key) => root.delete('$prefix$key');
+
+  @override
+  bool get resident => switch (root) {
+    SnapshotStore snapshot => snapshot.resident,
+    _ => false,
+  };
+
+  @override
+  String? peek(String key) => switch (root) {
+    SnapshotStore snapshot => snapshot.peek('$prefix$key'),
+    _ => null,
+  };
+
+  @override
+  Future<void> checkpoint() => checkpointStore(root);
+}
+
+/// The app's store as accounts need it: signing out of one deletes every key
+/// under its prefix, and the one cleanup of the single-account shape deletes
+/// every key under none.
+abstract interface class AccountsStore implements LocalStore {
+  Future<void> deletePrefix(String prefix);
+
+  /// Deletes every key outside an account except those in [keep].
+  Future<void> deleteUnscoped(Set<String> keep);
+}

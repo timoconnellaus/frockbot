@@ -207,9 +207,8 @@ describe("the Connected apps gateway routes", () => {
     );
     expect(await failed?.text()).toContain("Back to FrockBot");
     expect(commands).toHaveLength(0);
-    // Each app's own page: Android's verified link has already opened the
-    // app, so its page carries no script; the Mac page hands over on the
-    // app's scheme, under a nonce, with nothing from the query attached.
+    // Each app's own page hands over on the app's scheme, under a nonce,
+    // naming this deployment's host and nothing from the query.
     const android = await backend.publicRoute!(
       new Request(
         "https://bot.frockbot.com/api/connect/callback/android?status=success&connectedAccountId=ca_1",
@@ -220,12 +219,10 @@ describe("the Connected apps gateway routes", () => {
       {},
     );
     const androidPage = await android!.text();
-    expect(androidPage).toContain("Head back to the FrockBot app");
-    expect(androidPage).not.toContain("<script");
-    expect(androidPage).not.toContain("ca_1");
-    expect(android!.headers.get("content-security-policy")).not.toContain(
-      "script-src",
+    expect(androidPage).toContain(
+      "frockbot://bot.frockbot.com/api/connect/callback/android",
     );
+    expect(androidPage).not.toContain("ca_1");
     const mac = await backend.publicRoute!(
       new Request(
         "https://bot.frockbot.com/api/connect/callback/macos?status=success&connectedAccountId=ca_1",

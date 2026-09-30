@@ -93,7 +93,7 @@ Future<VoiceSocket> openVoiceSocketV1(
   Map<String, String> query = const {},
   Duration timeout = voiceAssistantConnectTimeoutV1,
 }) async {
-  final origin = Uri.parse(hostedOrigin);
+  final origin = Uri.parse(api.origin);
   final uri = origin.replace(
     // Plain HTTP only ever names the local stack.
     scheme: origin.scheme == 'http' ? 'ws' : 'wss',

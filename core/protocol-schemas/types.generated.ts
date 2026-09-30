@@ -8,7 +8,7 @@ export type RunVia =
 export type Digest = string;
 export type Instant = string;
 export type HttpsUrl = string;
-export type NativeReturnUri = HttpsUrl | "frockbot-dev://native/return/android";
+export type NativeReturnUri = HttpsUrl | string;
 export type AuthorizationUrl = HttpsUrl | string;
 export type Json =
   | null

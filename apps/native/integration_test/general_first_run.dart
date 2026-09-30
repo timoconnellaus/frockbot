@@ -47,6 +47,7 @@ class DelayedDirectoryApi extends NativeApi {
 
 Future<String> signIn(NativeApi api, PlainStore store) async {
   final signIn = NativeSignIn(api, store);
+  final returnUri = await signIn.returnUri();
   final verifier = '${randomId()}${randomId()}';
   final state = randomId();
   await store.write(
@@ -55,7 +56,7 @@ Future<String> signIn(NativeApi api, PlainStore store) async {
       'version': 1,
       'verifier': verifier,
       'state': state,
-      'returnUri': signIn.returnUri,
+      'returnUri': returnUri,
       'exchangeId': randomId(),
     }),
   );
@@ -69,7 +70,7 @@ Future<String> signIn(NativeApi api, PlainStore store) async {
           .encode(sha256.convert(utf8.encode(verifier)).bytes)
           .replaceAll('=', ''),
       'codeChallengeMethod': 'S256',
-      'returnUri': signIn.returnUri,
+      'returnUri': returnUri,
     },
     authenticated: false,
   ) as Map;

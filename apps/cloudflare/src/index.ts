@@ -164,10 +164,11 @@ import { BRAND_V1 } from "#brand";
 import {
   createNativeAuth,
   nativeAppsV1,
-  nativeDevelopmentReturnUriV1,
+  nativeAppReturnUrisV1,
   nativeReturnUris,
 } from "./native-auth.js";
 import { createSetupReader } from "./setup-reader.js";
+import { serverDiscoveryV1 } from "./server-discovery.js";
 import {
   DEVELOPMENT_USER_ID,
   isDeploymentAdminV1,
@@ -350,6 +351,13 @@ interface Env {
   DEFAULT_APPLICATION_HASH: string;
   BETTER_AUTH_SECRET?: string;
   BETTER_AUTH_URL?: string;
+  /**
+   * `https://` and the profile's first app hostname, generated for every
+   * deployment: what a build without `BETTER_AUTH_URL` knows its origin by.
+   */
+  APP_ORIGIN?: string;
+  /** The release tag this Worker was deployed from, where the deploy said. */
+  FROCKBOT_RELEASE?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
   /** The Zero Trust team whose keys sign every Cloudflare Access token. */
@@ -1005,17 +1013,27 @@ function developmentAuthAllowed(env: Env): boolean {
 }
 
 /**
- * Where the app may be sent back after sign-in: this deployment's App Links,
- * plus the development scheme on a stack that allows development auth — the flag
- * production's secret gate refuses.
+ * Where the app may be sent back after sign-in: the verified links the
+ * profile's `nativeAuth` names, and every app's own scheme, which any
+ * deployment serves.
  */
 function nativeReturnUrisFor(env: Env, origin: string): readonly string[] {
   return [
     ...nativeReturnUris(env.NATIVE_SLICE_2_AUTH, origin),
-    ...(developmentAuthAllowed(env)
-      ? [nativeDevelopmentReturnUriV1(BRAND_V1)]
-      : []),
+    ...nativeAppReturnUrisV1(BRAND_V1),
   ];
+}
+
+/**
+ * The deployment's own origin. `BETTER_AUTH_URL` where the build has one — a
+ * development stack points it at its own host, which the emulator reaches as
+ * 10.0.2.2 — and otherwise `APP_ORIGIN`, which the profile's app hostname
+ * generates, so a simple deployment signs its apps in too.
+ */
+export function deploymentOriginV1(
+  env: Pick<Env, "BETTER_AUTH_URL" | "APP_ORIGIN">,
+): string | undefined {
+  return env.BETTER_AUTH_URL || env.APP_ORIGIN || undefined;
 }
 
 /**
@@ -2741,6 +2759,7 @@ export default {
       // Package: the hosted build keeps signing with the live
       // `BETTER_AUTH_SECRET`, and a build without better-auth has its own key.
       const nativeTokenSecret = AUTH_PACKAGE_V1.nativeTokenSecret.read(env);
+      const nativeOrigin = deploymentOriginV1(env);
       const gateway = createGateway(
         {
           analytics: env.ANALYTICS,
@@ -2773,13 +2792,14 @@ export default {
             productName: BRAND_V1.productName,
             mayCreateIdentity: (candidate) => mayCreateIdentity(env, candidate),
           }),
-          // The deployment's own origin, which is what `BETTER_AUTH_URL` is: a
-          // development stack points it at its own host — the emulator reaches
-          // this machine as 10.0.2.2, never as the hosted origin — and a
-          // deployment that names none offers no native sign-in.
-          ...(env.BETTER_AUTH_URL &&
-          nativeReturnUrisFor(env, env.BETTER_AUTH_URL).length > 0 &&
-          nativeTokenSecret
+          serverDiscovery: serverDiscoveryV1({
+            brand: BRAND_V1,
+            nativeSignIn: !!(nativeOrigin && nativeTokenSecret),
+            version: env.FROCKBOT_RELEASE,
+          }),
+          // A deployment that names no origin of its own offers no native
+          // sign-in.
+          ...(nativeOrigin && nativeTokenSecret
             ? {
                 nativeAuth: createNativeAuth({
                   secret: nativeTokenSecret,
@@ -2788,10 +2808,10 @@ export default {
                     mayCreateIdentity: (candidate) =>
                       mayCreateIdentity(env, candidate),
                   }),
-                  returnUris: nativeReturnUrisFor(env, env.BETTER_AUTH_URL),
+                  returnUris: nativeReturnUrisFor(env, nativeOrigin),
                   nativeApps: nativeAppsV1(env.NATIVE_APPS),
                   brand: BRAND_V1,
-                  origin: env.BETTER_AUTH_URL,
+                  origin: nativeOrigin,
                   // The development door signs the app in as the development
                   // identity in place of Google.
                   ...(developmentAuthAllowed(env)

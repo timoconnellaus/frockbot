@@ -14,17 +14,17 @@ import 'package:frockbot_client/brand.dart';
 import 'package:frockbot_native/brand.dart';
 
 class LocalSettingsApi extends NativeApi {
-  final Uri origin;
+  final Uri local;
   final HttpClient client = HttpClient();
-  LocalSettingsApi(super.store, this.origin) {
+  LocalSettingsApi(super.store, this.local) {
     if (!const bool.fromEnvironment('NATIVE_ACCEPTANCE') ||
-        origin.scheme != 'http' ||
-        origin.host != '127.0.0.1' ||
-        origin.userInfo.isNotEmpty ||
-        origin.path.isNotEmpty ||
-        origin.hasQuery ||
-        origin.hasFragment ||
-        !origin.hasPort) {
+        local.scheme != 'http' ||
+        local.host != '127.0.0.1' ||
+        local.userInfo.isNotEmpty ||
+        local.path.isNotEmpty ||
+        local.hasQuery ||
+        local.hasFragment ||
+        !local.hasPort) {
       throw StateError('The design runner requires an explicit local harness');
     }
   }
@@ -42,7 +42,7 @@ class LocalSettingsApi extends NativeApi {
     }
     final request = await client.openUrl(
       body == null ? 'GET' : 'POST',
-      origin.resolve(path),
+      local.resolve(path),
     );
     request.followRedirects = false;
     request.headers.set('x-frockbot-user-id', 'native-settings-local');

@@ -28,7 +28,11 @@ export const INSTALL_NAME_PATTERN_V1 = "^[a-z0-9][a-z0-9-]{0,40}$";
 export const BUNDLE_SENTINEL_PREFIX_V1 = "zzfrockbotinstallzz";
 
 /** The vars a simple install supplies itself, carried as `vars` not secrets. */
-export const INSTALL_VARS_V1 = ["ACCESS_TEAM_DOMAIN", "ACCESS_AUD"] as const;
+export const INSTALL_VARS_V1 = [
+  "ACCESS_TEAM_DOMAIN",
+  "ACCESS_AUD",
+  "APP_ORIGIN",
+] as const;
 
 export const BUNDLE_WORKERS_V1 = [
   "app",

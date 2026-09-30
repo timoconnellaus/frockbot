@@ -470,7 +470,7 @@ export async function configureAccessV1(
       default: profile.access?.aud ?? UNISSUED_ACCESS_AUD_V1,
     });
     return finishAccessV1(context, profile, aud, [
-      "Create the two Access applications above, if you have not already.",
+      "Create the Access applications above, if you have not already.",
     ]);
   }
 

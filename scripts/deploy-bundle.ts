@@ -124,6 +124,7 @@ async function deploy(
     vars: {
       ACCESS_TEAM_DOMAIN: args.required("--access-team"),
       ACCESS_AUD: args.required("--access-aud"),
+      APP_ORIGIN: `https://${hostname}`,
     },
     secrets: await secretsFor(bundle, args.required("--secrets"), hostname),
     ...(args.values.get("--location")

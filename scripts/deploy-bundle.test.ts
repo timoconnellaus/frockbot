@@ -157,6 +157,7 @@ function install(overrides: Partial<InstallV1> = {}): InstallV1 {
     vars: {
       ACCESS_TEAM_DOMAIN: "team.cloudflareaccess.com",
       ACCESS_AUD: "d".repeat(64),
+      APP_ORIGIN: "https://bot.example.com",
     },
     secrets: {
       CREDENTIAL_KEYRING: "{}",
@@ -257,9 +258,10 @@ describe("the bundle's identity", () => {
     }
   });
 
-  test("the install supplies the Access vars; nothing else in it is install-specific", async () => {
+  test("the install supplies the Access vars and its origin; nothing else in it is install-specific", async () => {
     const manifest = await manifestV1();
     expect(manifest.workers.app.installVars).toEqual([
+      "APP_ORIGIN",
       "ACCESS_TEAM_DOMAIN",
       "ACCESS_AUD",
     ]);

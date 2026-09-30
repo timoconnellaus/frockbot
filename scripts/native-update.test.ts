@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
 
-test("Android release and patch delivery preserves signing, versions, and download access", () => {
+test("Android release and patch delivery preserves signing and versions", () => {
   const result = Bun.spawnSync([
     "python3",
     fileURLToPath(new URL("./native-update-test.py", import.meta.url)),

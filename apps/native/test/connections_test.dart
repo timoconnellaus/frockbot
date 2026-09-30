@@ -94,41 +94,43 @@ void main() {
     }
   });
 
-  test(
-    'a return link is one of this app\'s three return pages, and nothing else',
-    () {
-      for (final link in [
-        'https://bot.frockbot.com/api/connect/callback/android?status=success',
-        'frockbot://bot.frockbot.com/api/connect/callback/macos',
-        'frockbot://bot.frockbot.com/api/connect/callback/ios',
-      ]) {
-        expect(isConnectReturnV1(Uri.parse(link)), isTrue, reason: link);
-      }
-      for (final link in [
-        // The browser-tab page: it never opens the app.
-        'https://bot.frockbot.com/api/connect/callback?status=success',
-        // Each client's page only on the scheme that page hands over on.
-        'frockbot://bot.frockbot.com/api/connect/callback/android',
-        'https://bot.frockbot.com/api/connect/callback/macos',
-        // The FrockBot Dev builds' pages belong to those apps alone.
-        'frockbot-dev://bot.frockbot.com/api/connect/callback/macos-dev',
-        'frockbot://bot.frockbot.com/api/connect/callback/macos-dev',
-        'frockbot-dev://bot.frockbot.com/api/connect/callback/ios-dev',
-        'frockbot://bot.frockbot.com/api/connect/callback/ios-dev',
-        // The iPhone's page is handed over on its scheme, never claimed.
-        'https://bot.frockbot.com/api/connect/callback/ios',
-        // Anything else under the callback path.
-        'frockbot://bot.frockbot.com/api/connect/callback/windows',
-        'https://bot.frockbot.com/api/connect/callback/android/extra',
-        'https://bot.frockbot.com/native/return/android?code=1&state=2',
-        'https://bot.frockbot.com/?bot=primary',
-        'https://bot.frockbot.com/api/connect/callbacks',
-        'http://bot.frockbot.com/api/connect/callback/android',
-      ]) {
-        expect(isConnectReturnV1(Uri.parse(link)), isFalse, reason: link);
-      }
-    },
-  );
+  test('a return link is one of this app\'s return pages, and nothing else', () {
+    for (final link in [
+      'frockbot://bot.frockbot.com/api/connect/callback/android?status=success',
+      // An Android development identity hands over on its own scheme.
+      'frockbot-dev://bot.frockbot.com/api/connect/callback/android',
+      'frockbot://bots.example.org/api/connect/callback/android',
+      'frockbot://bot.frockbot.com/api/connect/callback/macos',
+      'frockbot://bot.frockbot.com/api/connect/callback/ios',
+    ]) {
+      expect(isConnectReturnV1(Uri.parse(link)), isTrue, reason: link);
+    }
+    for (final link in [
+      // The browser-tab page: it never opens the app.
+      'https://bot.frockbot.com/api/connect/callback?status=success',
+      // Each client's page only on the scheme that page hands over on, and
+      // naming the server it came from.
+      'https://bot.frockbot.com/api/connect/callback/android',
+      'frockbot:///api/connect/callback/android',
+      'https://bot.frockbot.com/api/connect/callback/macos',
+      // The FrockBot Dev builds' pages belong to those apps alone.
+      'frockbot-dev://bot.frockbot.com/api/connect/callback/macos-dev',
+      'frockbot://bot.frockbot.com/api/connect/callback/macos-dev',
+      'frockbot-dev://bot.frockbot.com/api/connect/callback/ios-dev',
+      'frockbot://bot.frockbot.com/api/connect/callback/ios-dev',
+      // The iPhone's page is handed over on its scheme, never claimed.
+      'https://bot.frockbot.com/api/connect/callback/ios',
+      // Anything else under the callback path.
+      'frockbot://bot.frockbot.com/api/connect/callback/windows',
+      'https://bot.frockbot.com/api/connect/callback/android/extra',
+      'https://bot.frockbot.com/native/return/android?code=1&state=2',
+      'https://bot.frockbot.com/?bot=primary',
+      'https://bot.frockbot.com/api/connect/callbacks',
+      'http://bot.frockbot.com/api/connect/callback/android',
+    ]) {
+      expect(isConnectReturnV1(Uri.parse(link)), isFalse, reason: link);
+    }
+  });
 
   group('an MCP server sign-in', () {
     test('a return link carrying a server\'s answer is sent back to finish', () {

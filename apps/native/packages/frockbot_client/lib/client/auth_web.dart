@@ -11,10 +11,10 @@ class HostedSignIn implements SignIn {
   HostedSignIn(this.api);
 
   @override
-  Future<void> start() async {
+  Future<bool?> start() async {
     final here = Uri.parse(web.window.location.href);
     if (developmentAuth) {
-      return _go(
+      _go(
         here
             .replace(
               queryParameters: {
@@ -24,6 +24,7 @@ class HostedSignIn implements SignIn {
             )
             .toString(),
       );
+      return null;
     }
     final callback = Uri.parse(hostedOrigin).replace(path: '/').toString();
     final response = await api.request(
@@ -42,6 +43,7 @@ class HostedSignIn implements SignIn {
       throw const RequestFailure('Couldn’t open sign-in. Please try again.');
     }
     _go(url);
+    return null;
   }
 
   @override

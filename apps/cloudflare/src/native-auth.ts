@@ -23,10 +23,13 @@ import {
   admissionUnavailableResponse,
 } from "./account-admission.js";
 import {
+  NATIVE_APP_PLATFORMS_V1,
+  nativeAppReturnUriV1,
   nativeReturnSchemeV1,
   type AuthIdentityV1,
   type AuthPackageIdentityV1,
   type BrandV1,
+  type NativeAppPlatformV1,
 } from "@frockbot/core/contracts";
 import type {
   NativeSessionOperation,
@@ -63,15 +66,37 @@ export function nativeReturnUriV1(
   return `${new URL(origin).origin}/native/return/${platform}`;
 }
 /**
- * Where a development build of the app receives its sign-in. A custom scheme,
- * the brand's development one, because a plain-HTTP loopback origin can never
- * be an App Link; only a Worker running with `ALLOW_DEVELOPMENT_AUTH` ever
- * lists it.
+ * The returns every deployment serves, whatever its profile: each app on the
+ * brand's own scheme, released and development builds alike. This is how an
+ * app signs in to a server whose host it was not built for — a self-hosted
+ * install, or a second account — because no verified link is involved. PKCE
+ * is what makes it safe: another app claiming the scheme receives a code it
+ * cannot redeem, and the consent page still asks the person first.
  */
-export function nativeDevelopmentReturnUriV1(
+export function nativeAppReturnUrisV1(
   brand: Pick<BrandV1, "nativeScheme">,
-): string {
-  return `${nativeReturnSchemeV1(brand, "development")}://native/return/android`;
+): readonly string[] {
+  return (["released", "development"] as const).flatMap((build) =>
+    NATIVE_APP_PLATFORMS_V1.map((platform) =>
+      nativeAppReturnUriV1(brand, build, platform),
+    ),
+  );
+}
+
+/** Which app a scheme return belongs to, for the consent page's question. */
+function nativeAppOfReturn(
+  returnUri: string,
+  brand: Pick<BrandV1, "nativeScheme">,
+):
+  | { platform: NativeAppPlatformV1; build: "released" | "development" }
+  | undefined {
+  for (const build of ["released", "development"] as const) {
+    for (const platform of NATIVE_APP_PLATFORMS_V1) {
+      if (nativeAppReturnUriV1(brand, build, platform) === returnUri)
+        return { platform, build };
+    }
+  }
+  return undefined;
 }
 /**
  * Which build each Apple return page hands over to, on the brand's scheme
@@ -130,12 +155,14 @@ export function nativeReturnUris(
 
 /** What the consent page calls the app a return belongs to. */
 function nativeAppName(
-  platform: NativeReturnPlatformV1,
+  platform: NativeReturnPlatformV1 | "android-dev",
   product: string,
 ): string {
   switch (platform) {
     case "android":
       return `the ${product} app on this Android device`;
+    case "android-dev":
+      return `${product} Dev on this Android device`;
     case "macos":
       return `the ${product} app on this Mac`;
     case "macos-dev":
@@ -573,15 +600,22 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
       expires: claims.expires,
       userId: session.user.id,
     });
-    const platform = NATIVE_RETURN_PLATFORMS.find(
-      (candidate) =>
-        nativeReturnUriV1(origin, candidate) === claims.start.returnUri,
-    );
+    const app = nativeAppOfReturn(claims.start.returnUri, options.brand);
+    const platform =
+      NATIVE_RETURN_PLATFORMS.find(
+        (candidate) =>
+          nativeReturnUriV1(origin, candidate) === claims.start.returnUri,
+      ) ??
+      (app === undefined
+        ? undefined
+        : app.build === "released"
+          ? app.platform
+          : (`${app.platform}-dev` as const));
     const destination = new URL(claims.start.returnUri);
     return returnPageV1({
       brand: options.brand,
       title: `Sign in to ${product}`,
-      heading: `Sign in to ${platform ? nativeAppName(platform, product) : `the ${product} development build on this device`}?`,
+      heading: `Sign in to ${platform ? nativeAppName(platform, product) : `the ${product} app on this device`}?`,
       lead: session.user.email
         ? `You’ll be signed in as ${session.user.email}.`
         : "You’ll be signed in with the account this browser uses.",
@@ -589,7 +623,7 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
         label: "Sign in",
         action: `${origin}/native/authorize`,
         fields: { consent },
-        // The development scheme is the one return off this origin.
+        // An app's own scheme is the one return off this origin.
         ...(destination.origin === origin
           ? {}
           : { redirects: [destination.protocol] }),

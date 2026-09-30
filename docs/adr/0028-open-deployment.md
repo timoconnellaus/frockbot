@@ -154,12 +154,27 @@ alias a relative import. `apps/cloudflare/tsconfig.access.json` type-checks the
 whole Worker against the other chooser, so an `env` name only one build has
 cannot reach the other unnoticed, and `scripts/check-auth-package-imports.ts` is
 the import rule. The Access build has no better-auth secret to sign the native
-door with, so it mints `NATIVE_TOKEN_SECRET` instead — and native sign-in is
-closed on the simple profile even so: the `assetlinks.json` and
-`apple-app-site-association` the Worker serves name the hosted app's package and
-signing fingerprint, so a client a deployer builds and signs has no verified
-return path on their own hostname. The simple profile names no native targets,
-and the web client is its client until that association is per-deployment.
+door with, so it mints `NATIVE_TOKEN_SECRET` instead.
+
+**Revised, 2026-09-30: every deployment signs the apps in.** A verified return
+could only ever name the one host an app was built for — `assetlinks.json` and
+`apple-app-site-association` name the hosted app's package and signing
+fingerprint — so the simple profile first shipped with native sign-in closed
+and the web client as its only client. The apps now sign in with PKCE in the
+system browser (RFC 8252) and come back on their own scheme,
+`<nativeScheme>://native/return/<android|ios|macos>` (`-dev` for the FrockBot
+Dev builds), which every deployment with a native token secret serves whatever
+its profile names: `ASWebAuthenticationSession` on an iPhone and a Mac, a
+Custom Tab on Android. Another app claiming the scheme receives a code it
+cannot redeem without the verifier, and the consent page still asks the person
+first. The profile's `nativeAuth` now names only the verified `https` returns an
+older app still uses. A deployment knows its origin from `BETTER_AUTH_URL` or,
+without one, from `APP_ORIGIN`, which the profile's first app hostname
+generates. An app reads `/.well-known/frockbot.json` — the server's name,
+protocol range, sign-in method and release, public and holding no secret —
+before signing in, and says plainly when a server is too old for it or needs a
+newer app; Access bypasses that one path. The same app holds several accounts
+at once, one per sign-in, each on its own server.
 
 ### 2. Administration out of the app
 
@@ -281,12 +296,15 @@ no better-auth secret to sign the native door with — recorded in
 `.deployment/simple/secrets.env` at mode 0600, since `wrangler secret list` says
 a name is set and never what it is set to, so a lost record could only be
 re-minted and would invalidate every credential, webhook key, paired machine and
-open Applet page it protects. **Two Access applications, not one**, because Access
-matches by path prefix and there is no way to say "the document and nothing under
-it": Allow on the app's own hostname — the document, the client, sign-out and the
-native flow, and the policy that is the deployment's allowlist — and Bypass on
-`/api`, which reaches the Worker, which authenticates every one of those requests
-itself from the Access cookie or the bearer. `ui.<app hostname>` is in neither: an
+open Applet page it protects. **Three Access applications, not one**, because
+Access matches by path prefix and there is no way to say "the document and nothing
+under it": Allow on the app's own hostname — the document, the client, sign-out
+and the native flow, and the policy that is the deployment's allowlist — Bypass
+on `/api`, which reaches the Worker, which authenticates every one of those
+requests itself from the Access cookie or the bearer, and Bypass on
+`/.well-known/frockbot.json`, which an app reads before anyone has signed in. An
+install made before the discovery file existed gets the third application by
+running `bun run setup` again. `ui.<app hostname>` is in none of them: an
 Applet's page is anonymous by design. Secrets go in with the script upload
 itself, as `secret_text` bindings beside `keep_bindings`, rather than a separate
 put that would address a Worker that does not exist yet on a first install; a

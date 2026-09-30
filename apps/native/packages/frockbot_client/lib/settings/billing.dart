@@ -216,7 +216,7 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
       if (link is! String) {
         throw const FormatException('Payment link is unavailable');
       }
-      final origin = Uri.parse(hostedOrigin);
+      final origin = Uri.parse(widget.api.origin);
       final uri = origin.resolve(link);
       final hosts = (action['hosts'] as List? ?? const []).whereType<String>();
       if (uri.origin != origin.origin &&

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../brand.dart';
 import '../client/auth.dart';
+import '../client/discovery.dart';
 import '../flock/avatar.dart';
 import '../shell/semantics.dart';
 
@@ -12,19 +13,50 @@ class SignInPage extends StatelessWidget {
   final bool awaitingBrowser;
   final String? error;
   final VoidCallback onSignIn;
+
+  /// The server a person chose under "Use another server", which this page
+  /// then signs in to; null is the deployment the build names.
+  final ServerDiscovery? server;
+
+  /// Opens the server address page. Null where there is no choice to make:
+  /// a browser is signed in to the origin that served it.
+  final VoidCallback? onUseAnotherServer;
+
+  /// Goes back to the account on screen, when this page is adding another.
+  final VoidCallback? onCancel;
   const SignInPage({
     super.key,
     required this.busy,
     required this.awaitingBrowser,
     required this.error,
     required this.onSignIn,
+    this.server,
+    this.onUseAnotherServer,
+    this.onCancel,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final provider = clientBrand.signInProvider;
+    final server = this.server;
+    // Who the person signs in with is known for the build's own deployment
+    // alone; another server's is whatever its owner set up.
+    final provider = server == null ? clientBrand.signInProvider : null;
     return Scaffold(
+      appBar: onCancel == null
+          ? null
+          : AppBar(
+              automaticallyImplyLeading: false,
+              backgroundColor: Colors.transparent,
+              leading: identified(
+                SignInIds.cancel,
+                IconButton(
+                  tooltip: 'Back',
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: onCancel,
+                ),
+              ),
+            ),
       body: identified(
         SignInIds.page,
         SafeArea(
@@ -75,6 +107,10 @@ class SignInPage extends StatelessWidget {
                               color: theme.colorScheme.onSurfaceVariant,
                             ),
                           ),
+                          if (server != null) ...[
+                            const SizedBox(height: 24),
+                            ServerCard(server: server),
+                          ],
                           const SizedBox(height: 36),
                           AnimatedSwitcher(
                             duration: FrockTheme.motion(context),
@@ -155,6 +191,21 @@ class SignInPage extends StatelessWidget {
                                   )
                                 : const SizedBox.shrink(),
                           ),
+                          if (onUseAnotherServer case final VoidCallback other
+                              when !busy) ...[
+                            const SizedBox(height: 8),
+                            identified(
+                              SignInIds.otherServer,
+                              TextButton(
+                                onPressed: other,
+                                child: Text(
+                                  server == null
+                                      ? 'Use another server'
+                                      : 'Use a different server',
+                                ),
+                              ),
+                            ),
+                          ],
                           const SizedBox(height: 24),
                           Text(
                             '${provider == null ? 'Secure sign-in.' : 'Secure sign-in with $provider.'}\nYour conversations stay with your account.',
@@ -169,6 +220,54 @@ class SignInPage extends StatelessWidget {
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Which server a sign-in is going to, as the server described itself.
+class ServerCard extends StatelessWidget {
+  final ServerDiscovery server;
+  const ServerCard({super.key, required this.server});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final version = server.version;
+    return Semantics(
+      container: true,
+      label:
+          'Signing in to ${server.name} at ${server.host}'
+          '${version == null ? '' : ', version $version'}',
+      excludeSemantics: true,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.dns_outlined, color: theme.colorScheme.primary),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(server.host, style: theme.textTheme.titleSmall),
+                  const SizedBox(height: 2),
+                  Text(
+                    version == null ? server.name : '${server.name} $version',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );

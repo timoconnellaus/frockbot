@@ -1,9 +1,11 @@
 import Cocoa
 import AVFoundation
+import AuthenticationServices
 import FlutterMacOS
 
 class MainFlutterWindow: NSWindow {
   private var speaker: PcmSpeaker?
+  private var webAuthentication: WebAuthentication?
   /// The system's count for the latest press, so a header click Flutter
   /// reports is judged by the person's own double-click speed.
   private var clickCount = 0
@@ -57,6 +59,7 @@ class MainFlutterWindow: NSWindow {
     }
 
     speaker = PcmSpeaker(flutterViewController.engine.binaryMessenger)
+    webAuthentication = WebAuthentication(flutterViewController.engine.binaryMessenger)
     RegisterGeneratedPlugins(registry: flutterViewController)
     DesktopUpdater.shared.bind(flutterViewController.engine.binaryMessenger)
     DeviceHostBridge.shared.bind(flutterViewController.engine.binaryMessenger)
@@ -188,4 +191,65 @@ private final class PcmSpeaker {
 
   deinit { release() }
   private enum SpeakerError: Error { case invalid }
+}
+
+/// Sign-in in the system's authentication session (RFC 8252). It shares the
+/// person's Safari sign-ins, and hands the return on the app's own scheme
+/// straight back to the call that opened it, so a sign-in to any server —
+/// not only the one this build names — comes back to this app, and to this
+/// build of it rather than whichever copy macOS would open for the scheme.
+/// The same as the iPhone's (`ios/Runner/FrockBotChannels.swift`).
+private final class WebAuthentication: NSObject, ASWebAuthenticationPresentationContextProviding {
+  private let channel: FlutterMethodChannel
+  private var session: ASWebAuthenticationSession?
+
+  init(_ messenger: FlutterBinaryMessenger) {
+    channel = FlutterMethodChannel(name: "frockbot/web-auth", binaryMessenger: messenger)
+    super.init()
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self else { return }
+      guard call.method == "authenticate",
+        let args = call.arguments as? [String: Any],
+        let address = args["url"] as? String,
+        let url = URL(string: address),
+        let scheme = args["scheme"] as? String
+      else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      self.authenticate(url, scheme: scheme, result: result)
+    }
+  }
+
+  /// Answers the return link, nil when the person closed the window, or an
+  /// error when the session could not run.
+  private func authenticate(_ url: URL, scheme: String, result: @escaping FlutterResult) {
+    session?.cancel()
+    let session = ASWebAuthenticationSession(url: url, callbackURLScheme: scheme) {
+      [weak self] callback, error in
+      DispatchQueue.main.async {
+        self?.session = nil
+        if let callback {
+          result(callback.absoluteString)
+        } else if let error = error as? ASWebAuthenticationSessionError,
+          error.code == .canceledLogin
+        {
+          result(nil)
+        } else {
+          result(FlutterError(code: "failed", message: error?.localizedDescription, details: nil))
+        }
+      }
+    }
+    session.presentationContextProvider = self
+    session.prefersEphemeralWebBrowserSession = false
+    self.session = session
+    if !session.start() {
+      self.session = nil
+      result(FlutterError(code: "failed", message: "Sign-in could not start.", details: nil))
+    }
+  }
+
+  func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+    NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first ?? ASPresentationAnchor()
+  }
 }

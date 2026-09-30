@@ -8,9 +8,11 @@ import '../protocol/client_wire.generated.dart' as wire;
 
 /// Navigation only; authority comes from membership in the live directory.
 /// A Group Chat's link answers with its sidebar entry id, `group:<id>`.
-String? botLink(Uri uri) {
+/// [origin] is the server of the account the link is for; a tapped alert may
+/// also name that account's User (`user`), which the app routes by.
+String? botLink(Uri uri, {String? origin}) {
   if (uri.scheme != 'https' ||
-      uri.origin != hostedOrigin ||
+      uri.origin != (origin ?? hostedOrigin) ||
       uri.userInfo.isNotEmpty ||
       uri.hasFragment ||
       (uri.path != '/' && uri.path.isNotEmpty)) {

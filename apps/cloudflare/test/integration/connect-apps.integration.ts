@@ -182,20 +182,17 @@ describe("Connected apps", () => {
     )) as { redirectUrl: string };
     expect(callbackOf(tab.redirectUrl)).toBe(`${ORIGIN}/api/connect/callback`);
 
-    // The phone's page: the verified link has already opened the app, so the
-    // page carries no script and nothing from the query.
+    // The phone's page hands over on the app's scheme, naming this host and
+    // nothing from the query.
     const android = await SELF.fetch(
       `${ORIGIN}/api/connect/callback/android?status=success&connectedAccountId=ca_9`,
     );
     expect(android.status).toBe(200);
     const androidPage = await android.text();
-    expect(androidPage).toContain("Head back to the FrockBot app");
-    expect(androidPage).not.toContain("safe to close");
-    expect(androidPage).not.toContain("<script");
-    expect(androidPage).not.toContain("ca_9");
-    expect(android.headers.get("content-security-policy")).not.toContain(
-      "script-src",
+    expect(androidPage).toContain(
+      `frockbot://${new URL(ORIGIN).host}/api/connect/callback/android`,
     );
+    expect(androidPage).not.toContain("ca_9");
 
     // The Mac's page hands over on the app's scheme, under its own nonce.
     const macos = await SELF.fetch(

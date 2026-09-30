@@ -6,7 +6,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_client/app.dart';
 import 'package:frockbot_client/auth/sign_in_page.dart';
 import 'package:frockbot_client/brand.dart';
-import 'package:frockbot_client/client/auth_io.dart';
+import 'package:frockbot_client/client/desktop_build.dart';
+import 'package:frockbot_client/client/ios_build.dart';
 import 'package:frockbot_client/client/transport.dart';
 import 'package:frockbot_client/connections/document.dart';
 import 'package:frockbot_client/flock/avatar.dart';
@@ -314,8 +315,8 @@ void main() {
   });
 
   test('the app comes back on the brand’s scheme', () {
-    expect(NativeSignIn.macosScheme, 'frockbot');
-    expect(NativeSignIn.iosScheme, 'frockbot');
+    expect(macosSchemeV1, 'frockbot');
+    expect(iosSchemeV1, 'frockbot');
     expect(
       isConnectReturnV1(
         Uri.parse('frockbot://bot.frockbot.com/api/connect/callback/macos'),
@@ -324,8 +325,8 @@ void main() {
     );
 
     wearing(coinfolk);
-    expect(NativeSignIn.macosScheme, 'coinfolk');
-    expect(NativeSignIn.iosScheme, 'coinfolk');
+    expect(macosSchemeV1, 'coinfolk');
+    expect(iosSchemeV1, 'coinfolk');
     expect(
       isConnectReturnV1(
         Uri.parse('coinfolk://coinfolk.example/api/connect/callback/macos'),
@@ -335,6 +336,19 @@ void main() {
     expect(
       isConnectReturnV1(
         Uri.parse('frockbot://coinfolk.example/api/connect/callback/macos'),
+      ),
+      isFalse,
+    );
+    // Android's page hands over on the scheme too, naming the server's host.
+    expect(
+      isConnectReturnV1(
+        Uri.parse('coinfolk://coinfolk.example/api/connect/callback/android'),
+      ),
+      isTrue,
+    );
+    expect(
+      isConnectReturnV1(
+        Uri.parse('https://coinfolk.example/api/connect/callback/android'),
       ),
       isFalse,
     );
@@ -357,6 +371,10 @@ void main() {
       expect(
         File('android/app/src/debug/AndroidManifest.xml').readAsStringSync(),
         contains('android:scheme="$scheme-dev"'),
+      );
+      expect(
+        File('android/app/build.gradle.kts').readAsStringSync(),
+        contains('if (productionIdentity) "$scheme" else "$scheme-dev"'),
       );
       expect(
         File('../cloudflare/src/brand.ts').readAsStringSync(),

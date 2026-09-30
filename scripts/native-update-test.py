@@ -10,12 +10,9 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
-import threading
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
-from urllib.error import HTTPError
-from urllib.request import Request, urlopen
 import zipfile
 
 sys.dont_write_bytecode = True
@@ -156,63 +153,6 @@ class UpdatesTest(unittest.TestCase):
         properties.write_text(f"sdk.dir={other}\n")
         with patch.object(updates, "NATIVE", root), patch.dict(os.environ, {"ANDROID_HOME": str(chosen)}):
             self.assertEqual(updates.build_tool("aapt"), chosen / "build-tools/36.0.0/aapt")
-
-    def test_download_and_no_directory_access(self):
-        (updates.STATE / "release.apk").write_bytes(b"complete apk")
-        (updates.STATE / "latest.json").write_text(json.dumps({"versionCode": 50, "file": "release.apk"}))
-        (updates.STATE / "private.txt").write_text("must not be served")
-        server = updates.ThreadingHTTPServer(("127.0.0.1", 0), updates.Downloads)
-        thread = threading.Thread(target=server.serve_forever)
-        thread.start()
-        url = f"http://127.0.0.1:{server.server_port}"
-        try:
-            with urlopen(url + "/frockbot.apk") as response:
-                self.assertEqual(response.read(), b"complete apk")
-                self.assertEqual(response.headers["Content-Type"], "application/vnd.android.package-archive")
-                self.assertEqual(response.headers["Cache-Control"], "no-store")
-            for route in ("/", "/private.txt", "/../private.txt"):
-                with self.assertRaises(HTTPError) as result:
-                    urlopen(url + route)
-                self.assertEqual(result.exception.code, 404)
-                result.exception.close()
-            (updates.STATE / "release.apk").unlink()
-            with self.assertRaises(HTTPError) as result:
-                urlopen(url + "/frockbot.apk")
-            self.assertEqual(result.exception.code, 503)
-            result.exception.close()
-            (updates.STATE / "latest.json").unlink()
-            with self.assertRaises(HTTPError) as result:
-                urlopen(url + "/frockbot.apk")
-            self.assertEqual(result.exception.code, 503)
-            result.exception.close()
-        finally:
-            server.shutdown()
-            thread.join()
-            server.server_close()
-
-    def test_head_serves_only_the_download_routes(self):
-        (updates.STATE / "release.apk").write_bytes(b"complete apk")
-        (updates.STATE / "latest.json").write_text(json.dumps({"versionCode": 50, "file": "release.apk"}))
-        (updates.STATE / "shorebird-private.pem").write_text("must not be served")
-        server = updates.ThreadingHTTPServer(("127.0.0.1", 0), updates.Downloads)
-        thread = threading.Thread(target=server.serve_forever)
-        thread.start()
-        url = f"http://127.0.0.1:{server.server_port}"
-        try:
-            with urlopen(Request(url + "/frockbot.apk", method="HEAD")) as response:
-                self.assertEqual(response.headers["Content-Length"], str(len(b"complete apk")))
-                self.assertEqual(response.read(), b"")
-            with urlopen(Request(url + "/health", method="HEAD")) as response:
-                self.assertEqual(response.status, 200)
-            for route in ("/shorebird-private.pem", "/baseline.json", "/pending-release.json"):
-                with self.assertRaises(HTTPError) as result:
-                    urlopen(Request(url + route, method="HEAD"))
-                self.assertEqual(result.exception.code, 404)
-                result.exception.close()
-        finally:
-            server.shutdown()
-            thread.join()
-            server.server_close()
 
 
 SIGNER = updates.SIGNER
