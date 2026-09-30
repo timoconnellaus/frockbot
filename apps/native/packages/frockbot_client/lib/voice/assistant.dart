@@ -611,7 +611,9 @@ class AssistantSessionController extends ChangeNotifier {
       return false;
     } on Object {
       if (generation != _generation || _disposed) return false;
-      await _fail('${clientBrand.productName} couldn’t start the microphone. Try again.');
+      await _fail(
+        '${clientBrand.productName} couldn’t start the microphone. Try again.',
+      );
       return false;
     }
   }

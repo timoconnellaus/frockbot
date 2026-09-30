@@ -176,13 +176,13 @@ test("the shell is usable on a phone", async ({
   await expect(page.getByRole("button", { name: "Routines" })).toHaveCount(0);
 
   // The list is a screen of its own, with the list's controls on it — and
-  // the Marketplace beside the avatar, where a phone keeps it.
+  // Setup beside the avatar, where a phone keeps it.
   await openBots(page);
   await shot(page, "02-bot-list");
   await expectNothingRunsOffTheEdge(page);
   await expectWithinViewport(page, "shell-sidebar");
   await expectWithinViewport(page, "sidebar-profile");
-  await expectWithinViewport(page, "sidebar-marketplace");
+  await expectWithinViewport(page, "sidebar-setup");
   await expectWithinViewport(page, "sidebar-search");
   await expectWithinViewport(page, "sidebar-create-bot");
   await openConversation(page, "Pocket");

@@ -80,12 +80,19 @@ test("browser and native Settings share one owner, revision, pending identity an
     ).status,
   ).toBe(409);
 
-  const models = await read(await native("/api/settings/models"));
-  expect(await read(await asUser(userId, "/api/settings/models"))).toEqual(
+  type Account = {
+    revision: number;
+    accountModel?: unknown;
+    packages: Array<{ packageId: string; state: string }>;
+  };
+  const account = async (response: Response) =>
+    (await response.json()) as Account;
+  const models = await account(await native("/api/settings?view=2"));
+  expect(await account(await asUser(userId, "/api/settings?view=2"))).toEqual(
     models,
   );
-  expect(models.sections[0]!.fields[0]!.value).toBeNull();
-  // A provider is added the way the Marketplace adds it; Models then lists it.
+  expect(models.accountModel).toBeUndefined();
+  // A provider is added the way Setup adds it, and the account then holds it.
   const choose = {
     schemaVersion: 1,
     type: "user/choose-model-provider",
@@ -100,11 +107,10 @@ test("browser and native Settings share one owner, revision, pending identity an
       }
     ).status,
   ).toBe("applied");
-  const chosen = await read(await asUser(userId, "/api/settings/models"));
+  const chosen = await account(await asUser(userId, "/api/settings?view=2"));
   expect(
-    chosen.sections.find((s) => s.id === "provider.provider-ollama-cloud")
-      ?.actions?.[0]?.kind,
-  ).toBe("manage-provider");
+    chosen.packages.find((p) => p.packageId === "provider-ollama-cloud")?.state,
+  ).toBe("installed");
   const current = (await (
     await asUser(userId, "/api/settings?view=2")
   ).json()) as { packages: Array<{ packageId: string; state: string }> };
@@ -128,7 +134,7 @@ test("browser and native Settings share one owner, revision, pending identity an
       })
     ).status,
   ).toBe(426);
-  expect((await read(await native("/api/settings/models"))).revision).toBe(
+  expect((await account(await native("/api/settings?view=2"))).revision).toBe(
     chosen.revision,
   );
 

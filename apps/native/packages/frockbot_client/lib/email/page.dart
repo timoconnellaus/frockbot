@@ -115,7 +115,8 @@ class BotEmailController extends ChangeNotifier {
       message = failure.message;
       return false;
     } catch (_) {
-      message = 'Couldn’t reach ${clientBrand.productName}. Check your connection and try again.';
+      message =
+          'Couldn’t reach ${clientBrand.productName}. Check your connection and try again.';
       return false;
     } finally {
       busy = false;

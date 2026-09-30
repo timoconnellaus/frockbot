@@ -186,13 +186,12 @@ test("projectedFieldIdV1 refuses an id longer than an identifier", () => {
   ).toBeUndefined();
 });
 
-test("a section action carries its kind, and a resettable field gets its own action", () => {
+test("a resettable field gets its own action", () => {
   const document = settingsDocumentV1(
     frame([
       {
-        id: "provider.example",
-        label: "Example AI",
-        credentialStatus: "missing",
+        id: "package.example",
+        label: "Example",
         fields: [
           {
             id: "region",
@@ -204,39 +203,20 @@ test("a section action carries its kind, and a resettable field gets its own act
             isSet: true,
           },
         ],
-        actions: [
-          {
-            kind: "manage-provider",
-            label: "Manage account",
-          },
-        ],
       },
     ]),
   );
   const section = group(document, 0);
   expect(section.children.map((node) => node.type)).toEqual([
-    "text",
-    "action",
-    "group",
-  ]);
-  const [, manage, advanced] = section.children;
-  if (advanced?.type !== "group") throw new Error("expected advanced settings");
-  expect(advanced.collapsed).toBe(true);
-  expect(advanced.children.map((node) => node.type)).toEqual([
     "field",
     "action",
     "action",
   ]);
-  const unset = advanced.children[2];
-  if (manage?.type !== "action" || unset?.type !== "action")
-    throw new Error("expected actions");
-  expect(manage.input).toEqual({
-    sectionId: "provider.example",
-    kind: "manage-provider",
-  });
+  const unset = section.children[2];
+  if (unset?.type !== "action") throw new Error("expected an action");
   expect(unset.label).toBe("Use default for Region");
   expect(unset.input).toEqual({
-    sectionId: "provider.example",
+    sectionId: "package.example",
     fieldId: "region",
   });
 });

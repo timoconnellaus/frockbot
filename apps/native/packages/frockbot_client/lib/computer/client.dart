@@ -177,6 +177,7 @@ class ComputerProjection {
 
   /// A recording running, or kept and waiting to be sent or discarded.
   final ComputerDemonstration? demonstration;
+
   /// The newest checkpoint this Bot knows of: what Reset returns the Computer
   /// to. Absent before the first is saved.
   final DateTime? checkpointAt;

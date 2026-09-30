@@ -117,7 +117,7 @@ class _ModelPickerState extends State<ModelPicker> {
                       ? FrockEmptyState(
                           icon: Icons.cloud_off_rounded,
                           title: 'Models couldn’t load',
-                          detail: 'Check your connection and try again. If Settings changed, return to Models and refresh.',
+                          detail: 'Check your connection and try again.',
                           action: 'Try again',
                           onAction: load,
                         )
@@ -125,8 +125,8 @@ class _ModelPickerState extends State<ModelPicker> {
                       ? FrockEmptyState(
                           icon: Icons.search_off_rounded,
                           title: 'No matching models',
-                          detail: 'Try another name, or add a provider in the Marketplace.',
-                          action: 'Back to Models',
+                          detail: 'Try another name, or add a provider on the AI page in Setup.',
+                          action: 'Back',
                           onAction: () => Navigator.of(context).pop(),
                         )
                       : ListView.builder(

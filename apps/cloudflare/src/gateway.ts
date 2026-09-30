@@ -70,6 +70,14 @@ import {
 } from "@frockbot/app/voice/diagnostics";
 import { createDebugRoute } from "./debug.js";
 import { isPluginPagePathV1, servePluginPageV1 } from "./plugin-page-route.js";
+import { serveSetupDocumentV1 } from "./setup-page.js";
+import {
+  isSetupDocumentPathV1,
+  SETUP_FRAME_PATH_V1,
+  SETUP_PAGES_V1,
+  setupReaderBearerV1,
+  setupReaderPathV1,
+} from "./setup-reader.js";
 import {
   drainedAnswerV1,
   forwardingBodyV1,
@@ -409,6 +417,64 @@ async function deletionRoute(
 }
 
 /**
+ * A framed Setup page's reads (`setup-reader.ts`): the User its credential
+ * names, admitted as a cookie is, on the account routes it opens and no
+ * others. Undefined when the request carries no reader credential.
+ */
+async function identifySetupReader(
+  dependencies: GatewayDependencies,
+  request: Request,
+  url: URL,
+) {
+  const token = setupReaderBearerV1(request);
+  if (token === undefined) return undefined;
+  const expired = () =>
+    Response.json(
+      {
+        error: "Setup has expired. Close it and open it again.",
+        code: "setup-reader-expired",
+      },
+      { status: 401, headers: NO_STORE },
+    );
+  if (!dependencies.setupReader || !setupReaderPathV1(url.pathname))
+    return { refusal: jsonError(403, "Setup cannot open this") };
+  const claims = await dependencies.setupReader.verify(token);
+  if (!claims) return { refusal: expired() };
+  const { userId } = claims;
+  // A local stack admits its development identities without an account
+  // behind them, so a credential minted for one is admitted the same way —
+  // and only where development identities are.
+  const development =
+    dependencies.allowDevelopmentIdentity === true && claims.development;
+  const isAdmin = isDeploymentAdminV1(
+    {
+      id: userId,
+      emailVerified: false,
+      mode: development ? "development" : "better-auth",
+    },
+    { emails: dependencies.adminEmails, userIds: dependencies.adminUserIds },
+  );
+  if (!development && !isAdmin) {
+    let admission;
+    try {
+      admission = await dependencies.setupReader.admit(userId);
+    } catch {
+      return { refusal: admissionUnavailableResponse() };
+    }
+    if (!admission) return { refusal: expired() };
+    if (!admission.admitted)
+      return { refusal: admissionRefusedResponse(admission.reason, false) };
+  }
+  return {
+    userId,
+    session: null,
+    development: development ? { userId, persist: false } : { persist: false },
+    authMode: development ? ("development" as const) : ("better-auth" as const),
+    isAdmin,
+  };
+}
+
+/**
  * Who a request is, and whether they may come in: a native bearer, the
  * development identity, or the browser's session, then the admission
  * authority. A refusal is the answer to send instead.
@@ -418,6 +484,16 @@ async function identifyRequest(
   request: Request,
   url: URL,
 ) {
+  const reader = await identifySetupReader(dependencies, request, url);
+  if (reader?.refusal) return { refusal: reader.refusal };
+  if (reader)
+    return {
+      userId: reader.userId,
+      session: null,
+      development: reader.development,
+      authMode: reader.authMode,
+      isAdmin: reader.isAdmin,
+    };
   let development = dependencies.allowDevelopmentIdentity
     ? developmentIdentity(request)
     : { persist: false };
@@ -604,6 +680,49 @@ export function createGateway(
       }
       return Response.json({ schemaVersion: 1, userId, isAdmin });
     }
+    // The reader credential a framed Setup page opens with. Only a signed-in
+    // app mints one: a reader credential is not a way in here, so a page
+    // cannot keep itself open.
+    if (url.pathname === SETUP_FRAME_PATH_V1) {
+      if (request.method !== "POST")
+        return jsonError(405, "method not allowed");
+      if (
+        !dependencies.setupReader ||
+        setupReaderBearerV1(request) !== undefined
+      )
+        return jsonError(503, "Setup is unavailable");
+      let page: string | undefined;
+      try {
+        const body = (await readNativeJsonBody(request, 1024)) as Record<
+          string,
+          unknown
+        > | null;
+        if (body?.page !== undefined) {
+          if (
+            typeof body.page !== "string" ||
+            !(SETUP_PAGES_V1 as readonly string[]).includes(body.page)
+          )
+            throw new Error("Unknown Setup page");
+          page = body.page;
+        }
+      } catch {
+        return jsonError(400, "invalid request");
+      }
+      const reader = await dependencies.setupReader.mint({
+        userId,
+        development: authMode === "development",
+      });
+      return Response.json(
+        {
+          schemaVersion: 1,
+          // In the fragment, so the credential is in no request line or log.
+          url: `${url.origin}/setup${page ? `/${page}` : ""}#reader=${reader.token}`,
+          expiresAt: reader.expiresAt,
+        },
+        { headers: NO_STORE },
+      );
+    }
+
     if (url.pathname === "/api/whats-new") {
       if (request.method !== "GET") return jsonError(405, "method not allowed");
       // FrockBot's release notes are FrockBot's: a brand that turns them off
@@ -872,29 +991,20 @@ export function createGateway(
       }
     }
 
-    if (
-      ["/api/settings/application", "/api/settings/models"].includes(
-        url.pathname,
-      )
-    ) {
-      const home = url.pathname.endsWith("/models") ? "models" : "application";
+    if (url.pathname === "/api/settings/application") {
       try {
         const owner = dependencies.userConfigurationFor(userId);
         if (request.method === "GET") {
           // Identity supplies only an unsaved profile suggestion. The User's
           // saved profile wins and only a save command persists edited fields.
-          const identity =
-            home !== "application"
-              ? null
-              : development.userId
-                ? { name: "Local developer" }
-                : await dependencies.auth.profile?.(userId).catch(() => null);
+          const identity = development.userId
+            ? { name: "Local developer" }
+            : await dependencies.auth.profile?.(userId).catch(() => null);
           const frame = decodeProtocol(
             "SettingsFrame",
             await owner.readSettingsFrame({
               schemaVersion: 1,
               userId,
-              home,
               ...(identity?.name?.trim()
                 ? { identityName: identity.name.trim().slice(0, 100) }
                 : {}),
@@ -915,18 +1025,14 @@ export function createGateway(
           // wants a frame keeps getting one.
           return Response.json(
             url.searchParams.get("as") === "document"
-              ? settingsDocumentV1(
-                  home === "application"
-                    ? {
-                        ...frame,
-                        sections: frame.sections.filter(
-                          (section) =>
-                            section.id ===
-                            (url.searchParams.get("section") ?? "profile"),
-                        ),
-                      }
-                    : frame,
-                )
+              ? settingsDocumentV1({
+                  ...frame,
+                  sections: frame.sections.filter(
+                    (section) =>
+                      section.id ===
+                      (url.searchParams.get("section") ?? "profile"),
+                  ),
+                })
               : frame,
             { headers: { "cache-control": "no-store" } },
           );
@@ -949,7 +1055,6 @@ export function createGateway(
             await owner.changeSettings({
               schemaVersion: 1,
               userId,
-              home,
               command,
             }),
           ),
@@ -1387,6 +1492,11 @@ export function createGateway(
       url = new URL(request.url);
     } catch {
       return jsonError(400, "invalid request URL");
+    }
+
+    // The Setup document names no account; the page reads it afterwards.
+    if (isSetupDocumentPathV1(url.pathname)) {
+      return serveSetupDocumentV1(request, BRAND_V1.productName);
     }
 
     // Anonymous and ahead of everything: a Plugin page is fetched by a

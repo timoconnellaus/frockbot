@@ -1154,7 +1154,7 @@ class _ShellState extends State<_Shell> {
               onSearch: () {},
               onProfile: () {},
               onWhatsNew: () {},
-              onMarketplace: () {},
+              onSetup: () {},
               onToggleHidden: () {},
               onRetry: () async {},
             ),

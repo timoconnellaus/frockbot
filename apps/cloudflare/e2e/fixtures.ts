@@ -790,10 +790,9 @@ export async function commitAndLoseTheAnswer(
 /**
  * Open one of the profile sheet's entries and wait for the surface it names.
  *
- * `marker` has to be something only that surface draws. Settings and Models are
- * both `settings-document`, so waiting on the document meant a press that
- * landed on the wrong row of a still-sliding sheet still reported success — and
- * the spec then asserted about a surface it had not opened.
+ * `marker` has to be something only that surface draws, so a press that
+ * landed on the wrong row of a still-sliding sheet does not report success
+ * for a surface it never opened.
  */
 async function openProfileSurface(
   page: Page,
@@ -804,28 +803,6 @@ async function openProfileSurface(
     await openProfileMenu(page);
     await press(sem(page, entry));
     await expect(sem(page, marker)).toBeVisible({ timeout: 10_000 });
-  }).toPass({ timeout: 120_000 });
-}
-
-/** Open Models: the account's default model, and the providers behind it. */
-export async function openModels(page: Page): Promise<void> {
-  await openProfileSurface(page, "profile-models", "settings-model-field");
-}
-
-/**
- * Open the Marketplace: the services a User authorizes once for every Bot
- * they own. Its door is on the Bot list itself rather than in the profile
- * sheet — beside the avatar on a phone, the foot of the column on a desktop —
- * and the same identifier names both. On a desktop it is a dialog over the
- * shell, on a phone a page; the document's marker is the same in either.
- */
-export async function openConnectors(page: Page): Promise<void> {
-  await expect(async () => {
-    await revealSidebar(page);
-    await press(sem(page, "sidebar-marketplace"));
-    await expect(sem(page, "connections-document")).toBeVisible({
-      timeout: 10_000,
-    });
   }).toPass({ timeout: 120_000 });
 }
 
@@ -1064,150 +1041,70 @@ export async function openBotSettings(page: Page): Promise<void> {
 }
 
 /**
- * Type into the Marketplace search and wait until the field holds it.
- *
- * `fill()` sets the DOM input's value. A Flutter field only reads that while
- * an editing session is open, so a fill against a closed session reports
- * success and leaves the catalog unfiltered. [answerInputs] opens the session
- * and types.
+ * Open a page of Setup in the tab itself, signed in by the tab's own session.
+ * Setup is a plain web page, so a spec drives it by its roles and labels
+ * rather than through Flutter's semantics tree.
  */
-export async function searchMarketplace(
+export async function openSetup(
   page: Page,
-  query: string,
+  subpage: "" | "plan" | "computer" | "ai" | "search" | "apps" | "accounts",
 ): Promise<void> {
-  const search = sem(page, "marketplace-search").locator("input, textarea");
-  await expect(search.first()).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
-  await answerInputs([[search.first(), query]]);
-  await settle(page);
+  await page.goto(subpage ? `/setup/${subpage}` : "/setup");
+  // The heading, not the sidebar: a phone draws the pages as a menu instead.
+  await expect(
+    page.getByRole("main").getByRole("heading").first(),
+  ).toBeAttached({ timeout: SHELL_TIMEOUT_MS });
 }
 
 /**
- * Install the Ollama Cloud provider from the Marketplace catalog. Models
- * only lists providers already added; Connectors offers the key form once
- * the Package is installed. `connectOllama` picks up from Models.
+ * Connect an Ollama Cloud account on Setup's AI page, pointed at the fake
+ * provider, and choose `model` for chat: the path a person takes to use their
+ * own model. Setup adds the provider as its dialog opens, and offers the
+ * model list once the provider has read it.
  */
-export async function chooseOllamaProvider(page: Page): Promise<void> {
-  await openModels(page);
-  const section = group(page, "Ollama Cloud");
-  // Models lists a provider only once it is added, and its one action reads
-  // "Connect account" or "Manage provider" by whether a key is connected, so
-  // the action being there at all is what says it was added.
-  const added = section
-    .locator('[flt-semantics-identifier^="view-action-section-"]')
-    .first();
-  if (await added.count()) {
-    await closeOverlay(page);
-    return;
-  }
-  await closeOverlay(page);
-  await openConnectors(page);
-  await searchMarketplace(page, "Ollama Cloud");
-  const offer = group(page, "Ollama Cloud");
-  await expect(offer).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
-  const add = sem(offer, "view-action-add-provider-ollama-cloud");
-  if (await add.isVisible().catch(() => false)) {
-    await press(add);
-    await settle(page);
-  }
-  await closeOverlay(page);
-  await openModels(page);
-  await expect(added).toBeVisible({ timeout: 60_000 });
-  await closeOverlay(page);
-}
-
-/**
- * Connect an Ollama Cloud account on Connectors, and wait for *that* account.
- *
- * The form is answered once and submitted once. It used to be answered again
- * from scratch — disconnecting whatever the last attempt had left behind —
- * because a press that the canvas swallowed looked exactly like a credential
- * that never landed. Both halves of that are gone: `answerInputs` proves every
- * field holds what this spec typed before anything is submitted, and `press`
- * activates the named node rather than a point on the canvas, so a submission
- * that returned is a submission the product received. Answering a credential
- * form twice is not something a person does, and a helper that did it hid
- * whatever made the first attempt fail.
- *
- * What is still asked repeatedly is the *read*: the catalogue is refreshed
- * behind the connect while a `ViewSurfacePage` re-reads only when something is
- * pressed, so the row is pressed again rather than waited on. That loop writes
- * nothing.
- *
- * The wait is scoped to the provider's own group: Frock AI is connected out of
- * the box and its row says the same words from the first frame.
- */
-export async function connectOllama(
+export async function connectOllamaInSetup(
   page: Page,
-  options: { apiKey: string; apiBaseUrl: string; label?: string },
+  options: { apiKey: string; apiBaseUrl: string; model: string },
 ): Promise<void> {
-  await openModels(page);
-  await press(
-    group(page, "Ollama Cloud")
-      .locator('[flt-semantics-identifier^="view-action-section-"]')
-      .first(),
-  );
-  await expect(sem(page, "connections-document")).toBeVisible({
+  await openSetup(page, "ai");
+  const custom = page.getByRole("button", { name: "Custom", exact: true });
+  if ((await custom.getAttribute("aria-pressed")) !== "true")
+    await custom.click();
+  await page.getByRole("button", { name: /^Provider for Chat:/u }).click();
+  await page.getByRole("searchbox").fill("Ollama");
+  await page
+    .getByRole("listitem")
+    .filter({ hasText: "Ollama Cloud" })
+    .first()
+    .click();
+  const connect = page.getByRole("dialog", { name: "Connect Ollama Cloud" });
+  await expect(connect.getByRole("button", { name: "Connect" })).toBeEnabled({
     timeout: 60_000,
   });
-  const provider = group(page, "Ollama Cloud");
-  await expect(provider).toBeVisible({ timeout: 60_000 });
-  await press(provider.getByText("Connect", { exact: true }));
-  await press(provider.getByText("Advanced — custom server", { exact: true }));
-  await answerInputs([
-    [
-      provider.locator('input[aria-label="Account name"]'),
-      options.label ?? E2E_CONNECTION_LABEL,
-    ],
-    [provider.locator('input[aria-label="API base URL"]'), options.apiBaseUrl],
-    [provider.locator('input[aria-label="API key"]'), options.apiKey],
-  ]);
-  await press(action(provider, "connect-0"));
-  // The compact row speaks the Connected pill either as its own node or
-  // folded into the provider heading. `spokenText` reads both.
-  await expect(async () => {
-    await press(sem(page, "connections-refresh"));
-    expect(await spokenText(provider)).toMatch(/\bConnected\b/u);
-  }).toPass({ timeout: 90_000 });
-  await closeOverlay(page);
-}
-
-/**
- * Choose, and save, the default model every new Bot starts on.
- *
- * Two steps a person makes that a spec would otherwise skip: the surface read
- * its catalogue before the account existed, so it is refreshed first or the
- * picker says "No matching models"; and the picker only stages a choice, which
- * the group's own Save is what writes.
- */
-export async function chooseDefaultModel(
-  page: Page,
-  optionLabel: string,
-): Promise<void> {
-  await openModels(page);
-  await press(sem(page, "settings-refresh"));
-  await sem(page, "settings-model-field").click();
-  const picker = sem(page, "model-picker");
-  await expect(picker).toBeVisible();
-  const option = sem(page, `model-option-${optionLabel}`);
-  await expect(option).toBeVisible({ timeout: 60_000 });
-  await option.click();
-  await expect(picker).toBeHidden();
-  await press(action(sem(page, "settings-document"), "save-0"));
+  await connect.getByLabel("Ollama Cloud API key").fill(options.apiKey);
+  await connect.getByText("Advanced", { exact: true }).click();
+  await connect.getByLabel(/^API base URL/u).fill(options.apiBaseUrl);
+  await connect.getByRole("button", { name: "Connect" }).click();
+  const models = page.getByRole("dialog", {
+    name: "Choose a Ollama Cloud model for chat",
+  });
+  await expect(models).toBeVisible({ timeout: 90_000 });
+  await models
+    .getByRole("listitem")
+    .filter({ hasText: options.model })
+    .first()
+    .click();
+  await expect(models).toBeHidden({ timeout: 60_000 });
   await expect(
-    sem(page, "settings-model-field").getByText(optionLabel),
-  ).toBeVisible({ timeout: 60_000 });
-  await closeOverlay(page);
+    page.getByRole("button", { name: /^Model for Chat:/u }),
+  ).toContainText(options.model);
 }
 
 /**
  * The whole path a User walks before a first conversation with a Bot that
- * answers from the fake provider: the two Packages, the account, the model, the
- * Bot. Every step is a press a person makes, so the specs that need a working
- * Bot prove the path as a side effect of using it.
- *
- * Both Packages, because Connectors offers a provider's connect form only once
- * that provider's own Package is on, and Ollama Cloud ships off just as Custom
- * models does.
+ * answers from the fake provider: the provider, its account and the chat
+ * model in Setup, then the Bot. Every step is a press a person makes, so the
+ * specs that need a working Bot prove the path as a side effect of using it.
  */
 export async function provisionThroughUi(
   page: Page,
@@ -1218,30 +1115,20 @@ export async function provisionThroughUi(
     botName: string;
   },
 ): Promise<void> {
-  // Provisioned in a window tall enough that the rows this path presses are on
-  // screen without scrolling, and restored afterwards. Steering a Flutter list
-  // by the wheel is not something to build a suite on: the engine drops a row
-  // out of the accessibility tree as the list moves and does not reliably put
-  // it back, so a row can be absent for a dozen consecutive scroll steps while
-  // its neighbours are present throughout. Nothing about provisioning is a
-  // claim about the size of the window, so the size a spec means is the one it
-  // set, and this is not it. The height is empirical rather than counted off a
-  // row: 1800px is what this path is known to clear today — the rows the
-  // provider and default-model steps press, each in the tree when it is
-  // pressed. A step that adds rows to either of those lists means measuring
-  // again here, not assuming there is headroom left.
+  // Provisioned in a window tall enough that the Bot rows this path presses
+  // are on screen without scrolling, and restored afterwards: the engine
+  // drops a row out of the accessibility tree as a list moves and does not
+  // reliably put it back. The height is empirical, what the path is known to
+  // clear today.
   const viewport = page.viewportSize();
   await page.setViewportSize({ width: 1280, height: 1800 });
   await openApplication(page, options.userId);
-  await chooseOllamaProvider(page);
-  await connectOllama(page, {
+  await connectOllamaInSetup(page, {
     apiKey: options.apiKey,
     apiBaseUrl: options.apiBaseUrl,
+    model: E2E_MODEL_LABEL,
   });
-  await chooseDefaultModel(
-    page,
-    `${E2E_MODEL_LABEL} · ${E2E_CONNECTION_LABEL}`,
-  );
+  await openApplication(page, options.userId);
   await createBot(page, options.botName);
   if (viewport) await page.setViewportSize(viewport);
   await expectReadyToSend(page);

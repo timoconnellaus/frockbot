@@ -27,7 +27,6 @@ import '../client/transport.dart';
 import '../computer/card.dart';
 import '../computer/client.dart';
 import '../computer/settings.dart';
-import '../connections/page.dart';
 import '../email/username.dart';
 import '../flock/avatar.dart';
 import '../flock/create.dart';
@@ -54,7 +53,8 @@ import '../settings/credit.dart';
 import '../settings/bot_quick_writes.dart';
 import '../settings/bot_settings.dart';
 import '../settings/look_settings.dart';
-import '../settings/page.dart';
+import '../settings/personal_details.dart';
+import '../setup/page.dart';
 import '../settings/spending.dart';
 import '../settings/voice_settings.dart';
 import '../theme/document.dart';
@@ -3089,7 +3089,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                       profileImageUrl: profileImageUrl,
                       onWhatsNew: _openWhatsNew,
                       whatsNewUnread: whatsNew.unseenCount(whatsNewSeenId) > 0,
-                      onMarketplace: _openMarketplace,
+                      onSetup: _openSetup,
                       phone: single,
                       onToggleHidden: () =>
                           setState(() => showHidden = !showHidden),
@@ -3419,9 +3419,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           const SearchAction('billing', 'Settings: Billing', 'Account'),
           const SearchAction('spending', 'Billing: Spending', 'Account'),
           const SearchAction(
-            'marketplace',
-            'Marketplace',
-            'Connections and services',
+            'setup',
+            'Setup',
+            'Plan, Computer, AI, connected apps and accounts',
           ),
           const SearchAction('machines', 'Your computers', 'Account'),
           if (selected != null)
@@ -3452,8 +3452,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           );
         case 'spending':
           unawaited(_openBilling(spending: true));
-        case 'marketplace':
-          _openMarketplace();
+        case 'setup':
+          _openSetup();
         case 'machines':
           _openAccount(MachineIds.profileEntry, () => _push(_machinesPage()));
         case 'routines':
@@ -3513,40 +3513,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
-  /// The Marketplace: a page and a list on a phone, where the list of Bots is
-  /// the screen and every destination is a page over it; a dialog and a grid
-  /// on a wider layout, where the Bots and the conversation stay put behind
-  /// it. One document either way.
-  void _openMarketplace() {
-    if (shellTierForWidth(MediaQuery.sizeOf(context).width) ==
-        ShellTier.single) {
-      _push(
-        MarketplacePage(
-          onFeaturesChanged: _featuresChanged,
-          api: widget.api,
-          store: widget.store,
-          userId: widget.userId,
-        ),
-      );
-      return;
-    }
-    unawaited(
-      showDialog<void>(
-        context: context,
-        builder: (dialogContext) => _withAccountTheme(
-          dialogContext,
-          MarketplaceDialog(
-            onFeaturesChanged: _featuresChanged,
-            api: widget.api,
-            store: widget.store,
-            userId: widget.userId,
-          ),
-        ),
-      ),
-    );
-  }
+  /// Setup, over everything: it has pages of its own and needs the room.
+  void _openSetup() => unawaited(_push(_setupPage()));
 
-  Widget _settingsPage() => SettingsPage(
+  Widget _setupPage() => SetupPage(
+    api: widget.api,
+    onClose: () => Navigator.of(context).popUntil((route) => route.isFirst),
+    onChanged: _featuresChanged,
+  );
+
+  Widget _settingsPage() => PersonalDetailsPage(
     api: widget.api,
     store: widget.store,
     userId: widget.userId,
@@ -3677,16 +3653,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           ]),
           ProfileGroup('Bots', [
             ProfileSection(
-              id: SettingsIds.profileModels,
-              icon: Icons.auto_awesome_rounded,
-              title: 'Models',
-              page: () => SettingsPage(
-                onFeaturesChanged: _featuresChanged,
-                api: widget.api,
-                store: widget.store,
-                userId: widget.userId,
-                home: 'models',
-              ),
+              id: SetupIds.profileEntry,
+              icon: Icons.tune_rounded,
+              title: 'Setup',
+              page: _setupPage,
             ),
             ProfileSection(
               id: SettingsIds.profileBilling,
@@ -3779,7 +3749,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
     if (!mounted) return;
     // The You page reads this again whenever it opens, and that read is still
-    // in flight while a later page — Marketplace — is on screen. A setState
+    // in flight while a later page — Setup — is on screen. A setState
     // for a name the shell already shows rebuilds that page and tears down
     // the text field's editing session, so a search typed into it never lands.
     if (profileName == name && profileImageUrl == photo) return;

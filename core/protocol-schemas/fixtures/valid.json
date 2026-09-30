@@ -875,7 +875,7 @@
     "schema": "SettingsFrame",
     "value": {
       "schemaVersion": 1,
-      "home": "models",
+      "home": "application",
       "revision": 0,
       "ownerId": "command-1",
       "sections": []
@@ -1904,7 +1904,6 @@
           ]
         }
       ],
-      "modelInUse": "Auto · Frock AI",
       "nextCursor": 50
     }
   },

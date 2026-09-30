@@ -2070,7 +2070,6 @@ export class UserConfiguration
       input,
       {
         userId: rpcIdentifier,
-        home: rpcEnum(["application", "models"]),
       },
       {
         identityName: rpcString(100),
@@ -2081,7 +2080,6 @@ export class UserConfiguration
     await this.assertUserIdentity(request.userId as string);
     return (await this.settingsContribution()).readSettingsFrame(
       request.userId as string,
-      request.home as "application" | "models",
       {
         ...(request.identityName
           ? { name: request.identityName as string }
@@ -2113,25 +2111,19 @@ export class UserConfiguration
   async changeSettings(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
-      home: rpcEnum(["application", "models"]),
       command: rpcDecoded((value) =>
         decodeProtocol("SettingsChangeCommand", value),
       ),
     });
     await this.assertUserIdentity(request.userId as string);
     const command = request.command as { sectionId?: string };
-    const profileSave =
-      request.home === "application" && command.sectionId === "profile";
+    const profileSave = command.sectionId === "profile";
     const before = profileSave
       ? await this.routineTimezone(request.userId as string)
       : undefined;
     const receipt = await (
       await this.settingsContribution()
-    ).changeSettings(
-      request.userId as string,
-      request.home as "application" | "models",
-      request.command,
-    );
+    ).changeSettings(request.userId as string, request.command);
     if (receipt.status === "applied" && before !== undefined) {
       await this.propagateRoutineTimezone(request.userId as string, before);
     }

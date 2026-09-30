@@ -1,12 +1,9 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
 import '../client/document_cache.dart';
 import '../client/transport.dart';
-import '../connections/page.dart';
-import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/desktop_layout.dart';
 import '../shell/lifecycle.dart';
 import '../shell/semantics.dart';
@@ -14,10 +11,9 @@ import '../theme/states.dart';
 import '../view/action.dart';
 import '../view/document.dart';
 import 'controller.dart';
-import 'document.dart';
-import 'model_picker.dart';
 
-/// Settings, rendered by the host's one renderer.
+/// Personal details — name, email and time zone — rendered by the host's one
+/// renderer. Everything else about the account is in Setup (`setup/page.dart`).
 ///
 /// The server projects the settings frame it already produces as a
 /// `ViewDocument`, so this page is a host over `ViewDocumentView` rather than
@@ -25,39 +21,34 @@ import 'model_picker.dart';
 /// retained command envelope are the ones every plugin-described view gets.
 /// What is left here is the surface's own chrome and the route an action
 /// lands on.
-class SettingsPage extends StatefulWidget {
+class PersonalDetailsPage extends StatefulWidget {
   final NativeApi api;
   final LocalStore store;
   final String userId;
-  final String home;
-  final String? section;
-  final String? title;
   final VoidCallback? onFeaturesChanged;
-  const SettingsPage({
+  const PersonalDetailsPage({
     super.key,
     required this.api,
     required this.store,
     required this.userId,
-    this.home = 'application',
-    this.section,
-    this.title,
     this.onFeaturesChanged,
   });
   @override
-  State<SettingsPage> createState() => _SettingsPageState();
+  State<PersonalDetailsPage> createState() => _PersonalDetailsPageState();
 }
 
-class _SettingsPageState extends State<SettingsPage>
+/// The one section of the application settings this page shows.
+const _home = 'application';
+
+class _PersonalDetailsPageState extends State<PersonalDetailsPage>
     with WidgetsBindingObserver {
   late final SettingsController state = SettingsController(
     widget.api,
     widget.userId,
-    widget.home,
-    section: widget.section,
+    _home,
   );
   ViewController? view;
   int? shown;
-  bool handingOff = false;
   bool reloadWanted = false;
   String? saved;
 
@@ -72,11 +63,7 @@ class _SettingsPageState extends State<SettingsPage>
 
   void _seedFromMemory() {
     if (state.document != null) return;
-    final cached = peekViewDocumentCache(
-      widget.userId,
-      state.surfaceId,
-      widget.section ?? widget.home,
-    );
+    final cached = peekViewDocumentCache(widget.userId, state.surfaceId, _home);
     if (cached == null) return;
     state.adoptCachedDocument(cached);
     final document = state.document;
@@ -99,7 +86,7 @@ class _SettingsPageState extends State<SettingsPage>
         widget.store,
         widget.userId,
         state.surfaceId,
-        widget.section ?? widget.home,
+        _home,
       );
       if (cached != null && mounted && state.document == null) {
         state.adoptCachedDocument(cached);
@@ -153,7 +140,7 @@ class _SettingsPageState extends State<SettingsPage>
           widget.store,
           widget.userId,
           state.surfaceId,
-          widget.section ?? widget.home,
+          _home,
           document,
         ),
       );
@@ -172,12 +159,6 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   Future<Map<String, Object?>> _dispatch(Map<String, Object?> command) async {
-    if (viewActionKindV1(command) == manageProviderKindV1) {
-      await _manageProvider(
-        (command['input'] as Map?)?['sectionId'] as String?,
-      );
-      return {'commandId': command['commandId'], 'status': 'applied'};
-    }
     final receipt = await state.dispatch(command);
     if (receipt['status'] == 'applied') {
       reloadWanted = true;
@@ -187,68 +168,6 @@ class _SettingsPageState extends State<SettingsPage>
     return receipt;
   }
 
-  Future<void> _manageProvider(String? sectionId) async {
-    if (handingOff) return;
-    setState(() => handingOff = true);
-    try {
-      await Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => ConnectionsPage(
-            onFeaturesChanged: widget.onFeaturesChanged,
-            api: widget.api,
-            store: widget.store,
-            userId: widget.userId,
-            models: true,
-            packageId: sectionId?.replaceFirst('provider.', ''),
-          ),
-        ),
-      );
-      reloadWanted = true;
-    } finally {
-      if (mounted) setState(() => handingOff = false);
-    }
-  }
-
-  Widget _modelField(
-    BuildContext context,
-    wire.SettingField field,
-    String id,
-    Object? value,
-    void Function(Object? value)? onChanged,
-  ) {
-    // A projected select carries JSON-encoded values, so the current value is
-    // matched as it stands and decoded only for the picker's own comparison.
-    final decoded = value is String ? jsonDecode(value) : null;
-    final matched = (field.choices ?? const <wire.SettingChoice>[]).where(
-      (choice) => choice.value.value == value,
-    );
-    return identified(
-      SettingsIds.modelField,
-      Card(
-        child: ListTile(
-          leading: const Icon(Icons.auto_awesome_rounded),
-          title: Text(matched.isEmpty ? 'Choose a model' : matched.first.label),
-          subtitle: Text(field.hint ?? 'Used by all your Bots'),
-          trailing: const Icon(Icons.expand_more_rounded),
-          onTap: onChanged == null
-              ? null
-              : () async {
-                  final choice = await Navigator.of(context)
-                      .push<wire.SettingChoice>(
-                        MaterialPageRoute(
-                          builder: (_) => ModelPicker(
-                            load: state.options,
-                            selected: decoded,
-                          ),
-                        ),
-                      );
-                  if (choice != null) onChanged(jsonEncode(choice.value.value));
-                },
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final document = state.document;
@@ -256,10 +175,7 @@ class _SettingsPageState extends State<SettingsPage>
     return Scaffold(
       appBar: DesktopHeader(
         child: AppBar(
-          title: Text(
-            widget.title ??
-                (widget.home == 'models' ? 'Models' : 'Personal details'),
-          ),
+          title: const Text('Personal details'),
           actions: [
             identified(
               SettingsIds.refresh,
@@ -319,10 +235,8 @@ class _SettingsPageState extends State<SettingsPage>
                                 ),
                                 document: document,
                                 controller: controller,
-                                fields: {'account-models': _modelField},
                               ),
                             ),
-                            if (widget.home == 'models') ..._homeLinks(),
                           ],
                         ),
                       ),
@@ -333,47 +247,4 @@ class _SettingsPageState extends State<SettingsPage>
       ),
     );
   }
-
-  List<Widget> _homeLinks() => [
-    identified(
-      SettingsIds.connectorsLink,
-      ListTile(
-        leading: const Icon(Icons.storefront_outlined),
-        title: const Text('Add a model provider'),
-        subtitle: const Text(
-          'Find one in the Marketplace, add it and connect your key',
-        ),
-        trailing: const Icon(Icons.chevron_right),
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (_) => MarketplacePage(
-              api: widget.api,
-              store: widget.store,
-              userId: widget.userId,
-              onFeaturesChanged: widget.onFeaturesChanged,
-              initialShowConnectors: false,
-            ),
-          ),
-        ),
-      ),
-    ),
-    ListTile(
-      leading: const Icon(Icons.image_outlined),
-      title: const Text('Image generation'),
-      subtitle: const Text('Choose the model used to create images'),
-      trailing: const Icon(Icons.chevron_right),
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => SettingsPage(
-            onFeaturesChanged: widget.onFeaturesChanged,
-            api: widget.api,
-            store: widget.store,
-            userId: widget.userId,
-            section: 'package.image',
-            title: 'Image generation',
-          ),
-        ),
-      ),
-    ),
-  ];
 }

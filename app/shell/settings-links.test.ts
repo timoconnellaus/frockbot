@@ -15,9 +15,9 @@ describe("settings link scheme", () => {
   });
 
   test("omits the Bot from a User row even when one is selected", () => {
-    expect(
-      settingsLinkV1({ anchor: "user-default-model", botId: "alpha" }),
-    ).toBe("/?settings=models#user-default-model");
+    expect(settingsLinkV1({ anchor: "user-profile", botId: "alpha" })).toBe(
+      "/?settings=user-settings#user-profile",
+    );
   });
 
   test("renders against an origin when one is supplied", () => {

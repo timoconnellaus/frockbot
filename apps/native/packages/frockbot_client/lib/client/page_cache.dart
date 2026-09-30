@@ -64,7 +64,9 @@ CachedPage? decodePageCache(String? saved) {
       before as String?,
       epoch: epoch as String?,
       cursor: cursor as String?,
-      announcements: announcements is List ? List<Object?>.from(announcements) : const [],
+      announcements: announcements is List
+          ? List<Object?>.from(announcements)
+          : const [],
     );
   } catch (_) {
     return null;

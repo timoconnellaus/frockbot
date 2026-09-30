@@ -1,9 +1,9 @@
 /// An app's hosted sign-in, or an MCP server's, opened in the system browser.
 ///
-/// Three things open one: Connect on a Marketplace or Connectors row, the
-/// Connect button on a Card's `ConnectApp`, and Sign in on an MCP server.
-/// They open it the same way, from here, so a door a Bot put in the thread is
-/// exactly the door the person would have found in Settings.
+/// Three things open one: Connect on an app in Setup, which the page asks the
+/// app to open; the Connect button on a Card's `ConnectApp`; and Sign in on an
+/// MCP server. They open it the same way, from here, so a door a Bot put in
+/// the thread is exactly the door the person would have found in Setup.
 library;
 
 import 'package:flutter/foundation.dart'

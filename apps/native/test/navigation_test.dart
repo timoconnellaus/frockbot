@@ -370,76 +370,67 @@ void main() {
     api.close();
   });
 
-  testWidgets('the Marketplace is a page on a phone and a dialog beside it', (
-    tester,
-  ) async {
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    final store = MemoryStore();
-    final api = OfflineApi(store);
-    final sessions = BotSessions(api: api, store: store);
-    final links = ValueNotifier<String?>(null);
-    Widget shell() => MaterialApp(
-      theme: FrockTheme.theme(Brightness.dark),
-      home: AppShell(
-        api: api,
-        store: store,
-        sessions: sessions,
-        userId: 'test-user',
-        botLinks: links,
-        onSignOut: () async {},
-      ),
-    );
+  testWidgets(
+    'Setup opens over the list on a phone and over the shell beside',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final store = MemoryStore();
+      final api = OfflineApi(store);
+      final sessions = BotSessions(api: api, store: store);
+      final links = ValueNotifier<String?>(null);
+      Widget shell() => MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: AppShell(
+          api: api,
+          store: store,
+          sessions: sessions,
+          userId: 'test-user',
+          botLinks: links,
+          onSignOut: () async {},
+        ),
+      );
 
-    // A phone: the door is in the list's bar, and it opens a page over the
-    // list, with the way back in that page's bar.
-    tester.view.physicalSize = const Size(320, 800);
-    await tester.pumpWidget(shell());
-    await tester.pumpAndSettle();
-    expect(find.text('Marketplace'), findsNothing);
-    await tester.tap(identifiedBy(ShellIds.sidebarMarketplace));
-    await tester.pumpAndSettle();
-    expect(find.widgetWithText(AppBar, 'Marketplace'), findsOneWidget);
-    expect(find.byType(Dialog), findsNothing);
-    expect(identifiedBy(ShellIds.sidebar), findsNothing);
-    await tester.pageBack();
-    await tester.pumpAndSettle();
-    expect(identifiedBy(ShellIds.sidebar).hitTestable(), findsOneWidget);
+      // A phone: the door is in the list's bar, and it opens a page over the
+      // list. Offline, the page says so and still offers the way out.
+      tester.view.physicalSize = const Size(320, 800);
+      await tester.pumpWidget(shell());
+      await tester.pumpAndSettle();
+      await tester.tap(identifiedBy(ShellIds.sidebarSetup));
+      await tester.pumpAndSettle();
+      expect(identifiedBy(SetupIds.page), findsOneWidget);
+      expect(find.widgetWithText(AppBar, 'Setup'), findsOneWidget);
+      expect(identifiedBy(ShellIds.sidebar), findsNothing);
+      await tester.tap(find.byTooltip('Close'));
+      await tester.pumpAndSettle();
+      expect(identifiedBy(ShellIds.sidebar).hitTestable(), findsOneWidget);
 
-    // A desktop: the door is the foot of the column, named, and it opens a
-    // dialog over the shell rather than a page in place of it.
-    await tester.pumpWidget(const SizedBox());
-    tester.view.physicalSize = const Size(1200, 800);
-    await tester.pumpWidget(shell());
-    await tester.pumpAndSettle();
-    final foot = identifiedBy(ShellIds.sidebarMarketplace);
-    expect(
-      find.descendant(of: foot, matching: find.text('Marketplace')),
-      findsOneWidget,
-    );
-    await tester.tap(foot);
-    await tester.pumpAndSettle();
-    expect(find.byType(Dialog), findsOneWidget);
-    expect(identifiedBy(ConnectorIds.marketplaceDialog), findsOneWidget);
-    expect(find.widgetWithText(AppBar, 'Marketplace'), findsOneWidget);
-    expect(identifiedBy(ShellIds.sidebar), findsOneWidget);
-    await tester.tap(find.byTooltip('Close marketplace'));
-    await tester.pumpAndSettle();
-    expect(find.byType(Dialog), findsNothing);
+      // A desktop: the door is the foot of the column, named, and Setup covers
+      // the shell, since it has pages of its own.
+      await tester.pumpWidget(const SizedBox());
+      tester.view.physicalSize = const Size(1200, 800);
+      await tester.pumpWidget(shell());
+      await tester.pumpAndSettle();
+      final foot = identifiedBy(ShellIds.sidebarSetup);
+      expect(
+        find.descendant(of: foot, matching: find.text('Setup')),
+        findsOneWidget,
+      );
+      await tester.tap(foot);
+      await tester.pumpAndSettle();
+      expect(identifiedBy(SetupIds.page), findsOneWidget);
+      await tester.tap(find.byTooltip('Close'));
+      await tester.pumpAndSettle();
+      expect(identifiedBy(SetupIds.page), findsNothing);
+      expect(identifiedBy(ShellIds.sidebar), findsOneWidget);
 
-    // It is not in the account sheet any more: the list is where it lives.
-    await tester.tap(identifiedBy(ShellIds.sidebarProfile));
-    await tester.pumpAndSettle();
-    expect(identifiedBy(SettingsIds.profileMenu), findsOneWidget);
-    expect(find.text('Connected apps'), findsNothing);
-    expect(find.widgetWithText(ListTile, 'Marketplace'), findsNothing);
-
-    await tester.pumpWidget(const SizedBox());
-    sessions.clear();
-    links.dispose();
-    api.close();
-  });
+      await tester.pumpWidget(const SizedBox());
+      sessions.clear();
+      links.dispose();
+      api.close();
+    },
+  );
 
   testWidgets('on a phone, Settings back returns to the Profile page', (
     tester,
@@ -521,14 +512,14 @@ void main() {
     );
 
     // Another row swaps the page in place; the rows stay.
-    await tester.tap(identifiedBy(SettingsIds.profileModels));
+    await tester.tap(identifiedBy(SetupIds.profileEntry));
     await tester.pumpAndSettle();
-    expect(find.widgetWithText(AppBar, 'Models'), findsOneWidget);
+    expect(identifiedBy(SetupIds.page), findsOneWidget);
     expect(find.widgetWithText(AppBar, 'Personal details'), findsNothing);
     expect(menu, findsOneWidget);
     await tester.tap(identifiedBy(MachineIds.profileEntry));
     await tester.pumpAndSettle();
-    expect(find.widgetWithText(AppBar, 'Models'), findsNothing);
+    expect(identifiedBy(SetupIds.page), findsNothing);
     expect(find.byType(BackButton), findsOneWidget);
 
     // What a page opens stacks inside it, and a system Back leaves that

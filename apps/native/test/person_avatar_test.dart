@@ -55,7 +55,7 @@ void main() {
             onProfile: () {},
             onWhatsNew: () {},
             profileName: 'Tim OConnell',
-            onMarketplace: () {},
+            onSetup: () {},
             onToggleHidden: () {},
             onRetry: () async {},
           ),

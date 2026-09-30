@@ -8,18 +8,17 @@ import 'document.dart';
 ///
 /// The retained command envelope is no longer here: `ViewController` owns it
 /// for every plugin-described view, and settings is now one of those. What is
-/// left is the read, the model catalog page, and the translation from a view
+/// left is the read and the translation from a view
 /// action to the settings command the route already takes.
 class SettingsController extends ChangeNotifier {
   final NativeApi api;
   final String userId;
   final String home;
-  final String? section;
   wire.ViewDocument? document;
   bool busy = false;
   bool _closed = false;
   String? message;
-  SettingsController(this.api, this.userId, this.home, {this.section});
+  SettingsController(this.api, this.userId, this.home);
 
   String get surfaceId => 'settings-$home';
 
@@ -44,7 +43,7 @@ class SettingsController extends ChangeNotifier {
         await api.request(
           Uri(
             path: '/api/settings/$home',
-            queryParameters: {'as': 'document', 'section': ?section},
+            queryParameters: {'as': 'document'},
           ).toString(),
         ),
       );
@@ -59,30 +58,6 @@ class SettingsController extends ChangeNotifier {
       busy = false;
       _changed();
     }
-  }
-
-  Future<wire.SettingsOptionsPage> options(String query, int? cursor) async {
-    final revision = document?.revision;
-    if (revision == null) throw const FormatException('Settings unavailable');
-    final page = wire.SettingsOptionsPage.fromJson(
-      await api.request(
-        '/api/settings/models/options',
-        body: wire.SettingsOptionsQuery.fromJson({
-          'schemaVersion': 1,
-          'source': 'account-models',
-          'revision': revision,
-          'query': query,
-          'cursor': ?cursor,
-        }).toJson(),
-      ),
-    );
-    if (page.ownerId.value != userId ||
-        page.revision != revision ||
-        page.source != 'account-models' ||
-        document?.revision != revision) {
-      throw const FormatException('Model catalog changed');
-    }
-    return page;
   }
 
   /// The settings route is where a view action on this surface lands. The

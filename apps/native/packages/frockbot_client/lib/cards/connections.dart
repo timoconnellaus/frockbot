@@ -3,7 +3,7 @@
 /// `ConnectApp` is trust chrome: the kernel names the app from its own
 /// catalog, and the host draws the button. The press is not a Card action —
 /// nothing about it goes to the Bot. It opens the app's hosted sign-in under
-/// the person's own session, the same door Connect in the Marketplace opens,
+/// the person's own session, the same door Connect in Setup opens,
 /// because connecting an app is the User granting and never the Bot.
 ///
 /// And the card has to say what happened. A person who signed in and came

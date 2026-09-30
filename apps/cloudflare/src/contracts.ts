@@ -530,7 +530,7 @@ export interface UserConfigurationBinding {
     secretId: string;
   }): Promise<{ schemaVersion: 1; removed: boolean }>;
   readSettingsFrame(
-    request: UserConfigurationReadRpcV1 & { home: "application" | "models" },
+    request: UserConfigurationReadRpcV1,
   ): Promise<SettingsFrame>;
   readSettingsOptions(
     request: UserConfigurationReadRpcV1 & {
@@ -539,7 +539,6 @@ export interface UserConfigurationBinding {
   ): Promise<import("@frockbot/core/protocol-schemas").SettingsOptionsPage>;
   changeSettings(
     request: UserConfigurationReadRpcV1 & {
-      home: "application" | "models";
       command: SettingsChangeCommand;
     },
   ): Promise<OperationReceiptV1>;
@@ -799,6 +798,8 @@ export interface GatewayDependencies {
   };
   /** Explicit Slice 2 prototype; absent until signed-target qualification. */
   nativeAuth?: import("./native-auth.js").NativeAuth;
+  /** Mints and reads the credential a framed Setup page reads the account with. */
+  setupReader?: import("./setup-reader.js").SetupReader;
   loader: WorkerLoader;
   artifacts: ApplicationArtifactStore;
   auth: AuthPackageV1;

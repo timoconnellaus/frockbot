@@ -109,7 +109,8 @@ class DeviceHostController extends ChangeNotifier {
       if (generation == _generation) _adopt(result);
     } catch (_) {
       if (generation != _generation) return;
-      error = 'Device modules couldn’t reach the Mac app. Reopen ${clientBrand.productName}.';
+      error =
+          'Device modules couldn’t reach the Mac app. Reopen ${clientBrand.productName}.';
       enrolling = false;
       notifyListeners();
     }

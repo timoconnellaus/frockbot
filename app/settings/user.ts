@@ -3,8 +3,6 @@ import {
   applicationSettingsFrame,
   connectionsFrame,
   applicationSettingsCommand,
-  modelsSettingsFrame,
-  modelsSettingsCommand,
   modelSettingsOptions,
   type ConnectionsCatalogQueryV1,
 } from "./settings-frame.js";
@@ -726,27 +724,15 @@ export class UserSettingsBackendContribution {
 
   async readSettingsFrame(
     userId: string,
-    home: "application" | "models",
     identity?: { name?: string; email?: string; image?: string },
   ) {
-    const settings = await this.readConfiguration({
-      schemaVersion: 1,
+    return applicationSettingsFrame(
       userId,
-    });
-    return home === "models"
-      ? modelsSettingsFrame(
-          userId,
-          settings,
-          this.host.availablePackages,
-          this.host.productName,
-        )
-      : applicationSettingsFrame(
-          userId,
-          settings,
-          this.host.availablePackages,
-          this.host.productName,
-          identity,
-        );
+      await this.readConfiguration({ schemaVersion: 1, userId }),
+      this.host.availablePackages,
+      this.host.productName,
+      identity,
+    );
   }
 
   async readSettingsOptions(userId: string, input: unknown) {
@@ -758,25 +744,18 @@ export class UserSettingsBackendContribution {
     );
   }
 
-  async changeSettings(
-    userId: string,
-    home: "application" | "models",
-    input: unknown,
-  ) {
+  async changeSettings(userId: string, input: unknown) {
     const requested = decodeProtocol("SettingsChangeCommand", input);
     if (requested.ownerId !== userId)
       throw new ConfigurationDecodeError("Settings owner mismatch");
-    const command =
-      home === "models"
-        ? modelsSettingsCommand(requested)
-        : applicationSettingsCommand(requested);
+    const command = applicationSettingsCommand(requested);
     return this.host.storage.transaction((storage) =>
       this.applyConfigurationCommand(
         userId,
         command,
         storage,
         configurationCommandFingerprintV1(command),
-        home,
+        true,
       ),
     );
   }
@@ -820,7 +799,8 @@ export class UserSettingsBackendContribution {
     command: UserConfigurationCommandV1,
     storage: UserSettingsTransaction,
     commandFingerprint: string,
-    home?: "application" | "models",
+    /** Sent from the Settings page, which edits only its own Packages' settings. */
+    fromSettingsPage = false,
   ): Promise<OperationReceiptV1> {
     await this.assertIdentity(userId, storage);
     const receiptKey = `${RECEIPT_PREFIX}${command.commandId}`;
@@ -868,7 +848,7 @@ export class UserSettingsBackendContribution {
       await storage.put(receiptKey, { commandFingerprint, receipt });
       return receipt;
     }
-    if (home !== undefined && command.type === "user/set-package-settings") {
+    if (fromSettingsPage && command.type === "user/set-package-settings") {
       const installed = current.packages.find(
         (pkg) => pkg.packageId === command.packageId,
       );
@@ -879,8 +859,7 @@ export class UserSettingsBackendContribution {
       if (
         installed?.state !== "installed" ||
         !item ||
-        packageConfigurationHomeV1(item) !==
-          (home === "application" ? "user-settings" : "models")
+        packageConfigurationHomeV1(item) !== "user-settings"
       ) {
         const receipt: OperationReceiptV1 = {
           schemaVersion: 1,

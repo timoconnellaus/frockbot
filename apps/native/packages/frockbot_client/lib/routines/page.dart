@@ -143,8 +143,7 @@ class RoutinesController extends ViewSurfaceController {
             _reload = true;
             continue;
           }
-          _message =
-              'Couldn’t load this Bot’s Routines. Check your connection and try again.';
+          _message = 'Couldn’t load this Bot’s Routines. Check your connection and try again.';
         }
       } while (_reload && !_closed);
     } finally {
@@ -331,16 +330,15 @@ class _RoutinesViewState extends State<RoutinesView> {
 
   late RoutinesController controller;
 
-  RoutinesController _createController() =>
-      RoutinesController(
-        widget.api,
-        widget.botId,
-        openRuns: _openRuns,
-        confirmDelete: _confirmDelete,
-        onInbox: (count) => widget.onInbox?.call(count),
-        onOpenDetail: _openDetail,
-        onCloseDetail: _leaveDetail,
-      )..viewing = widget.initialRoutineId;
+  RoutinesController _createController() => RoutinesController(
+    widget.api,
+    widget.botId,
+    openRuns: _openRuns,
+    confirmDelete: _confirmDelete,
+    onInbox: (count) => widget.onInbox?.call(count),
+    onOpenDetail: _openDetail,
+    onCloseDetail: _leaveDetail,
+  )..viewing = widget.initialRoutineId;
 
   @override
   void initState() {

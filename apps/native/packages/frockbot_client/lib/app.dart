@@ -152,8 +152,8 @@ class _FrockBotAppState extends State<FrockBotApp> {
       botLinks.value = target;
       return;
     }
-    // A hosted door closing: the Marketplace is still where the person left
-    // it, and it reads its frame again to show what they did there. An MCP
+    // A hosted door closing: Setup is still where the person left it, and it
+    // reads the account again to show what they did there. An MCP
     // server's sign-in is finished here first, under this app's session.
     if (isConnectReturnV1(uri)) {
       String? refusal;
@@ -223,7 +223,10 @@ class _FrockBotAppState extends State<FrockBotApp> {
       }
     } catch (_) {
       if (mounted) {
-        setState(() => error = 'Couldn’t reach ${clientBrand.productName}. Please try again.');
+        setState(
+          () => error =
+              'Couldn’t reach ${clientBrand.productName}. Please try again.',
+        );
       }
     } finally {
       if (mounted) setState(() => busy = false);

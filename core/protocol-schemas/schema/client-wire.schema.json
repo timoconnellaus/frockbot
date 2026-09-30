@@ -3706,7 +3706,7 @@
           "const": 1
         },
         "home": {
-          "enum": ["models", "connections", "application", "bot"]
+          "enum": ["connections", "application", "bot"]
         },
         "revision": {
           "type": "integer",
@@ -3740,32 +3740,10 @@
                 "minItems": 0,
                 "maxItems": 64
               },
-              "credentialStatus": {
-                "enum": ["not-required", "missing", "connected", "revoked"]
-              },
               "failure": {
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 8000
-              },
-              "actions": {
-                "type": "array",
-                "maxItems": 4,
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "enum": ["manage-provider"]
-                    },
-                    "label": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 100
-                    }
-                  },
-                  "required": ["kind", "label"],
-                  "additionalProperties": false
-                }
               }
             },
             "required": ["id", "label", "fields"],
@@ -4861,11 +4839,6 @@
             ],
             "additionalProperties": false
           }
-        },
-        "modelInUse": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 300
         },
         "nextCursor": {
           "type": "integer",

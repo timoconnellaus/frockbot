@@ -254,14 +254,14 @@ class ShellSidebar extends StatelessWidget {
   final VoidCallback onWhatsNew;
   final bool whatsNewUnread;
 
-  /// Opens the Marketplace: the services a Bot can be given, and the accounts
-  /// already on them. Where it is drawn depends on [phone].
-  final VoidCallback onMarketplace;
+  /// Opens Setup: the account's plan, Computer, AI, connected apps and
+  /// accounts. Where it is drawn depends on [phone].
+  final VoidCallback onSetup;
 
-  /// Whether this list is a phone's whole screen. There the Marketplace is a
-  /// control in the header beside the account, because the foot of a
-  /// full-height list is the last place a thumb reaches; on a wider layout
-  /// the column has a foot, and the Marketplace is a named row on it.
+  /// Whether this list is a phone's whole screen. There Setup is a control in
+  /// the header beside the account, because the foot of a full-height list is
+  /// the last place a thumb reaches; on a wider layout the column has a foot,
+  /// and Setup is a named row on it.
   final bool phone;
 
   final VoidCallback onToggleHidden;
@@ -303,7 +303,7 @@ class ShellSidebar extends StatelessWidget {
     required this.onSearch,
     required this.onProfile,
     required this.onWhatsNew,
-    required this.onMarketplace,
+    required this.onSetup,
     required this.onToggleHidden,
     this.showArchived = false,
     this.onToggleArchived,
@@ -410,7 +410,7 @@ class ShellSidebar extends StatelessWidget {
     final foot = phone
         ? null
         : _Foot(
-            onMarketplace: onMarketplace,
+            onSetup: onSetup,
             onSettings: onProfile,
             onWhatsNew: onWhatsNew,
             whatsNewUnread: whatsNewUnread,
@@ -432,7 +432,7 @@ class ShellSidebar extends StatelessWidget {
           profileImageUrl: profileImageUrl,
           onWhatsNew: phone ? onWhatsNew : null,
           whatsNewUnread: whatsNewUnread,
-          onMarketplace: phone ? onMarketplace : null,
+          onSetup: phone ? onSetup : null,
         ),
         if (!phone)
           Padding(
@@ -1695,7 +1695,7 @@ class _BotRowState extends State<_BotRow> {
 }
 
 /// The list's own controls: you, and a new Bot or Group Chat. On a phone the
-/// header also carries What’s New, the Marketplace and search, which a wider
+/// header also carries What’s New, Setup and search, which a wider
 /// layout names in the column's search field and foot.
 ///
 /// Voice is not here: a call addresses one Bot, so it is started from that
@@ -1718,9 +1718,9 @@ class _Header extends StatelessWidget {
   final VoidCallback? onWhatsNew;
   final bool whatsNewUnread;
 
-  /// The Marketplace, where the header is the place for it; null where the
+  /// Setup, where the header is the place for it; null where the
   /// column's foot names it instead.
-  final VoidCallback? onMarketplace;
+  final VoidCallback? onSetup;
 
   const _Header({
     required this.phone,
@@ -1732,7 +1732,7 @@ class _Header extends StatelessWidget {
     required this.whatsNewUnread,
     this.profileName,
     this.profileImageUrl,
-    this.onMarketplace,
+    this.onSetup,
   });
 
   @override
@@ -1808,12 +1808,12 @@ class _Header extends StatelessWidget {
                 open,
               ),
             ],
-            if (onMarketplace case final VoidCallback open) ...[
+            if (onSetup case final VoidCallback open) ...[
               const SizedBox(width: 2),
               quiet(
-                ShellIds.sidebarMarketplace,
-                'Marketplace',
-                const Icon(Icons.storefront_outlined),
+                ShellIds.sidebarSetup,
+                'Setup',
+                const Icon(Icons.tune_rounded),
                 open,
               ),
             ],
@@ -2022,12 +2022,12 @@ class _SearchField extends StatelessWidget {
 /// Rows rather than icons because the column has the width for a word, and a
 /// word is what makes a door someone has never opened worth opening.
 class _Foot extends StatelessWidget {
-  final VoidCallback onMarketplace;
+  final VoidCallback onSetup;
   final VoidCallback onSettings;
   final VoidCallback onWhatsNew;
   final bool whatsNewUnread;
   const _Foot({
-    required this.onMarketplace,
+    required this.onSetup,
     required this.onSettings,
     required this.onWhatsNew,
     required this.whatsNewUnread,
@@ -2040,12 +2040,8 @@ class _Foot extends StatelessWidget {
       indent: 14,
       rows: [
         identified(
-          ShellIds.sidebarMarketplace,
-          FrockRow(
-            icon: Icons.storefront_outlined,
-            title: 'Marketplace',
-            onTap: onMarketplace,
-          ),
+          ShellIds.sidebarSetup,
+          FrockRow(icon: Icons.tune_rounded, title: 'Setup', onTap: onSetup),
         ),
         identified(
           ShellIds.sidebarSettings,

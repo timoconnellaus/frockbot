@@ -1754,7 +1754,7 @@ describe("native provider setup navigation", () => {
     return { view, headers, session };
   }
   test.each(["models", "connections"])(
-    "returns only to the exact %s home for the same browser User",
+    "returns only to the %s page of Setup for the same browser User",
     async (home) => {
       const f = fixture();
       const { view } = await handoff(f, home);
@@ -1765,7 +1765,7 @@ describe("native provider setup navigation", () => {
       );
       expect(response?.status).toBe(302);
       expect(response?.headers.get("location")).toBe(
-        `${NATIVE_ORIGIN}/?settings=${home}${home === "models" ? "#user-model-providers" : ""}`,
+        `${NATIVE_ORIGIN}/setup/${home === "models" ? "ai" : "apps"}`,
       );
       expect(response?.headers.get("set-cookie")).toBeNull();
       expect(f.values.size).toBe(1);

@@ -186,7 +186,9 @@ class DictationController extends ChangeNotifier {
 
   /// How long this capture has been running. Its own notifier so the pill's
   /// `00:05` can tick without rebuilding the shell.
-  final ValueNotifier<Duration> elapsed = ValueNotifier<Duration>(Duration.zero);
+  final ValueNotifier<Duration> elapsed = ValueNotifier<Duration>(
+    Duration.zero,
+  );
 
   final List<String> _segments = [];
   String _delta = '';
@@ -310,7 +312,9 @@ class DictationController extends ChangeNotifier {
       return;
     } on Object {
       if (generation != _generation || _disposed) return;
-      await _fail('${clientBrand.productName} couldn’t start the microphone. Try again.');
+      await _fail(
+        '${clientBrand.productName} couldn’t start the microphone. Try again.',
+      );
       return;
     }
   }

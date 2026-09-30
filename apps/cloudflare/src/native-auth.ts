@@ -761,8 +761,10 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
                 },
               },
             );
+          // Both homes are Setup's now: models on its AI page, connectors
+          // on Connected apps.
           return redirect(
-            `${origin}/?settings=${claims.home}${claims.home === "models" ? "#user-model-providers" : ""}`,
+            `${origin}/setup/${claims.home === "models" ? "ai" : "apps"}`,
           );
         }
         if (

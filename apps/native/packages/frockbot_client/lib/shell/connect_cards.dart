@@ -127,7 +127,7 @@ class ConnectCardsController extends ChangeNotifier
     } catch (_) {
       _failures[connectionTypeId] =
           'Couldn’t open the sign-in. Try again, or connect it from '
-          'Marketplace in Settings.';
+          'Connected apps in Setup.';
     } finally {
       _opening = null;
       _changed();

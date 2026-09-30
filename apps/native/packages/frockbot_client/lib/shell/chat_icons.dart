@@ -3,15 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 
-enum ChatIconKind {
-  computer,
-  routines,
-  settings,
-  plugins,
-  panel,
-  send,
-  mic,
-}
+enum ChatIconKind { computer, routines, settings, plugins, panel, send, mic }
 
 /// Shared sizing keeps custom and Material icons consistent across clients.
 /// This is the phone's size: big enough to read and hit with a thumb.
