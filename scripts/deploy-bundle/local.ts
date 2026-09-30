@@ -15,6 +15,9 @@ import {
 } from "../../apps/cloudflare/deployment-config/bundle.ts";
 import type { BundleFilesV1 } from "../../apps/cloudflare/deployment-config/deploy.ts";
 
+/** A release version, `v` optional, prereleases included. */
+export const RELEASE_VERSION_PATTERN_V1 = /^v?\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
+
 /** The GitHub repository whose releases carry the bundles. */
 export const BUNDLE_RELEASE_REPOSITORY_V1 = "timoconnellaus/frockbot";
 
@@ -62,7 +65,7 @@ export async function loadBundleV1(
 ): Promise<LocalBundleV1> {
   let manifestBytes: Uint8Array;
   let archiveBytes: Uint8Array;
-  if (/^v?\d+\.\d+\.\d+$/.test(spec)) {
+  if (RELEASE_VERSION_PATTERN_V1.test(spec)) {
     const version = spec.replace(/^v/, "");
     const names = bundleAssetNamesV1(version);
     manifestBytes = await downloadV1(
@@ -140,12 +143,28 @@ export async function cloudflareTokenV1(
   cwd: string,
 ): Promise<string> {
   if (env.CLOUDFLARE_API_TOKEN) return env.CLOUDFLARE_API_TOKEN;
-  const child = Bun.spawn(["bunx", "wrangler", "auth", "token"], {
+  // `--json`, because without it the banner is printed to stdout too.
+  const child = Bun.spawn(["bunx", "wrangler", "auth", "token", "--json"], {
     cwd,
     stdout: "pipe",
     stderr: "pipe",
   });
-  const token = (await new Response(child.stdout).text()).trim();
+  const printed = await new Response(child.stdout).text();
+  let token = "";
+  try {
+    const parsed = JSON.parse(printed.slice(printed.indexOf("{"))) as {
+      type?: string;
+      token?: unknown;
+    };
+    if (
+      (parsed.type === "oauth" || parsed.type === "api_token") &&
+      typeof parsed.token === "string"
+    ) {
+      token = parsed.token.trim();
+    }
+  } catch {
+    // Not logged in: wrangler printed an error, not a token.
+  }
   if ((await child.exited) !== 0 || token === "" || /\s/.test(token)) {
     throw new Error(
       "No Cloudflare token: set CLOUDFLARE_API_TOKEN, or run `bunx wrangler login` first",

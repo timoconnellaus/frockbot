@@ -18,7 +18,7 @@ export const INSTALL_TOKEN_V1 = "{install}";
  * container application, so it has to leave room for the longest suffix
  * (`-application-artifacts`) under R2's 63 characters.
  */
-export const INSTALL_NAME_PATTERN_V1 = "^[a-z][a-z0-9-]{0,30}[a-z0-9]$";
+export const INSTALL_NAME_PATTERN_V1 = "^[a-z0-9][a-z0-9-]{0,40}$";
 
 /**
  * The prefix a bundle is generated under, and then replaced by the token. A
@@ -409,7 +409,7 @@ export async function workerContentHashV1(
 export function checkInstallNameV1(name: string): void {
   if (!new RegExp(INSTALL_NAME_PATTERN_V1).test(name)) {
     throw new Error(
-      `"${name}" is not an install name: lowercase letters, digits and dashes, starting with a letter, at most 32 characters`,
+      `"${name}" is not an install name: lowercase letters, digits and dashes, not starting with a dash, at most 41 characters`,
     );
   }
 }
@@ -539,6 +539,8 @@ export function migrationUploadV1(
 export function bundleSuccessionProblemsV1(
   previous: DeployBundleManifestV1,
   next: DeployBundleManifestV1,
+  /** Classes a release deletes on purpose, with their data. */
+  allowDeleted: readonly string[] = [],
 ): string[] {
   const problems: string[] = [];
   if (previous.install.token !== next.install.token) {
@@ -573,6 +575,17 @@ export function bundleSuccessionProblemsV1(
       problems.push(
         `${key} is renamed from ${before.name} to ${after.name}, a new script with none of its Durable Objects`,
       );
+    }
+    // Appending a deletion is growth by the history's rule, and still data
+    // loss: a class live before must be live after (a rename carries it), or
+    // be named as deleted on purpose.
+    const liveAfter = liveClassesV1(after.migrations);
+    for (const className of liveClassesV1(before.migrations)) {
+      if (!liveAfter.has(className) && !allowDeleted.includes(className)) {
+        problems.push(
+          `${key}'s ${className} Durable Objects are deleted with their data; name it with --allow-deleted if that is meant`,
+        );
+      }
     }
     const history = after.migrations.slice(0, before.migrations.length);
     if (canonicalJsonV1(history) !== canonicalJsonV1(before.migrations)) {
@@ -616,6 +629,8 @@ function durableTargetV1(binding: BundleBindingV1): string | undefined {
       return `index ${String(binding.index_name)}`;
     case "analytics_engine":
       return `dataset ${String(binding.dataset)}`;
+    case "durable_object_namespace":
+      return `class ${String(binding.class_name)}`;
     default:
       return undefined;
   }

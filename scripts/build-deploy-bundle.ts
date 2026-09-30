@@ -183,11 +183,20 @@ const CONTENT_TYPES_V1: Record<string, string> = {
   pdf: "application/pdf",
 };
 
+/**
+ * `application/null` is the API's word for "serve it with no Content-Type",
+ * which is what wrangler sends for an extension it does not know; text types
+ * carry a charset, as wrangler's do.
+ */
 export function assetContentTypeV1(path: string): string {
-  return (
-    CONTENT_TYPES_V1[extname(path).slice(1).toLowerCase()] ??
-    "application/octet-stream"
-  );
+  const type = CONTENT_TYPES_V1[extname(path).slice(1).toLowerCase()];
+  if (type === undefined) return "application/null";
+  return type.startsWith("text/") ||
+    type === "application/javascript" ||
+    type === "application/json" ||
+    type === "image/svg+xml"
+    ? `${type}; charset=utf-8`
+    : type;
 }
 
 /** Wrangler's assets hash, which the upload session is keyed by. */
@@ -253,7 +262,7 @@ export async function buildDeployBundleV1(
   options: BuildOptionsV1,
 ): Promise<DeployBundleManifestV1> {
   const { version, dist } = options;
-  if (!/^\d+\.\d+\.\d+$/.test(version)) {
+  if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(version)) {
     throw new Error(`"${version}" is not a release version`);
   }
   const artifactFile = join(dist, "artifacts", "foundation-v1.mjs");
@@ -410,11 +419,18 @@ function assetsOfV1(
       contentType: assetContentTypeV1(name),
     });
   }
-  const {
-    directory: _directory,
-    binding: _binding,
-    ...assetConfig
-  } = (config.assets ?? {}) as Record<string, unknown>;
+  const { directory: _directory, ...assetConfig } = (config.assets ??
+    {}) as Record<string, unknown>;
+  if ("binding" in assetConfig) {
+    throw new Error(
+      "The app's assets have a binding, which a deploy bundle does not carry yet; teach bundle.ts before adding one",
+    );
+  }
+  if (existsSync(join(webDirectory, ".assetsignore"))) {
+    throw new Error(
+      "The web client has an .assetsignore, whose patterns a deploy bundle does not apply; teach build-deploy-bundle.ts first",
+    );
+  }
   return {
     config: assetConfig,
     ...(headers === undefined ? {} : { headers }),

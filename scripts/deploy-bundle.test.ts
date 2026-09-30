@@ -375,6 +375,21 @@ describe("the equivalence gate between releases", () => {
     );
   });
 
+  test("a deletion appended to the history is refused unless it is named", async () => {
+    const previous = await manifestV1();
+    const next = structuredClone(previous) as DeployBundleManifestV1;
+    (next.workers.app.migrations as unknown[]).push({
+      tag: "v10",
+      deleted_classes: ["GroupChat"],
+    });
+    expect(bundleSuccessionProblemsV1(previous, next)).toEqual([
+      "app's GroupChat Durable Objects are deleted with their data; name it with --allow-deleted if that is meant",
+    ]);
+    expect(bundleSuccessionProblemsV1(previous, next, ["GroupChat"])).toEqual(
+      [],
+    );
+  });
+
   test("a dropped bucket or a reshaped index is refused", async () => {
     const previous = await manifestV1();
     const next = structuredClone(previous) as DeployBundleManifestV1;
@@ -495,7 +510,11 @@ describe("the assets hash", () => {
     expect(assetContentTypeV1("_flutter/x/canvaskit.wasm")).toBe(
       "application/wasm",
     );
-    expect(assetContentTypeV1("x.unknown")).toBe("application/octet-stream");
+    // No Content-Type at all, as wrangler serves an extension it does not know.
+    expect(assetContentTypeV1("x.unknown")).toBe("application/null");
+    expect(assetContentTypeV1("main.dart.js")).toBe(
+      "application/javascript; charset=utf-8",
+    );
   });
 });
 
@@ -772,6 +791,43 @@ describe("deploying through the API", () => {
     expect(
       account.calls.filter((call) => call.endsWith("/rollouts")),
     ).toHaveLength(2);
+  });
+
+  test("a session that asks for one call per file gets one call per file", async () => {
+    const account = fakeAccountV1();
+    const payload = btoa(
+      JSON.stringify({ wrangler_single_asset_uploads: true }),
+    );
+    const inner = account.api.call.bind(account.api);
+    const single: string[] = [];
+    const api: CloudflareApiV1 = {
+      async call(request) {
+        if (request.path.endsWith("/assets-upload-session")) {
+          return {
+            status: 200,
+            body: {
+              result: { jwt: `h.${payload}.s`, buckets: [["b".repeat(32)]] },
+            },
+          };
+        }
+        if (request.path.includes("/workers/assets/upload/")) {
+          single.push(request.headers?.["content-type"] ?? "");
+          return { status: 201, body: { result: { jwt: "completion" } } };
+        }
+        return inner(request);
+      },
+    };
+    const manifest = await manifestV1();
+    await deployBundleV1({
+      api,
+      manifest,
+      files: await filesFor(manifest),
+      install: install(),
+    });
+    expect(single).toEqual(["text/html"]);
+    expect(account.calls).not.toContain(
+      "POST /workers/assets/upload?base64=true",
+    );
   });
 
   test("refuses, before touching anything, an install it would orphan", async () => {

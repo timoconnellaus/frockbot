@@ -329,14 +329,11 @@ for `linux/amd64`. `timoconnellaus` is that Docker Hub account's own username; n
 organisation was created. `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` are still
 unset, so the job skips with a warning on every tag and `deploy-backend` does not
 name it in `needs` — adding it there is what makes a tag production runs always a
-tag an installer can install. The assets are built by `release-assets` and
-attached by `github-release`:
-`frockbot-web-client-<version>.zip` and
-`frockbot-application-artifact-<version>.mjs`, the second as bytes rather than an
-archive because the R2 key the Worker loads it under is that file's own sha256.
+tag an installer can install.
 
-**Built later, as deploy bundles.** The two assets were superseded by a deploy
-bundle per release: `frockbot-deploy-<version>.tar.gz`, holding the three Workers
+**Built later, as deploy bundles.** What an installer pulls besides the images is
+a deploy bundle per release, built by `release-assets` and attached by
+`github-release`: `frockbot-deploy-<version>.tar.gz`, holding the three Workers
 prebuilt with the web client and the application artifact, and the manifest
 `frockbot-deploy-<version>.json`. The manifest names every Worker's modules,
 bindings, migrations, secrets and images, with `{install}` where the install's

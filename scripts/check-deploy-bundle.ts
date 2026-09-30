@@ -5,7 +5,10 @@
  * names, same buckets and index, same container applications, a migration
  * history that only grows at its end ([docs/deploy-bundles.md](../docs/deploy-bundles.md)).
  *
- *   bun scripts/check-deploy-bundle.ts <next manifest> [<previous manifest>]
+ *   bun scripts/check-deploy-bundle.ts <next manifest> [<previous manifest>] [--allow-deleted <Class>]...
+ *
+ * `--allow-deleted` names a Durable Object class a release deletes on purpose,
+ * with its data; without it, a deletion is refused like any other loss.
  *
  * `release.yml` runs it before a bundle is attached, with the manifest of the
  * last release that published one. With no previous manifest there is nothing
@@ -17,7 +20,14 @@ import {
   decodeBundleManifestV1,
 } from "../apps/cloudflare/deployment-config/bundle.ts";
 
-const [nextFile, previousFile] = process.argv.slice(2);
+const positional: string[] = [];
+const allowDeleted: string[] = [];
+const args = process.argv.slice(2);
+for (let index = 0; index < args.length; index += 1) {
+  if (args[index] === "--allow-deleted") allowDeleted.push(args[++index] ?? "");
+  else positional.push(args[index]!);
+}
+const [nextFile, previousFile] = positional;
 if (!nextFile) {
   console.error(
     "usage: bun scripts/check-deploy-bundle.ts <next manifest> [<previous manifest>]",
@@ -34,7 +44,7 @@ if (!previousFile || !existsSync(previousFile)) {
   process.exit(0);
 }
 const previous = read(previousFile);
-const problems = bundleSuccessionProblemsV1(previous, next);
+const problems = bundleSuccessionProblemsV1(previous, next, allowDeleted);
 if (problems.length > 0) {
   console.error(
     `An install of ${previous.version} would lose data if ${next.version} were deployed over it:`,

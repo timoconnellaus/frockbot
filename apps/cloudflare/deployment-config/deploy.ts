@@ -461,6 +461,24 @@ async function deployWorkerV1(
   }
 }
 
+/** Whether an upload session's JWT asks for one call per file, as wrangler reads it. */
+function singleAssetUploadModeV1(jwt: string): boolean {
+  try {
+    const payload = (jwt.split(".")[1] ?? "")
+      .replaceAll("-", "+")
+      .replaceAll("_", "/");
+    return (
+      (
+        JSON.parse(atob(payload)) as {
+          wrangler_single_asset_uploads?: unknown;
+        }
+      ).wrangler_single_asset_uploads === true
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** Base64 of bytes, in chunks a call stack survives. */
 function base64V1(bytes: Uint8Array): string {
   let binary = "";
@@ -505,7 +523,33 @@ async function uploadAssetsV1(
   let completion: string | undefined =
     (opened.buckets ?? []).length === 0 ? opened.jwt : undefined;
   let sent = 0;
-  for (const bucket of opened.buckets ?? []) {
+  const single = singleAssetUploadModeV1(opened.jwt);
+  if (single) {
+    // What the session asks for instead of the bulk form: each file raw, one
+    // call each, typed as it will be served.
+    for (const hash of (opened.buckets ?? []).flat()) {
+      const file = byHash.get(hash);
+      if (!file) {
+        throw new Error(
+          `The upload session asked for ${hash}, which the bundle does not hold`,
+        );
+      }
+      const uploaded = await expectOk(
+        api,
+        {
+          method: "POST",
+          path: `${account}/workers/assets/upload/${hash}`,
+          bytes: await files.read(file.archivePath),
+          headers: { "content-type": file.contentType },
+          bearer: opened.jwt,
+        },
+        `upload ${script}'s asset ${file.path}`,
+      );
+      completion = resultOf<{ jwt?: string }>(uploaded)?.jwt ?? completion;
+      sent += 1;
+    }
+  }
+  for (const bucket of single ? [] : (opened.buckets ?? [])) {
     const form = new FormData();
     for (const hash of bucket) {
       const file = byHash.get(hash);
@@ -641,9 +685,13 @@ async function ensureContainerV1(
       `The container application ${name} serves another Durable Object namespace; it is not this install's`,
     );
   }
+  // The API may answer an instance type as its limits rather than its name,
+  // so the name is compared only when it is there: a restart for nothing is
+  // every running Computer and build cut off.
+  const reportedType = existing.configuration?.instance_type;
   if (
     existing.configuration?.image === container.image &&
-    existing.configuration?.instance_type === container.instanceType &&
+    (reportedType === undefined || reportedType === container.instanceType) &&
     existing.max_instances === container.maxInstances
   ) {
     say(`  container  ${name} already runs ${container.image}`);

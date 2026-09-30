@@ -48,7 +48,7 @@ that profile would have uploaded. Source maps are left out.
   "profile": "simple",
   "protocol": { "min": 2, "max": 4 }, // the client protocol range this server speaks
   "archive": { "file": "frockbot-deploy-0.9.3.tar.gz", "sha256": "…" },
-  "install": { "token": "{install}", "pattern": "^[a-z][a-z0-9-]{0,30}[a-z0-9]$" },
+  "install": { "token": "{install}", "pattern": "^[a-z0-9][a-z0-9-]{0,40}$" },
   "resources": {
     "r2Buckets": ["{install}-application-artifacts", "{install}-memory-files"],
     "vectorizeIndexes": [{ "name": "{install}-memory", "dimensions": 768, "metric": "cosine" }]

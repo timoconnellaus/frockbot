@@ -308,8 +308,10 @@ jobs:
       - name: Hold the bundle to the previous release's
         # The equivalence gate for installs: a Worker name, Durable Object class
         # or migration tag that differs between two bundles is a namespace an
-        # install loses when it updates. The previous manifest is the newest
-        # Release's; before any Release carried one there is nothing to hold it to.
+        # install loses when it updates. The previous manifest is that of the
+        # newest Release older than this tag, so re-running an older tag is not
+        # held to a newer one. Only a Release that carries no manifest passes
+        # with nothing to compare; any other failure to read it fails the gate.
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -319,11 +321,22 @@ jobs:
           set -euo pipefail
           previous="$RUNNER_TEMP/previous-bundle"
           mkdir -p "$previous"
-          if latest="$(gh release view --json tagName -q .tagName 2>/dev/null)"; then
-            gh release download "$latest" --pattern 'frockbot-deploy-*.json' --dir "$previous" 2>/dev/null ||
-              echo "$latest carries no deploy bundle."
+          tags="$(gh release list --limit 100 --exclude-drafts --json tagName -q '.[].tagName')"
+          older="$(
+            { printf '%s\n' "$tags"; echo "v$VERSION"; } |
+              grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' | sort -uV |
+              awk -v current="v$VERSION" '$0 == current { print last; exit } { last = $0 }'
+          )"
+          previous_manifest=""
+          if [[ -n "$older" ]]; then
+            manifest="frockbot-deploy-${older#v}.json"
+            if gh release view "$older" --json assets -q '.assets[].name' | grep -qxF "$manifest"; then
+              gh release download "$older" --pattern "$manifest" --dir "$previous"
+              previous_manifest="$previous/$manifest"
+            else
+              echo "$older carries no deploy bundle."
+            fi
           fi
-          previous_manifest="$(find "$previous" -name 'frockbot-deploy-*.json' | head -n 1)"
           bun scripts/check-deploy-bundle.ts \
             "$RUNNER_TEMP/release-assets/frockbot-deploy-$VERSION.json" \
             ${previous_manifest:+"$previous_manifest"}
