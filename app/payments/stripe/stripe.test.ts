@@ -1195,7 +1195,7 @@ describe("the marketing page's prices", () => {
           ? `Includes ${usd(plan.includedMicros / 10_000)} of usage credit every month.`
           : "No usage credit included.",
       );
-      if (plan.jevFairUseMicros)
+      if ("jevFairUseMicros" in plan)
         expect(section).toContain(
           `Every reply checked before it's sent, up to ${usd(plan.jevFairUseMicros / 10_000)} a month`,
         );
