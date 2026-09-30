@@ -75,34 +75,36 @@ function AddServer(props: { connectionTypeId: string; onClose: () => void }) {
   const [address, setAddress] = useState("");
   const [name, setName] = useState("");
   const [token, setToken] = useState("");
+  const add = () =>
+    void action.run(async () => {
+      let url: URL;
+      try {
+        url = new URL(address.trim());
+      } catch {
+        throw new Error(
+          "Enter the server’s full https address, like https://mcp.example.com/mcp.",
+        );
+      }
+      if (url.protocol !== "https:" || url.username)
+        throw new Error(
+          "Enter the server’s full https address, like https://mcp.example.com/mcp.",
+        );
+      await addMcpServer({
+        connectionTypeId: props.connectionTypeId,
+        address: url.toString(),
+        name,
+        token: token.trim(),
+      });
+      await reload();
+      props.onClose();
+    });
   return (
     <Dialog title="Add an MCP server" onClose={props.onClose}>
       <form
         class="stack-16"
         onSubmit={(event) => {
           event.preventDefault();
-          void action.run(async () => {
-            let url: URL;
-            try {
-              url = new URL(address.trim());
-            } catch {
-              throw new Error(
-                "Enter the server’s full https address, like https://mcp.example.com/mcp.",
-              );
-            }
-            if (url.protocol !== "https:" || url.username)
-              throw new Error(
-                "Enter the server’s full https address, like https://mcp.example.com/mcp.",
-              );
-            await addMcpServer({
-              connectionTypeId: props.connectionTypeId,
-              address: url.toString(),
-              name,
-              token: token.trim(),
-            });
-            await reload();
-            props.onClose();
-          });
+          add();
         }}
       >
         <Field
@@ -128,7 +130,12 @@ function AddServer(props: { connectionTypeId: string; onClose: () => void }) {
           <button type="button" class="btn outline" onClick={props.onClose}>
             Cancel
           </button>
-          <button type="submit" class="btn primary" disabled={action.busy}>
+          <button
+            type="button"
+            class="btn primary"
+            disabled={action.busy}
+            onClick={add}
+          >
             {action.busy ? "Adding…" : "Add server"}
           </button>
         </div>

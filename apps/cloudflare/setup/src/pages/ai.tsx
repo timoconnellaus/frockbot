@@ -386,10 +386,12 @@ function ConnectProvider(props: {
           <button type="button" class="btn outline" onClick={props.onClose}>
             Cancel
           </button>
+          {/* Pressed, not submitted: the app's web frame allows no forms. */}
           <button
-            type="submit"
+            type="button"
             class="btn primary"
             disabled={action.busy || !provider.installed}
+            onClick={() => void connect()}
           >
             {action.busy ? "Connecting…" : "Connect"}
           </button>
@@ -407,18 +409,20 @@ export function ReplaceKey(props: {
   const { reload } = useSetup();
   const action = useAction();
   const [key, setKey] = useState("");
+  const save = () =>
+    void action.run(async () => {
+      if (!key.trim()) throw new Error("Paste the new key first.");
+      await replaceKey(props.connection.connectionId, key.trim());
+      await reload();
+      props.onClose();
+    });
   return (
     <Dialog title={`Replace the ${props.name} key`} onClose={props.onClose}>
       <form
         class="stack-16"
         onSubmit={(event) => {
           event.preventDefault();
-          void action.run(async () => {
-            if (!key.trim()) throw new Error("Paste the new key first.");
-            await replaceKey(props.connection.connectionId, key.trim());
-            await reload();
-            props.onClose();
-          });
+          save();
         }}
       >
         <Field
@@ -435,7 +439,12 @@ export function ReplaceKey(props: {
           <button type="button" class="btn outline" onClick={props.onClose}>
             Cancel
           </button>
-          <button type="submit" class="btn primary" disabled={action.busy}>
+          <button
+            type="button"
+            class="btn primary"
+            disabled={action.busy}
+            onClick={save}
+          >
             {action.busy ? "Saving…" : "Save key"}
           </button>
         </div>
