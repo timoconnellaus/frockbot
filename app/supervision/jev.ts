@@ -401,8 +401,9 @@ export function workersAiJevFetchV1(ai: JevAiBindingV1): Fetch {
     if (!isRecord(body)) throw new TypeError("A Jev request has no body.");
     const signal = init.signal ?? undefined;
     signal?.throwIfAborted();
-    // Raced as well as passed: a binding that ignores the signal must not
-    // hold an attempt past the client's timeout.
+    // Raced, not passed: an AbortSignal cannot cross the binding's RPC
+    // ("AbortSignal serialization is not enabled"), and a race still stops an
+    // attempt at the client's timeout.
     const aborted = new Promise<never>((_resolve, reject) => {
       signal?.addEventListener("abort", () => reject(signal.reason), {
         once: true,
@@ -411,11 +412,10 @@ export function workersAiJevFetchV1(ai: JevAiBindingV1): Fetch {
     let answer: unknown;
     try {
       answer = await Promise.race([
-        ai.run(
-          WORKERS_AI_JEV_MODEL_V1,
-          { state: body.state ?? null, questions: body.questions },
-          signal ? { signal } : {},
-        ),
+        ai.run(WORKERS_AI_JEV_MODEL_V1, {
+          state: body.state ?? null,
+          questions: body.questions,
+        }),
         aborted,
       ]);
     } catch (error) {
