@@ -25,6 +25,7 @@
     "./fly/host-client": "./fly/host-client.ts",
     "./fly/provider": "./fly/provider.ts",
     "./fly/runtime": "./fly/runtime.ts",
+    "./linux-runtime": "./linux-runtime/runtime.ts",
     "./fly/sync": "./fly/sync.ts",
     "./fly/workspace": "./fly/workspace.ts",
     "./package.json": "./package.json"

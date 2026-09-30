@@ -1,5 +1,5 @@
 import type { WorkspaceFailureV1 } from "@frockbot/core/contracts";
-import { shellQuote } from "./shell.js";
+import { shellQuote } from "../linux-runtime/shell.js";
 
 export interface FlyWorkspaceStageOptionsV1 {
   mount: string;

@@ -206,7 +206,7 @@ An always-running Computer means a shell is there the moment a Bot wants one, wi
 
 "Secrets stay server-side" still holds. A CLI runs with a placeholder token, never a real one. Every connected app answers on the Computer at `https://<app>.connected.internal/<path>`, the path resolved by the provider against that account's API base URL, and a few real hosts (`api.github.com` for `gh`) are routed as well. Requests to either go through a proxy on the Computer that terminates TLS for those names only, with a CA the Computer trusts, and forwards each request to the app Worker under a token that names the Turn's object and the exec call. The Bot Durable Object sends it as the connected account through the provider, which attaches the credential, so nothing on the Computer ever holds one. Every other destination is a plain tunnel. Revoking a Connection takes effect on the next request.
 
-This runs on the Fly Sprite today (`computer/egress.ts`, `computer/fly/egress.ts`, `app/connect/egress.ts`, [architecture §10](architecture.md#connected-accounts-from-the-terminal)), for every app the person has connected, with no per-app table.
+This runs on the Fly Sprite today (`computer/egress.ts`, `computer/linux-runtime/egress.ts`, `app/connect/egress.ts`, [architecture §10](architecture.md#connected-accounts-from-the-terminal)), for every app the person has connected, with no per-app table.
 
 ### Jev reviews every command
 

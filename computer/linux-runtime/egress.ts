@@ -1,16 +1,16 @@
-// The Sprite half of credentialed egress (`computer/egress.ts`): a small
+// The machine half of credentialed egress (`computer/egress.ts`): a small
 // HTTPS proxy on loopback that a `computer_exec` shell is pointed at.
 //
 // It terminates TLS only for the connected apps' generic addresses
 // (`<toolkit>.connected.internal`) and the few real API hosts routed to them,
-// with a certificate from a CA the Sprite makes for itself and
+// with a certificate from a CA the Computer makes for itself and
 // trusts through the usual environment variables, and posts each request it
 // reads to the Worker under the exec call's token. Every other destination is
 // a plain tunnel: the proxy never reads it and never sees a credential,
-// because none exists on the Sprite.
+// because none exists on the Computer.
 //
 // The proxy is started on demand by the prelude each exec carries and stays
-// up; a Sprite that cannot start it runs the command with no proxy at all, so
+// up; a Computer that cannot start it runs the command with no proxy at all, so
 // a broken proxy costs connected accounts and nothing else.
 
 import {
@@ -32,12 +32,12 @@ export const EGRESS_PORT = 18089;
 export const EGRESS_ROOT = `${EGRESS_RUNTIME_ROOT}/egress`;
 export const EGRESS_PROXY_SCRIPT = `${EGRESS_RUNTIME_ROOT}/egress-proxy.mjs`;
 export const EGRESS_ENSURE_SCRIPT = `${EGRESS_RUNTIME_ROOT}/egress-ensure.sh`;
-/** The system roots plus the Sprite's own CA: what every client is told to trust. */
+/** The system roots plus the Computer's own CA: what every client is told to trust. */
 export const EGRESS_BUNDLE = `${EGRESS_ROOT}/bundle.pem`;
 export const EGRESS_CA = `${EGRESS_ROOT}/ca.pem`;
 /**
  * The token `gh` is given so it tries at all. The proxy drops every
- * `authorization` header before a request leaves the Sprite.
+ * `authorization` header before a request leaves the Computer.
  */
 export const EGRESS_PLACEHOLDER_TOKEN = "frockbot-connected-account";
 /** The proxy user of a command with no connected account, which reaches Jev alone. */
@@ -315,7 +315,7 @@ listening && current && [ -s ${shellQuote(EGRESS_BUNDLE)} ]
  * accounts: start the proxy, then point every client at it and at the CA it
  * signs with. The token is the exec call's own and expires with it.
  */
-export function flyEgressShellPreludeV1(
+export function egressShellPreludeV1(
   token: string,
   options: { accounts?: boolean } = {},
 ): string {

@@ -62,7 +62,7 @@ import {
   type WorkspaceWriterV1,
 } from "@frockbot/core/contracts";
 import type { FlyAgentComputer } from "./computer.js";
-import { shellQuote } from "./shell.js";
+import { shellQuote } from "../linux-runtime/shell.js";
 import { stageFlyWorkspaceBytesV1 } from "./staging.js";
 
 /** Where a root records the generation of each file beneath it. */
