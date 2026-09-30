@@ -2638,6 +2638,14 @@
       top: 10px;
     }
   }
+  /* Two narrow plan cards put Chill under the end of the heading, so a
+     smaller Chill stands in the gap between "flock." and the intro. */
+  @media (min-width: 896px) and (max-width: 1179px) {
+    .follow.follow-pricing-chill {
+      --f: 0.6;
+      left: calc(50% + 185px);
+    }
+  }
   /* Landscape tablets and short laptops: tighter copy, so the devices show. */
   @media (min-width: 700px) and (max-height: 860px) {
     .hero-copy {
