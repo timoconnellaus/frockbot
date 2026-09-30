@@ -308,7 +308,15 @@ export const NON_SECRET_WORKER_SETTINGS_V1: readonly NonSecretWorkerSettingV1[] 
   [
     {
       name: "NATIVE_SLICE_2_AUTH",
-      why: "Native sign-in returns, exactly as the profile's `nativeAuth` lists them.",
+      why: "The verified `https` sign-in returns older apps use, exactly as the profile's `nativeAuth` lists them; every app's own scheme is served regardless.",
+    },
+    {
+      name: "APP_ORIGIN",
+      why: "The deployment's own origin, from the profile's first app hostname: what native sign-in is built from where there is no `BETTER_AUTH_URL`.",
+    },
+    {
+      name: "FROCKBOT_RELEASE",
+      why: "The release tag the deploy passes as a `--var`, which `/.well-known/frockbot.json` reports; absent, the file names no release.",
     },
     {
       name: "NATIVE_APPS",
