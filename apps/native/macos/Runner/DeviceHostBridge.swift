@@ -156,12 +156,13 @@ final class DeviceHostBridge {
     let net = url.port.map { "\(host):\($0)" } ?? host
     let child = Process()
     child.executableURL = deno
-    // Exactly what the host needs: the deployment, its own folder, and
+    // Exactly what the host needs: the deployment, this Mac's loopback for
+    // the local model relay (and no other address), its own folder, and
     // `sandbox-exec` to start each module inside its Seatbelt profile. Deno's
     // `child_process` reads NODE_V8_COVERAGE as it spawns.
     child.arguments = [
       "run", "--no-prompt", "--no-config", "--no-remote", "--no-npm", "--cached-only",
-      "--allow-net=\(net)",
+      "--allow-net=\(net),localhost,127.0.0.1,[::1]",
       "--allow-read=\(support.path)",
       "--allow-write=\(support.path)",
       "--allow-run=/usr/bin/sandbox-exec",

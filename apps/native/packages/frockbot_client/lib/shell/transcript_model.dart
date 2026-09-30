@@ -476,6 +476,9 @@ Set<String> get knownFailureCopy => {
       'stopped. Try sending it again.',
   'The model stopped part-way through its reply and went quiet for a minute, '
       'so the request was stopped. Try sending it again.',
+  // A local model runs on the person's Mac, which only they can bring back.
+  "Your Mac is offline, so your local model can't answer.",
+  'Your Mac went offline before your local model finished answering.',
   ...billingFailureCopy,
 };
 

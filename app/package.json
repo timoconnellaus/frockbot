@@ -117,6 +117,7 @@
     "./machine/device": "./machine/device.ts",
     "./machine/device-runner": "./machine/device-runner.ts",
     "./machine/intent": "./machine/intent.ts",
+    "./machine/model-relay": "./machine/model-relay.ts",
     "./machine/module-calls": "./machine/module-calls.ts",
     "./machine/modules": "./machine/modules.ts",
     "./machine/pairing": "./machine/pairing.ts",

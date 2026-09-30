@@ -144,6 +144,13 @@ export interface UsageReservation {
    */
   platform?: true;
   /**
+   * Work that costs nothing whatever the account holds: a local model on the
+   * person's own Mac. It is recorded, so it shows on Spending at no charge,
+   * and it is never refused for want of credit, a plan or a daily limit.
+   * Only a zero reservation may be free.
+   */
+  free?: true;
+  /**
    * Why the money was spent, for the Spending page. Descriptive only: it is
    * not part of the charge's identity, so a retry that resolves it
    * differently — a Routine renamed in between — is still the same charge.
@@ -487,17 +494,26 @@ export class BillingLedger {
           created: false,
         };
       }
+      if (input.free && input.maximumMicros !== 0)
+        throw new BillingError("Invalid usage reservation", 400);
+      const free = input.free === true;
       if (
+        !free &&
         dayStart !== undefined &&
         spendLimitReachedV1(this.storage.sql, input, attribution, dayStart)
       )
         throw new BillingError(DAILY_LIMIT_REASON_V1);
       const subscribed = this.subscribed();
-      if (this.get<boolean>("suspended"))
+      if (!free && this.get<boolean>("suspended"))
         throw new BillingError(subscriptionRequiredReasonV1(this.productName));
-      const grants = this.spendable(subscribed, input.kind === "jev");
+      const grants = free ? [] : this.spendable(subscribed, input.kind === "jev");
       const available = grants.reduce((total, g) => total + g.remaining, 0);
-      if (!subscribed && available === 0 && this.plan.subscriptions.length > 0)
+      if (
+        !free &&
+        !subscribed &&
+        available === 0 &&
+        this.plan.subscriptions.length > 0
+      )
         throw new BillingError(subscriptionRequiredReasonV1(this.productName));
       let needed = input.maximumMicros;
       if (available < needed)

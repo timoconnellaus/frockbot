@@ -14,7 +14,14 @@ import {
   type MachineSocketsV1,
   type MachineUserBackendContribution,
 } from "@frockbot/app/machine/user";
-import type { MachineStorageV1 } from "@frockbot/app/machine/store";
+import {
+  listMachineRecordsV1,
+  type MachineStorageV1,
+} from "@frockbot/app/machine/store";
+import {
+  LOCAL_MODEL_OFFLINE_V1,
+  type MachineModelRelayRequestV1,
+} from "@frockbot/core/machine-protocol/relay";
 import {
   type SearchUserBackendContribution,
   type SearchUserBackendHost,
@@ -205,6 +212,12 @@ export async function createFoundationUserBackendContributions(host: {
   /** The registered machines' sockets, which only the Durable Object holds. */
   machineSockets: MachineSocketsV1;
   /**
+   * Sends one local model request down a Mac's socket and answers its
+   * streamed response. Only the Durable Object can; a host without it
+   * reaches no Mac, which reads to a person as the Mac being offline.
+   */
+  localModelRelay?(request: MachineModelRelayRequestV1): Promise<Response>;
+  /**
    * The Bot lifecycle seam. Archive and restore are Bot authority, so the
    * User coordinator carries each command to the Bot Durable Object rather
    * than mutating Bot state itself.
@@ -338,6 +351,26 @@ export async function createFoundationUserBackendContributions(host: {
         storage: host.storage,
         settings,
         connectionName: host.brand.builtInModelName,
+      };
+    },
+    get localModels() {
+      const settings = mountedContributions.get(settingsUserContribution);
+      if (!settings) {
+        throw new Error("Local models require the Settings Contribution");
+      }
+      return {
+        storage: host.storage,
+        settings,
+        machines: async () =>
+          (await listMachineRecordsV1(host.storage)).map((record) => ({
+            machineId: record.machineId,
+            label: record.label,
+            revoked: record.revokedAt !== undefined,
+          })),
+        relay: (request: MachineModelRelayRequestV1) =>
+          host.localModelRelay
+            ? host.localModelRelay(request)
+            : Promise.reject(new Error(LOCAL_MODEL_OFFLINE_V1)),
       };
     },
     get machines() {

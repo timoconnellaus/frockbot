@@ -83,6 +83,10 @@ import {
   type McpUserApplicationHostV1,
 } from "@frockbot/app/mcp/user";
 import { userContribution as ollamaCloudUserContribution } from "@frockbot/providers/ollama-cloud/user";
+import {
+  userContribution as localModelUserContribution,
+  type LocalModelUserApplicationHostV1,
+} from "@frockbot/providers/local-model/user";
 import type { ModelConnectionsUserApplicationHostV1 } from "@frockbot/providers/model-connections/user";
 import {
   userContribution as frockAiUserContribution,
@@ -136,6 +140,7 @@ export {
   connectUserContribution,
   mcpUserContribution,
   ollamaCloudUserContribution,
+  localModelUserContribution,
   frockAiUserContribution,
   machineUserContribution,
   searchUserContribution,
@@ -238,6 +243,7 @@ export type FoundationUserBackendHostV1 = {
   ConnectUserApplicationHostV1 &
   McpUserApplicationHostV1 &
   ModelConnectionsUserApplicationHostV1 &
+  LocalModelUserApplicationHostV1 &
   FrockAiUserApplicationHostV1 &
   MachineUserApplicationHostV1 &
   SearchUserApplicationHostV1 &
@@ -301,6 +307,7 @@ export const backendDescriptorsV1: readonly AnyBackendDescriptor[] = [
   mcpUserContribution,
   ...catalogUserContributionsV1,
   ollamaCloudUserContribution,
+  localModelUserContribution,
   frockAiUserContribution,
   machineUserContribution,
   searchUserContribution,

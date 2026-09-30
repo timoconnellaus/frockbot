@@ -21,6 +21,12 @@
  * seam and have a later version start honouring it.
  */
 
+import {
+  decodeMachineRelayFrameV1,
+  type MachineRelayCancelFrameV1,
+  type MachineRelayFrameV1,
+} from "./relay.js";
+
 /** Bumped only for a breaking change; a new command op is additive. */
 export const MACHINE_PROTOCOL_VERSION = 1;
 
@@ -932,7 +938,9 @@ export function decodeMachineModuleV1(
 export type MachineSocketFrameV1 =
   | { type: "commands"; commands: MachineCommandV1[]; serverTime: string }
   | { type: "modules"; modules: MachineModuleV1[]; serverTime: string }
-  | MachineModuleCallFrameV1;
+  | MachineModuleCallFrameV1
+  | MachineRelayFrameV1
+  | MachineRelayCancelFrameV1;
 
 /**
  * One call a Plugin's cloud code makes to its device module (ADR 0037). It is
@@ -1026,6 +1034,8 @@ export function decodeMachineSocketFrameV1(
   const value = object(input, label);
   if (value.type === "call")
     return decodeMachineModuleCallFrameV1(value, label);
+  if (value.type === "relay" || value.type === "relay-cancel")
+    return decodeMachineRelayFrameV1(value, label);
   if (value.type === "modules") {
     exactly(value, ["type", "modules", "serverTime"], label);
     return {

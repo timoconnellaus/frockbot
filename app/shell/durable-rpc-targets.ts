@@ -107,6 +107,14 @@ export interface BotUserConfigurationRpcTargetV1
       effectId: string;
     }>,
   ): Promise<void>;
+  /** A chat request to a local model, streamed back from the Mac. */
+  relayLocalModel(
+    input: UserRpcEnvelopeV1<{
+      connectionId: string;
+      relayId: string;
+      body: string;
+    }>,
+  ): Promise<Response>;
   leaseToolCredential(
     input: UserRpcEnvelopeV1<{
       connectionId: string;

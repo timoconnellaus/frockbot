@@ -269,6 +269,14 @@ export interface ShellModelRuntimeHostV1 {
   frockAiAutoRoute?: string | null;
   runFrockAiChatCompletion?: FrockAiChatCompletionV1;
   fetch?: typeof fetch;
+  /**
+   * Sends a chat request to the local model this Turn's Connection names,
+   * through the User Durable Object and the Mac's socket.
+   */
+  relayLocalModel?(request: {
+    relayId: string;
+    body: string;
+  }): Promise<Response>;
 }
 
 /**

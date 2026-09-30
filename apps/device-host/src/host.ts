@@ -9,6 +9,9 @@
 // its own sandboxed run of the app's Apple Events helper (`apple-events.ts`),
 // never from inside the app.
 //
+// It also relays the account's local model requests to model servers on this
+// Mac's loopback (`relay.ts`), and nowhere else.
+//
 //   app → host   start, pair, unpair, reply
 //   host → app   native, status, error
 
@@ -25,6 +28,7 @@ import {
 } from "@frockbot/app/machine/device";
 
 import { runAppleEventsV1 } from "./apple-events.ts";
+import { LocalModelRelayV1 } from "./relay.ts";
 import {
   ModuleHostV1,
   type ModuleHostCredentialV1,
@@ -159,6 +163,9 @@ async function start(input: Record<string, unknown>): Promise<void> {
       announce();
     },
   });
+  const relay = new LocalModelRelayV1({
+    fetch: (url, init) => fetch(url, init),
+  });
   agent = new MachineDeviceAgentV1({
     origin,
     fetch: fetchOnce,
@@ -182,6 +189,9 @@ async function start(input: Record<string, unknown>): Promise<void> {
     onStatus: (status) => {
       agentStatus = status;
       if (!status.enrolled) modules?.stopAll();
+      // A closed socket counts a failure; what was relayed on it has no one
+      // left to answer.
+      if (!status.running || status.failures > 0) relay.stopAll();
       announce();
     },
     onModules: (list) => {
@@ -189,6 +199,9 @@ async function start(input: Record<string, unknown>): Promise<void> {
     },
     onCall: (call) => {
       void modules?.handleCall(call);
+    },
+    onRelay: (frame, send) => {
+      void relay.handle(frame, send);
     },
   });
   await agent.paired();
