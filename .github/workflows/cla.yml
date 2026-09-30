@@ -10,16 +10,21 @@ name: CLA
 # so a fork's pull request can be commented on. It never checks out the pull
 # request's code, and must not: nothing here may run what a contributor wrote.
 #
-# A contributor signs by commenting the exact sentence below on their pull
-# request; `recheck` asks again. Allowlisted accounts pass without signing.
-# The sentence and the signatures file carry CLA.md's version: a new version
-# changes both, so nobody's signature silently carries over to new terms.
+# Exemption is by who opened the pull request, which GitHub authenticates,
+# never by commit author: the action matches an unlinked commit on its bare
+# git author name, so any name on a commit can be forged. Tim's and
+# Dependabot's pull requests pass; on everyone else's, every commit author
+# must have signed, so a commit authored as someone else never passes.
+#
+# A contributor signs by commenting the exact sentence below; `recheck` asks
+# again. The sentence and the signatures file carry CLA.md's version: a new
+# version changes both, so nobody's signature carries over to new terms.
 
 on:
   issue_comment:
     types: [created]
-  pull_request_target:
-    types: [opened, closed, synchronize]
+  pull_request_target: # zizmor: ignore[dangerous-triggers] checks out nothing; the action reads pull request metadata only
+    types: [opened, reopened, synchronize]
 
 permissions:
   actions: write
@@ -27,8 +32,9 @@ permissions:
   pull-requests: write
   statuses: write
 
+# Every signature is written to one file, so runs take turns.
 concurrency:
-  group: cla-${{ github.event.pull_request.number || github.event.issue.number }}
+  group: cla-signatures
   cancel-in-progress: false
 
 jobs:
@@ -38,20 +44,25 @@ jobs:
       github.event_name == 'pull_request_target' ||
       (github.event.issue.pull_request &&
         (github.event.comment.body == 'recheck' ||
-         github.event.comment.body == 'I have read the FrockBot CLA version 1.0 and I hereby sign it.'))
+         startsWith(github.event.comment.body, 'I have read the FrockBot CLA version 1.0 and I hereby sign it.')))
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      OPENED_BY: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
     steps:
       - name: Create the signatures branch if it is missing
+        if: env.OPENED_BY != 'timoconnellaus' && env.OPENED_BY != 'dependabot[bot]'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
           if ! gh api "repos/$REPO/branches/cla-signatures" --silent 2>/dev/null; then
             sha=$(gh api "repos/$REPO/commits/main" --jq .sha)
-            gh api "repos/$REPO/git/refs" -f ref=refs/heads/cla-signatures -f sha="$sha" --silent
+            gh api "repos/$REPO/git/refs" -f ref=refs/heads/cla-signatures -f sha="$sha" --silent ||
+              gh api "repos/$REPO/branches/cla-signatures" --silent
           fi
       - name: CLA Assistant
+        if: env.OPENED_BY != 'timoconnellaus' && env.OPENED_BY != 'dependabot[bot]'
         uses: contributor-assistant/github-action@ca4a40a7d1004f18d9960b404b97e5f30a505a08 # v2.6.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -59,12 +70,7 @@ jobs:
           path-to-signatures: signatures/cla-v1.0.json
           path-to-document: https://github.com/${{ github.repository }}/blob/main/CLA.md
           branch: cla-signatures
-          # Tim holds the copyright already. Commits from Tim's Claude sessions
-          # are authored as noreply@anthropic.com, which GitHub resolves to
-          # `claude`. Author emails are unverified, so anyone can claim either
-          # identity: an outside pull request is merged only by Tim, who
-          # checks who opened it. No `*[bot]` wildcard: anyone can register one.
-          allowlist: timoconnellaus,claude,claude[bot],dependabot[bot],github-actions[bot]
+          lock-pullrequest-aftermerge: false
           custom-pr-sign-comment: I have read the FrockBot CLA version 1.0 and I hereby sign it.
           custom-notsigned-prcomment: >-
             Thank you for your contribution. Before it can merge, each author of
@@ -72,8 +78,9 @@ jobs:
             Agreement](https://github.com/${{ github.repository }}/blob/main/CLA.md)
             once. It lets FrockBot keep the core MIT while offering commercial
             licences for add-ons; [CONTRIBUTING.md](https://github.com/${{ github.repository }}/blob/main/CONTRIBUTING.md)
-            explains why. To sign, reply on this pull request with exactly the
+            explains why and what to do if your commits are not linked to your
+            GitHub account. To sign, reply on this pull request with exactly the
             sentence below.
           custom-allsigned-prcomment: Every author of this pull request has signed the FrockBot CLA.
-          signed-commit-message: $contributorName signed the CLA in $owner/$repo#$pullRequestNo
-          create-file-commit-message: Start recording CLA signatures
+          signed-commit-message: $contributorName signed the FrockBot CLA v1.0 in $owner/$repo
+          create-file-commit-message: Start recording CLA v1.0 signatures
