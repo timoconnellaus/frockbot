@@ -1200,9 +1200,18 @@ describe("the marketing page's prices", () => {
           `Every reply checked before it's sent, up to ${usd(plan.jevFairUseMicros / 10_000)} a month`,
         );
     }
-    expect(homepage).toContain(
-      `From ${usd(PLAN.subscriptions[0]!.monthlyCents)} a month`,
+    // The hero's "From" sits beside the trial, so it is the cheapest plan
+    // with one; the plan without a trial is named where hosting is offered.
+    const page = homepage.replace(/\s+/g, " ");
+    const withTrial = PLAN.subscriptions.filter(
+      (plan) => !("trial" in plan && plan.trial === false),
     );
+    expect(page).toContain(
+      `${PLAN.trial.days}-day trial · From ${usd(Math.min(...withTrial.map((plan) => plan.monthlyCents)))} a month`,
+    );
+    for (const plan of PLAN.subscriptions)
+      if (!withTrial.includes(plan))
+        expect(page).toContain(`or ${usd(plan.monthlyCents)} with your own AI`);
   });
 
   test("states the trial, who has none, and the top-ups", () => {
