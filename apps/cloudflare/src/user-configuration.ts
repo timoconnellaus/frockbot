@@ -333,6 +333,7 @@ import {
   computerHostBindingV1,
   createComputerHostV1,
 } from "./computer-host.js";
+import { decodeComputerHostChoiceV1 } from "@frockbot/computer/core/host";
 import type { AuthPackageEnvironmentV1 } from "#auth-package";
 import { BRAND_V1 } from "#brand";
 import type { VoiceAssistant } from "./voice-assistant.js";
@@ -355,6 +356,11 @@ const USER_IDENTITY_KEY = "user:identity";
 const USER_FEATURES_KEY = "user:features:v1";
 /** One receipt per "Delete my Computer" press that destroyed a Computer. */
 const COMPUTER_TEARDOWN_RECEIPT_PREFIX = "computer:teardown:";
+/**
+ * Where this User's Computer runs. Absent means FrockBot's own host, which is
+ * every account today: nothing writes it until a second host is offered.
+ */
+const COMPUTER_HOST_KEY = "computer:host:v1";
 
 interface UserConfigurationEnv
   extends BillingEnv, AccountDeletionEnvV1, AuthPackageEnvironmentV1 {
@@ -2972,6 +2978,15 @@ export class UserConfiguration
       this.skillBodies(),
       { kind: "user-instructions", userId },
       held.revisions,
+    );
+  }
+
+  /** Where the User chose to run their Computer, for every Bot they own. */
+  async readComputerHost(input: unknown): Promise<object> {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertUserIdentity(request.userId as string);
+    return decodeComputerHostChoiceV1(
+      await this.ctx.storage.get<unknown>(COMPUTER_HOST_KEY),
     );
   }
 

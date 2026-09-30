@@ -26,6 +26,7 @@ import { createComputerAgentFeature } from "./agent.js";
 /** A host that offers nothing beyond the operations under test. */
 const TEST_HOST_CAPABILITIES: ComputerHostCapabilitiesV1 = {
   viewerFrameOrigins: [],
+  availability: "always",
 };
 
 const COMPOSITION = {

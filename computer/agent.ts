@@ -81,8 +81,11 @@ import {
   type ComputerDoctorReportV1,
   type ComputerBackgroundStateV1,
   type ComputerBrowserAction,
+  computerAssignmentForChoiceV1,
+  type ComputerHostChoiceV1,
   type ComputerHostSessionV1,
   type ComputerRegistry,
+  DEFAULT_COMPUTER_HOST_CHOICE_V1,
   computerSyncSummaryV1,
   type ComputerSyncReasonV1,
   type ComputerSyncSummaryV1,
@@ -254,7 +257,13 @@ export interface ComputerAgentPluginConfig {
   /** The product, which a refused connected-account request names. */
   productName: string;
   userId: string;
+  /** The host this deployment registered for its own (`frockbot`) Computer. */
   defaultProviderId: string;
+  /**
+   * Where the User chose to run their Computer. Absent means the
+   * deployment's own.
+   */
+  hostChoice?(): Promise<ComputerHostChoiceV1>;
   /**
    * Whether this deployment has a Computer at all.
    *
@@ -1161,7 +1170,7 @@ export function createComputerAgentFeature(
     throw new Error("Computer default provider id must be non-empty");
   }
 
-  return (runtime) => {
+  return async (runtime) => {
     // A deployment with no Computer offers no Computer tool and no Computer
     // prompt. The alternative — tools that always fail — spends a Turn's model
     // budget discovering what this host already knows, and leaves the model
@@ -1170,10 +1179,14 @@ export function createComputerAgentFeature(
     // One Computer per User: the assignment is keyed by the User,
     // and the Bot attaches to it as a tenant.
     const identity = { userId };
+    const chosen = computerAssignmentForChoiceV1(
+      (await config.hostChoice?.()) ?? DEFAULT_COMPUTER_HOST_CHOICE_V1,
+      defaultProviderId,
+    );
     // What the host this Bot will open is, read once, from the registry
     // rather than from a host's own module: the tools describe the Computer
     // and refuse a command before any Computer has been woken to ask.
-    const capabilities = runtime.computers.capabilities(defaultProviderId);
+    const capabilities = runtime.computers.capabilities(chosen.providerId);
     const scratchName = capabilities?.scratchPath
       ? `${capabilities.scratchPath} (also $FROCKBOT_SCRATCH)`
       : "$FROCKBOT_SCRATCH";
@@ -1275,7 +1288,11 @@ export function createComputerAgentFeature(
     });
     const attach = async (botId: string, signal: AbortSignal) => {
       if (!runtime.computers.assignment(identity)) {
-        runtime.computers.assign(identity, defaultProviderId);
+        runtime.computers.assign(
+          identity,
+          chosen.providerId,
+          chosen.configuration,
+        );
       }
       return runtime.computers.open(identity, { botId }, { signal });
     };

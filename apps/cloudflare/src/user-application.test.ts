@@ -10,7 +10,7 @@ import {
   HOSTED_EMBEDDED_BODY_ATTRIBUTES_V1,
 } from "./user-application.js";
 import { BotTurnRefusedError } from "@frockbot/core/durable";
-import { COMPUTER_HOST_CAPABILITIES_V1 } from "./computer-host.js";
+import { COMPUTER_HOST_FRAME_ORIGINS_V1 } from "./computer-host.js";
 
 function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
   return {
@@ -150,11 +150,9 @@ describe("user application security headers", () => {
     // the expanded Computer viewer at whatever origins its host declared.
     expect(policy.get("frame-src")).toEqual([
       "https://app.example/plugin-pages/",
-      ...COMPUTER_HOST_CAPABILITIES_V1.viewerFrameOrigins,
+      ...COMPUTER_HOST_FRAME_ORIGINS_V1,
     ]);
-    expect(
-      COMPUTER_HOST_CAPABILITIES_V1.viewerFrameOrigins.length,
-    ).toBeGreaterThan(0);
+    expect(COMPUTER_HOST_FRAME_ORIGINS_V1.length).toBeGreaterThan(0);
     expect(policy.get("frame-ancestors")).toEqual(["'none'"]);
   });
 

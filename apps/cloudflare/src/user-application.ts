@@ -3,7 +3,7 @@ import {
   FOUNDATION_PACKAGE_VERSION_V1,
 } from "@frockbot/app/runtime";
 import { BRAND_V1 } from "#brand";
-import { COMPUTER_HOST_CAPABILITIES_V1 } from "./computer-host.js";
+import { COMPUTER_HOST_FRAME_ORIGINS_V1 } from "./computer-host.js";
 import {
   decodeBotIdV1,
   isApplicationDeploymentHash,
@@ -162,7 +162,7 @@ function appHtml(
 function frameSources(applicationUrl: URL): string {
   return [
     `${applicationUrl.origin}/plugin-pages/`,
-    ...COMPUTER_HOST_CAPABILITIES_V1.viewerFrameOrigins,
+    ...COMPUTER_HOST_FRAME_ORIGINS_V1,
   ].join(" ");
 }
 

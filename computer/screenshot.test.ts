@@ -44,6 +44,7 @@ class FrameStorage {
 /** A host that offers nothing beyond the operations under test. */
 const TEST_HOST_CAPABILITIES: ComputerHostCapabilitiesV1 = {
   viewerFrameOrigins: [],
+  availability: "always",
 };
 
 /** A 4x3 PNG: a real signature and a real IHDR, and nothing after it. */

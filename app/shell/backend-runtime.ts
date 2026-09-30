@@ -11,6 +11,7 @@ import type {
 } from "@frockbot/core/configuration";
 import type { FoundationAgentPackage } from "@frockbot/app/agent-runtime";
 import type {
+  ComputerHostChoiceV1,
   ComputerHostV1,
   ComputerSyncHostV1,
 } from "@frockbot/computer/core/host";
@@ -71,6 +72,11 @@ export interface ShellHostedRuntimeHostV1 {
    * surface reads as unconfigured, which is the truth.
    */
   computerHost?: ShellComputerHostFactoryV1;
+  /**
+   * Where the User chose to run their Computer, read from the User's Durable
+   * Object. Absent, the deployment's own host.
+   */
+  computerHostChoice?(): Promise<ComputerHostChoiceV1>;
   /**
    * The Skills seam, supplied by the Bot Durable Object for one admitted
    * Turn. Absent outside a Turn, and outside one whose Workspace reads are

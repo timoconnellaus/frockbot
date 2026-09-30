@@ -30,14 +30,14 @@ const DENO = process.env.FROCKBOT_TEST_DENO;
 function localHost(opened: string[]): ComputerHostV1 {
   return {
     id: "fixture",
-    capabilities: { viewerFrameOrigins: [] },
+    capabilities: { viewerFrameOrigins: [], availability: "always" },
     open: async (identity, tenant, assignment) => {
       opened.push("open");
       return {
         assignment,
         identity,
         tenant,
-        capabilities: { viewerFrameOrigins: [] },
+        capabilities: { viewerFrameOrigins: [], availability: "always" },
         exec: {
           execute: async (request) => {
             const ran = spawnSync(request.executable, request.args ?? [], {
