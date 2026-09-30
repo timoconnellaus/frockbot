@@ -140,8 +140,10 @@ class _FrockBotAppState extends State<FrockBotApp> {
   late final LocalStore store = widget.store ?? nativeStore();
 
   /// Whether this app holds accounts. A browser is the one account of the
-  /// origin that served it, and so is an app a test hands one client.
-  late final bool holdsAccounts = !kIsWeb && widget.api == null;
+  /// origin that served it, and so is an app a test hands one client, and a
+  /// development build that is the local stack's development User.
+  late final bool holdsAccounts =
+      !kIsWeb && widget.api == null && !localDevelopment;
   late final AccountDirectory? directory = holdsAccounts
       ? AccountDirectory(store)
       : null;
@@ -224,10 +226,23 @@ class _FrockBotAppState extends State<FrockBotApp> {
         }
       },
     );
-    unawaited(holdsAccounts ? _loadAccounts() : restore());
+    unawaited(holdsAccounts ? _loading : restore());
   }
 
+  /// The directory's first read. A link the app was opened with can arrive
+  /// before it, and waits for it: an Android sign-in returning to a process
+  /// started afresh finds its account there.
+  late final Future<void> _loading = _loadAccounts();
+
   void _countElsewhere() => elsewhere.value = otherUnread.total;
+
+  /// Closes the account on screen when no account is left to show.
+  void _close(AccountSession session) {
+    if (!identical(current, session)) return;
+    current = null;
+    otherUnread.watch(const []);
+    WidgetsBinding.instance.addPostFrameCallback((_) => session.dispose());
+  }
 
   /// Makes [session] the account on screen. The one it replaces is closed
   /// once its shell has gone, which is after the frame that swaps them.
@@ -267,6 +282,7 @@ class _FrockBotAppState extends State<FrockBotApp> {
   }
 
   Future<void> accept(Uri uri) async {
+    if (holdsAccounts) await _loading;
     final directory = this.directory;
     // A tapped alert or a shared link: the account on its server, and the
     // User it names where it names one.
@@ -292,18 +308,17 @@ class _FrockBotAppState extends State<FrockBotApp> {
     // sign-in is finished here first, under the session of the account whose
     // server handed it back.
     if (isConnectReturnV1(uri)) {
-      final account = directory?.accounts
-          .where((account) => account.host == uri.host)
-          .fold<AccountRecord?>(
-            null,
-            (best, account) =>
-                best ?? (account.id == current?.account?.id ? account : null),
-          );
-      final owner =
-          account ??
-          directory?.accounts
-              .where((account) => account.host == uri.host)
-              .firstOrNull;
+      // The account on screen when it is on that server, which is where the
+      // door was opened; otherwise the server's first account.
+      final onHost = [
+        ...?directory?.accounts.where((account) => account.host == uri.host),
+      ];
+      final owner = onHost.isEmpty
+          ? null
+          : onHost.firstWhere(
+              (account) => account.id == current?.account?.id,
+              orElse: () => onHost.first,
+            );
       if (directory != null && owner == null) return;
       if (owner != null && owner.id != current?.account?.id) {
         await switchTo(owner);
@@ -456,8 +471,7 @@ class _FrockBotAppState extends State<FrockBotApp> {
         await restore();
         return;
       }
-      current = null;
-      otherUnread.watch(const []);
+      _close(session);
     }
     if (mounted) {
       setState(() {
@@ -578,8 +592,7 @@ class _FrockBotAppState extends State<FrockBotApp> {
           await restore();
           return;
         }
-        current = null;
-        otherUnread.watch(const []);
+        _close(session);
       }
       if (mounted) setState(() => userId = null);
     } catch (_) {

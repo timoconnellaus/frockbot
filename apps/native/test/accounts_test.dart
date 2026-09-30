@@ -43,7 +43,11 @@ class AccountApi extends NativeApi {
     required this.bots,
     required this.paths,
     this.unread = 0,
+    this.rejected = false,
   });
+
+  /// Whether the server has stopped accepting this account's session.
+  final bool rejected;
 
   @override
   Future<Object?> request(
@@ -53,6 +57,7 @@ class AccountApi extends NativeApi {
     bool authenticated = true,
   }) async {
     paths.add('${Uri.parse(origin).host}$path');
+    if (rejected) throw const RequestFailure('Please sign in again.', 401);
     if (path == '/api/identity') {
       return {'schemaVersion': 1, 'userId': userId, 'isAdmin': false};
     }
@@ -417,6 +422,63 @@ void main() {
       await tester.pump();
     },
   );
+
+  testWidgets('a session a server stops accepting ends that account alone', (
+    tester,
+  ) async {
+    withoutDeepLinks(tester);
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final store = AccountsMemoryStore()
+      ..values[AccountDirectory.key] = jsonEncode({
+        'version': 1,
+        'active': 'own',
+        'accounts': [
+          {
+            'id': 'hosted',
+            'origin': hostedOrigin,
+            'name': 'FrockBot',
+            'userId': 'user-hosted',
+          },
+          {
+            'id': 'own',
+            'origin': 'https://bots.example.org',
+            'name': 'FrockBot',
+            'userId': 'user-own',
+          },
+        ],
+      })
+      ..values['account/hosted/session'] = session('user-hosted')
+      ..values['account/own/session'] = session('user-own');
+    await tester.pumpWidget(
+      FrockBotApp(
+        store: store,
+        apiFor: (account, scoped) {
+          final hosted = account.origin == hostedOrigin;
+          return AccountApi(
+            scoped,
+            origin: account.origin,
+            userId: hosted ? 'user-hosted' : 'user-own',
+            bots: [registration('bot-rose', 'Rosemary')],
+            paths: [],
+            rejected: !hosted,
+          );
+        },
+      ),
+    );
+    await answer(tester);
+    expect(find.text('Rosemary'), findsWidgets);
+    expect(find.text('frockbot.com'), findsOneWidget);
+    expect(
+      find.text('bots.example.org: Please sign in again.'),
+      findsOneWidget,
+    );
+    expect(store.values.containsKey('account/own/session'), isFalse);
+    expect(store.values['account/hosted/session'], isNotNull);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
 
   testWidgets('another server is read before anyone signs in to it', (
     tester,
