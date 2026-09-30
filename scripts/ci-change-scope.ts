@@ -1,25 +1,31 @@
-// What a landed change obliges `main.yml` to run.
+// What a change obliges CI to run, decided by one rule in three places.
 //
-// Most pushes to `main` touch the application, and the slow tier — the
-// Flutter client's suite, the Cloudflare workerd and integration suites and
-// the browser suite across five runners — is the whole point of running it
-// once per landed change. A few pushes cannot possibly affect any of them: the
-// marketing site and the admin portal are separate Workers, deployed by their
-// own release job, and nothing under `apps/cloudflare`, `core`, `app` or
-// `providers` imports either one. For those, eleven minutes of suites prove
-// nothing that the fast tier has not already proven.
+// Most changes touch the application, and the slow tier — the Flutter
+// client's suite, the Cloudflare workerd and integration suites and the
+// browser suite across five runners — is the whole point of running it. A few
+// cannot possibly affect any of it: the marketing site and the admin portal
+// are separate Workers with no import path from `apps/cloudflare`, `core`,
+// `app` or `providers`. For those, the suites prove nothing the fast tier has
+// not already proven, and a release has nothing to ship but those two sites.
 //
-// The fast tier is not negotiable and is not decided here. `validate` runs
-// `format:check`, `typecheck` and the unit suite, and all three cover the
-// marketing and admin workspaces like any other — the formatter reads the
-// whole repository and the typechecker walks every workspace package. It also
-// bundles those two sites, for the same reason: their only build must belong
-// to the job a skip cannot reach.
+// The same classification answers three questions, each over its own range:
+//
+// - `check.yml`, on a pull request: does the diff against its base owe the
+//   Flutter client's checks and the package runtime suites?
+// - `main.yml`, on a landed change: does the range since the newest release
+//   tag owe the slow tier?
+// - `release.yml`, on a tag: does the range since the last release that
+//   fully shipped owe the full release, or only the marketing deploy?
+//
+// The fast tier is not negotiable and is not decided here. `format:check`,
+// `typecheck` and the unit suite cover the marketing and admin workspaces like
+// any other, and `main.yml`'s `validate` bundles both sites in a job a skip
+// cannot reach.
 //
 // The direction of the default is the point. A path nobody has classified
-// obliges the slow tier, so adding a directory, or a workspace, or a new kind
-// of file is safe by omission. Only the listed prefixes and root Markdown buy
-// a skip, and only when every changed path is one of them.
+// obliges everything, so adding a directory, or a workspace, or a new kind of
+// file is safe by omission. Only the listed prefixes and root Markdown buy a
+// skip, and only when every changed path is one of them.
 
 import { spawnSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
@@ -129,8 +135,12 @@ function lastReleaseTagV1(root: string): string | null {
 }
 
 /**
- * What this checkout's unreleased range obliges, and the tag it measured
- * from — null when there was none to measure from, which the caller reports.
+ * What this checkout's range obliges, and the base it measured from — null
+ * when there was none to measure from, which the caller reports.
+ *
+ * The base is the newest release tag reachable from `HEAD` unless the caller
+ * names one: a pull request names its base branch, and a release names the
+ * last tag that fully shipped. An empty name is no base at all.
  *
  * A base that cannot be resolved, and a diff that cannot be read, both leave
  * no paths, and the classifier reads an empty list as absence of evidence and
@@ -140,11 +150,15 @@ function lastReleaseTagV1(root: string): string | null {
  * so a file moved out of the application into an excused workspace would
  * present as an excused change alone.
  */
-export function scopeDecisionV1(root: string): {
+export function scopeDecisionV1(
+  root: string,
+  explicitBase?: string,
+): {
   base: string | null;
   slowTier: boolean;
 } {
-  const base = lastReleaseTagV1(root);
+  const base =
+    explicitBase === undefined ? lastReleaseTagV1(root) : explicitBase || null;
   const diff =
     base === null
       ? null
@@ -157,11 +171,14 @@ export function scopeDecisionV1(root: string): {
 
 // Decides for the checkout it runs in and appends the workflow output line to
 // `GITHUB_OUTPUT`. The workflow step is this invocation and nothing else.
+// `--base <rev>` measures from that revision instead of the newest release tag.
 if (import.meta.main) {
-  const { base, slowTier } = scopeDecisionV1(process.cwd());
+  const flag = process.argv.indexOf("--base");
+  const explicitBase = flag === -1 ? undefined : (process.argv[flag + 1] ?? "");
+  const { base, slowTier } = scopeDecisionV1(process.cwd(), explicitBase);
   if (base === null)
     console.log(
-      "::notice::No release tag is reachable from this head, so the range since the last verified commit could not be read; running the full tier.",
+      "::notice::No base revision to measure from, so the changed paths could not be read; running everything.",
     );
   const line = `slow-tier=${slowTier}\n`;
   const output = process.env.GITHUB_OUTPUT;

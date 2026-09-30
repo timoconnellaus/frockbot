@@ -17,6 +17,64 @@ concurrency:
   group: release-${{ github.ref }}
 
 jobs:
+  scope:
+    name: Scope
+    # Whether this tag owes the full release or only the marketing deploy.
+    #
+    # A tag whose changes since the last release that fully shipped touch
+    # nothing but the marketing site, the admin portal and documentation has
+    # nothing else to ship: the app, the phone and desktop clients, the npm
+    # packages and the container images are all byte-for-byte what that release
+    # already published. So `verify` and everything behind it skip, and
+    # `deploy-marketing` runs on its own. `main.yml` already ran the fast tier
+    # and bundled both sites on this revision before cutting the tag.
+    #
+    # The base is the newest `vX.Y.Z` with a GitHub Release, not the newest
+    # tag. `github-release` is created only once the app, marketing and the
+    # installer's assets all deployed, and a marketing-only tag creates none,
+    # so an app change whose release failed stays in the measured range until
+    # a release ships it. The rule is `scripts/ci-change-scope.ts`, which
+    # obliges everything when there is no base or anything is unclassified.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      slow-tier: ${{ steps.decide.outputs.slow-tier }}
+
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Set up Bun # zizmor: ignore[cache-poisoning] tag-only release job
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Find the last release that fully shipped
+        id: shipped
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$(gh api "repos/$GH_REPO/releases?per_page=100" --jq '
+            [.[] | select((.draft | not) and (.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")))]
+            | first | .tag_name // ""')"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Measuring from ${tag:-nothing}"
+
+      - name: Decide what this tag obliges
+        id: decide
+        env:
+          BASE: ${{ steps.shipped.outputs.tag }}
+        run: bun scripts/ci-change-scope.ts --base "$BASE"
+
   verify:
     name: Verify the release tag
     # The gate every other job waits on. Publishing to npm and deploying to
@@ -24,6 +82,12 @@ jobs:
     # deployed here installs the published packages, they are built from the
     # source in this checkout. Keeping npm publishing off this critical path
     # is what lets a deploy start as soon as the code is known good.
+    #
+    # Skipped for a marketing-only tag, and every job behind it with it. Only
+    # the word `false` skips it: a `scope` that failed publishes nothing, and
+    # `!cancelled()` keeps this gate from being skipped along with it.
+    needs: scope
+    if: ${{ !cancelled() && needs.scope.outputs.slow-tier != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Only `publish-npm` needs the OIDC identity that npm trusts, and only it
@@ -1515,7 +1579,17 @@ jobs:
     # held here and a green `main` reaches bot.frockbot.com on its own; the
     # environment is named so that adding a required reviewer later is the
     # only change needed to put a person back in the path.
-    needs: verify
+    #
+    # A marketing-only tag skips `verify` (see `scope`) and deploys here
+    # straight away; `main.yml` ran the fast tier and bundled both sites on
+    # this revision before it cut the tag.
+    needs: [scope, verify]
+    if: >-
+      ${{ !cancelled()
+      && (needs.verify.result == 'success'
+          || (needs.verify.result == 'skipped'
+              && needs.scope.result == 'success'
+              && needs.scope.outputs.slow-tier == 'false')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -1525,20 +1599,46 @@ jobs:
       url: https://frockbot.com
 
     steps:
+      # Releases run side by side, one per tag, and nothing orders their
+      # deploys; a marketing-only one takes minutes. Deploying an older tag's
+      # sites after a newer one's would roll frockbot.com back until the next
+      # release, so a tag with a newer `vX.Y.Z` above it leaves the sites to
+      # that release, which carries every change this one does.
+      - name: Check no newer release supersedes this one
+        id: current
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          newest="$( { gh api --paginate "repos/$GH_REPO/git/matching-refs/tags/v" \
+            --jq '.[].ref | ltrimstr("refs/tags/")' \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; echo "$TAG"; } | sort -V | tail -n 1)"
+          if [[ "$newest" != "$TAG" ]]; then
+            echo "$newest supersedes $TAG; leaving frockbot.com and the admin portal to its release."
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Check out the release tag
+        if: steps.current.outputs.stale != 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up Bun # zizmor: ignore[cache-poisoning] tag-only release job
+        if: steps.current.outputs.stale != 'true'
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.2
 
       - name: Install dependencies
+        if: steps.current.outputs.stale != 'true'
         run: bun install --frozen-lockfile
 
       - name: Validate Cloudflare credentials
+        if: steps.current.outputs.stale != 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -1554,12 +1654,15 @@ jobs:
           fi
 
       - name: Write production deployment configuration
+        if: steps.current.outputs.stale != 'true'
         run: bun run deployment:config hosted
 
       - name: Prove the generated configs are what production runs
+        if: steps.current.outputs.stale != 'true'
         run: bun test scripts/deployment-config.test.ts
 
       - name: Deploy frockbot.com
+        if: steps.current.outputs.stale != 'true'
         working-directory: apps/marketing
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -1569,6 +1672,7 @@ jobs:
           -c ../../.deployment/hosted/marketing/wrangler.jsonc
 
       - name: Deploy admin.frockbot.com
+        if: steps.current.outputs.stale != 'true'
         # The deployment's whole administrative surface (ADR 0028). It reaches
         # the app over a service binding, so it is deployed beside marketing
         # rather than with the backend: the binding names the app Worker, which

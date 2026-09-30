@@ -180,3 +180,37 @@ test("documentation behind the trigger still measures as excused", () => {
   git(root, "commit", "-qam", "marketing only");
   expect(scopeDecisionV1(root)).toEqual({ base: "v1.0.0", slowTier: false });
 });
+
+test("a named base is measured from instead of the newest release tag", () => {
+  // A release measures from the last tag that fully shipped, which need not be
+  // the newest: a marketing-only release is tagged but ships nothing else.
+  const root = fixture();
+  git(root, "tag", "v1.0.0");
+  write(root, "core/deadline.ts", "export const a = 1;\n");
+  git(root, "commit", "-qam", "application change");
+  git(root, "tag", "v1.0.1");
+  write(root, "apps/marketing/index.html", "<p>two</p>\n");
+  git(root, "commit", "-qam", "marketing only");
+
+  expect(scopeDecisionV1(root)).toEqual({ base: "v1.0.1", slowTier: false });
+  expect(scopeDecisionV1(root, "v1.0.1")).toEqual({
+    base: "v1.0.1",
+    slowTier: false,
+  });
+  expect(scopeDecisionV1(root, "v1.0.0")).toEqual({
+    base: "v1.0.0",
+    slowTier: true,
+  });
+});
+
+test("an empty or unresolvable named base obliges everything", () => {
+  const root = fixture();
+  write(root, "apps/marketing/index.html", "<p>two</p>\n");
+  git(root, "commit", "-qam", "marketing only");
+  expect(scopeDecisionV1(root, "")).toEqual({ base: null, slowTier: true });
+  expect(scopeDecisionV1(root, "v9.9.9").slowTier).toBe(true);
+  expect(scopeDecisionV1(root, "HEAD^1")).toEqual({
+    base: "HEAD^1",
+    slowTier: false,
+  });
+});

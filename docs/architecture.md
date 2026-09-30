@@ -1377,7 +1377,11 @@ Seven workflows live in `.github/workflows/`:
 - `check.yml` (`Check`, plus `Flutter`) — what a pull request owes: the fast
   tier (format, typecheck, `bun test`, the Computer host and Plugin build
   suites) beside Dart analysis, the Flutter tests and the Android badge unit
-  test. It needs no secret, so a fork's pull request runs it.
+  test. It needs no secret, so a fork's pull request runs it. A pull request
+  whose diff against its base touches only what `Scope` excuses (below) keeps
+  format, typecheck and `bun test` and skips the rest; `Flutter` is skipped
+  by its `if`, which the ruleset reads as passing, and runs whenever `Scope`
+  did not say `false` — including when `Scope` failed.
 - `main.yml` — everything a landed change owes, on the merge commit: the fast
   tier again, plus the marketing and admin-portal bundles, then — when the
   `Scope` job says the change could have affected them — the Flutter suite, the
@@ -1422,10 +1426,21 @@ nothing approves a production deploy. Merging belongs to the babysitter
 
 Trigger: push of a tag matching `v*.*.*`.
 
+- `scope` — measures from the newest `vX.Y.Z` that has a GitHub Release, the
+  last tag that fully shipped, with the same `scripts/ci-change-scope.ts`
+  rule. When everything since is marketing, admin portal or documentation,
+  `verify` skips and every job behind it skips with it, so the tag deploys
+  `deploy-marketing` alone in a few minutes and creates no GitHub Release.
+  Such a tag has no container images or release assets; an installer takes its
+  tag from Releases. `ci-watch` counts such a run as shipped once
+  `deploy-marketing` succeeded.
 - `verify` — validates strict SemVer, then `typecheck`, `bun test`, and `bun run build` behind the pinned Flutter SDK, because the build compiles the web client.
 - `publish-npm` (after `deploy-backend`) — publishes the workspaces `scripts/npm-publish.ts` lists: the Plugin SDK, and every workspace the Worker's graph reaches (`core`, `app`, `providers`, `computer`, `frock-compose`, `applets` and `apps/cloudflare` as `@frockbot/cloudflare`), which a white-label installs ([ADR 0038](adr/0038-white-label-deployments.md)). Each must declare `frockbot.npm`. `bun scripts/npm-publish.ts set-versions` rewrites every one to the tag version and sets `private: false`, resolves `workspace:` ranges to that exact version, requires npm ≥ 11.5.1, then `npm publish --access public` (`--tag next` for prereleases) through OIDC trusted publishing. `EPUBLISHCONFLICT` is treated as success.
 - `github-release` — creates the Release for the tag with `--generate-notes --verify-tag`, attaching the web client archive and the application artifact an installer needs. The notarized disk image is attached only when `macos-release` produced one: notarization depends on Apple answering and used to take the whole Release with it when it did not.
-- `deploy-marketing`.
+- `deploy-marketing` (environment `production`) — after `verify`, or
+  straight after `scope` for a marketing-only tag. It deploys nothing when a
+  higher `vX.Y.Z` already exists, so a slow full release that finishes after a
+  fast marketing-only one cannot roll frockbot.com back.
 - `deploy-backend` (environment `production`) — runs `bun run deployment:config hosted` and then `scripts/deployment-config.test.ts` as a gate, writes the artifact's own sha256 over the generated config's `DEFAULT_APPLICATION_HASH` placeholder, applies D1 migrations remotely, uploads the artifact, deploys the computer host and then the Plugin build service, each with its own secrets file, runs `scripts/check-production-secrets.ts check --live` and `write-secrets-file`, then `wrangler deploy --secrets-file`. It rewrites no tracked `wrangler.jsonc`: the D1 identifier is in `deployments/hosted.json`, and the only in-place edit is to the generated config under `.deployment/`.
 
 ### `.github/workflows/native.yml`

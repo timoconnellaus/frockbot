@@ -12,7 +12,7 @@
 // reach, and the assertion is whether the job runs. An inverted gate and a
 // loosened gate are both invisible to a test that only looks for a fragment of
 // the text, and both are exactly what this file exists to catch.
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
@@ -70,6 +70,7 @@ function evaluateCondition(expression: string, state: RunState): boolean {
   // throws below rather than being guessed at, because a function modelled
   // with the wrong semantics would assert a condition into passing.
   const statuses: Record<string, () => boolean> = {
+    always: () => true,
     cancelled: () => state.cancelled === true,
     failure: () => Object.values(results).some((r) => r === "failure"),
   };
@@ -372,4 +373,96 @@ test("the end-to-end report cannot be resurrected by a skipped suite", () => {
   expect(runs("e2e-report", { results: { e2e: "failure" } })).toBe(true);
   expect(runs("e2e-report", { results: { e2e: "skipped" } })).toBe(false);
   expect(runs("e2e-report", { results: { e2e: "success" } })).toBe(false);
+});
+
+/** Another workflow's jobs, parsed the same way as `main.yml`'s. */
+function jobsOf(file: string): Record<string, Job> {
+  return (
+    Bun.YAML.parse(
+      readFileSync(join(root, ".github", "workflows", file), "utf8") as string,
+    ) as { jobs: Record<string, Job> }
+  ).jobs;
+}
+
+function runsIn(jobs: Record<string, Job>, job: string, state: RunState) {
+  const condition = jobs[job]?.if;
+  return condition === undefined || evaluateCondition(condition, state);
+}
+
+test("a pull request skips Flutter only when scope says false", () => {
+  const jobs = jobsOf("check.yml");
+  const scoped = (result: string, slowTier?: string): RunState => ({
+    results: { scope: result },
+    outputs: slowTier === undefined ? {} : { scope: { "slow-tier": slowTier } },
+  });
+  expect(runsIn(jobs, "flutter", scoped("success", "true"))).toBe(true);
+  expect(runsIn(jobs, "flutter", scoped("success", "false"))).toBe(false);
+  // A failed `scope` must not skip a required check: skipped reads as passing.
+  expect(runsIn(jobs, "flutter", scoped("failure"))).toBe(true);
+  // The fast tier waits on nothing and is skipped by nothing.
+  expect(jobs.check?.needs).toBeUndefined();
+  expect(jobs.check?.if).toBeUndefined();
+});
+
+describe("a marketing-only release", () => {
+  const jobs = jobsOf("release.yml");
+  const state = (
+    scope: string,
+    verify: string,
+    slowTier?: string,
+  ): RunState => ({
+    results: { scope, verify },
+    outputs: slowTier === undefined ? {} : { scope: { "slow-tier": slowTier } },
+  });
+
+  test("skips verify only when scope says false", () => {
+    expect(runsIn(jobs, "verify", state("success", "", "true"))).toBe(true);
+    expect(runsIn(jobs, "verify", state("success", "", "false"))).toBe(false);
+    expect(runsIn(jobs, "verify", state("failure", ""))).toBe(true);
+  });
+
+  test("deploys marketing without verify only when scope excused it", () => {
+    const deploys = (s: RunState) => runsIn(jobs, "deploy-marketing", s);
+    expect(deploys(state("success", "success", "true"))).toBe(true);
+    expect(deploys(state("success", "skipped", "false"))).toBe(true);
+    expect(deploys(state("success", "failure", "true"))).toBe(false);
+    expect(deploys(state("failure", "skipped"))).toBe(false);
+    expect(deploys(state("success", "skipped", "true"))).toBe(false);
+  });
+
+  test("everything else waits on verify, so it skips with it", () => {
+    for (const [name, job] of Object.entries(jobs)) {
+      if (name === "scope" || name === "verify" || name === "deploy-marketing")
+        continue;
+      const direct = [job.needs ?? []].flat();
+      const reachesVerify = (needs: string[], seen = new Set<string>()) =>
+        needs.some(
+          (need) =>
+            need === "verify" ||
+            (!seen.has(need) &&
+              (seen.add(need),
+              reachesVerify([jobs[need]?.needs ?? []].flat(), seen))),
+        );
+      expect({ name, gated: reachesVerify(direct) }).toEqual({
+        name,
+        gated: true,
+      });
+      // A condition with a status function overrides the skip it inherits,
+      // so it has to refuse a skipped verify on its own.
+      if (job.if && /always\(\)|cancelled\(\)/.test(job.if)) {
+        const skipped: RunState = {
+          results: Object.fromEntries(
+            Object.keys(jobs).map((other) => [other, "skipped"]),
+          ),
+          outputs: { scope: { "slow-tier": "false" } },
+        };
+        skipped.results.scope = "success";
+        skipped.results["deploy-marketing"] = "success";
+        expect({ name, runs: runsIn(jobs, name, skipped) }).toEqual({
+          name,
+          runs: false,
+        });
+      }
+    }
+  });
 });
