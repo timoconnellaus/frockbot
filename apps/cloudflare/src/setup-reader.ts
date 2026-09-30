@@ -59,6 +59,7 @@ export function setupReaderPathV1(pathname: string): boolean {
     pathname === "/api/connection-commands" ||
     pathname === "/api/billing" ||
     pathname === "/api/billing/spending" ||
+    pathname === "/api/web-search" ||
     /^\/api\/billing\/provider\/(checkout|plan|portal)$/.test(pathname) ||
     new RegExp(
       `^/api/plugins/${ACCOUNT_CONNECTION_PACKAGES_V1}/connections(/[^/]+/(revoke|authorize))?$`,

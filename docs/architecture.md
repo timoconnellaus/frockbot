@@ -721,11 +721,12 @@ on). It reads and writes through the account routes that already exist:
 `/api/settings/connections` (with `catalog=1&kinds=model` for every model
 provider the product supports, and `kinds=connector&q=` for the app search),
 `/api/connections` and the `connect` and `mcp` Packages' own routes for
-accounts, and `/api/billing` for the plan, credit and what used it. Keys are
-sent once, in the command that stores them, and never read back. A part whose
-backend is not built yet is drawn and marked Coming soon: choosing a provider
-per job other than chat, BYO, a Computer of the person's own, and search or
-Composio of their own.
+accounts, `/api/web-search` for the search choice, and `/api/billing` for the
+plans (BYO among them), credit and what used it. Keys are sent once, in the
+command that stores them, and never read back. A part whose backend is not
+built yet is drawn and marked Coming soon: choosing a provider per job other
+than chat, a Computer of the person's own, a test search, and Composio of
+their own.
 
 Opened in a tab, Setup reads with the browser's session. The app opens it in a
 `HostFrame` (`lib/setup/page.dart`), which carries no session: the web frame is

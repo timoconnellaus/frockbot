@@ -14,6 +14,7 @@ import {
   type SetupPage,
 } from "../model.ts";
 import { Icon, Notice, PageHead, Pill, type Tone } from "../ui.tsx";
+import { nameOfSearch } from "./search.tsx";
 
 function Summary(props: {
   page: SetupPage;
@@ -54,7 +55,16 @@ export function OverviewPage() {
   );
   const chat = chatOf(data.settings, providers);
   const needs = needsYouOf(data.settings, providers, chat, data.billing);
-  const strip = stripOf(chat, providers, data.settings);
+  const ownSearch =
+    data.webSearch && data.webSearch.provider !== "frockbot"
+      ? data.webSearch.provider
+      : undefined;
+  const strip = stripOf(
+    chat,
+    providers,
+    data.settings,
+    ownSearch !== undefined,
+  );
   const billing = data.billing;
   const plan = billing?.subscription
     ? billing.plan.subscriptions.find(
@@ -180,11 +190,15 @@ export function OverviewPage() {
           icon="search"
           title="Web search"
           state={{ tone: "ok", text: "Ready" }}
-          headline="FrockBot’s search"
+          headline={
+            ownSearch ? `Your ${nameOfSearch(ownSearch)}` : "FrockBot’s search"
+          }
           detail={
-            searches && searches.operations > 0
-              ? `${searches.operations} search${searches.operations === 1 ? "" : "es"} ${billing?.subscribed ? "this month" : "in the last 30 days"}.`
-              : "Every bot can search the web."
+            ownSearch
+              ? "Never billed by FrockBot."
+              : searches && searches.operations > 0
+                ? `${searches.operations} search${searches.operations === 1 ? "" : "es"} ${billing?.subscribed ? "this month" : "in the last 30 days"}.`
+                : "Every bot can search the web."
           }
         />
         <Summary

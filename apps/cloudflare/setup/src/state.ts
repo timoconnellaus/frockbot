@@ -14,6 +14,7 @@ import type {
   ConnectionsFrame,
   Settings,
   Spending,
+  WebSearchChoice,
 } from "./model.ts";
 
 export interface SetupData {
@@ -25,6 +26,8 @@ export interface SetupData {
   /** Absent where this install sells nothing, or while billing is down. */
   billing?: Billing;
   spending?: Spending;
+  /** Absent while it cannot be read; the page then says so. */
+  webSearch?: WebSearchChoice;
   /** Credit used in the last 30 days, for the plan suggestion. */
   spentLast30DaysMicros?: number;
 }
@@ -44,13 +47,14 @@ async function optional<T>(read: Promise<T>): Promise<T | undefined> {
 }
 
 export async function loadSetup(): Promise<SetupData> {
-  const [settings, models, installed, billing] = await Promise.all([
+  const [settings, models, installed, billing, webSearch] = await Promise.all([
     api<Settings>("/api/settings?view=2"),
     api<ConnectionsFrame>(
       "/api/settings/connections?catalog=1&kinds=model&limit=2000",
     ),
     api<ConnectionsFrame>("/api/settings/connections"),
     optional(api<Billing & { spentLast30DaysMicros?: number }>("/api/billing")),
+    optional(api<WebSearchChoice>("/api/web-search")),
   ]);
   const spending = billing?.metered
     ? await optional(
@@ -65,6 +69,7 @@ export async function loadSetup(): Promise<SetupData> {
     accounts: installed.accounts,
     ...(billing ? { billing } : {}),
     ...(spending ? { spending } : {}),
+    ...(webSearch ? { webSearch } : {}),
     ...(billing?.spentLast30DaysMicros === undefined
       ? {}
       : { spentLast30DaysMicros: billing.spentLast30DaysMicros }),

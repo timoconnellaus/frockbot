@@ -173,6 +173,33 @@ describe("plans", () => {
     expect(heavy.why).toContain("US$30.00");
   });
 
+  test("with no own computer, a Custom account still suits a plan with credit, and says when BYO would do", () => {
+    const withByo: Billing = {
+      ...billing,
+      plan: {
+        ...billing.plan,
+        subscriptions: [
+          {
+            id: "byo",
+            name: "BYO",
+            monthlyCents: 500,
+            includedMicros: 0,
+            trial: false,
+            jevFairUseMicros: 2_000_000,
+          },
+          ...billing.plan.subscriptions,
+        ],
+      },
+    };
+    const chosen = settings({
+      accountModel: { connectionId: "openai-1", providerModelId: "gpt-5.5" },
+    });
+    const chat = chatOf(chosen, providersOf(chosen, catalog));
+    const suggestion = suggestPlan(chat, withByo, 1_000_000);
+    expect(suggestion.planId).toBe("standard");
+    expect(suggestion.why).toContain("BYO would be enough");
+  });
+
   test("list Jev as included and the person's own accounts as paid to them", () => {
     const providers = providersOf(settings(), catalog);
     const rows = usageRowsOf(

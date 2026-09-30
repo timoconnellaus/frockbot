@@ -133,6 +133,31 @@ test("an MCP server is added from a form that asks for its address", async ({
   });
 });
 
+test("your own SearXNG runs web search, and FrockBot's is one press away", async ({
+  page,
+  userId,
+}) => {
+  await openApplication(page, userId);
+  await openSetup(page, "search");
+  await page.getByRole("button", { name: "Custom", exact: true }).click();
+  await page.getByRole("button", { name: /SearXNG/u }).click();
+  await page
+    .getByLabel("Your SearXNG address")
+    .fill("https://search.example.net");
+  await page.getByRole("button", { name: "Use SearXNG" }).click();
+  await expect(page.getByText("Your bots search with SearXNG.")).toBeVisible();
+  const read = async () =>
+    (await (await page.request.get("/api/web-search")).json()) as {
+      provider: string;
+    };
+  expect((await read()).provider).toBe("searxng");
+
+  await page
+    .getByRole("button", { name: "FrockBot’s search", exact: true })
+    .click();
+  await expect.poll(async () => (await read()).provider).toBe("frockbot");
+});
+
 test.describe("Setup on a phone", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 

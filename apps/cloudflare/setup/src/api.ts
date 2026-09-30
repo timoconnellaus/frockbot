@@ -76,7 +76,7 @@ async function renewReader(): Promise<boolean> {
 
 export async function api<T>(
   path: string,
-  options: { method?: "GET" | "POST"; body?: unknown } = {},
+  options: { method?: "GET" | "POST" | "PUT"; body?: unknown } = {},
   retried = false,
 ): Promise<T> {
   const headers: Record<string, string> = {};

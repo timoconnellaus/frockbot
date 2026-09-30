@@ -22,6 +22,7 @@ import {
   useAction,
 } from "../ui.tsx";
 import { ReplaceKey } from "./ai.tsx";
+import { nameOfSearch } from "./search.tsx";
 
 export function connectionState(connection: Connection): {
   tone: "ok" | "bad" | "warn" | "neutral";
@@ -161,7 +162,11 @@ function ComingRow(props: { name: string; detail: string; uses: string }) {
 }
 
 export function AccountsPage() {
-  const { data } = useSetup();
+  const { data, go } = useSetup();
+  const ownSearch =
+    data.webSearch && data.webSearch.provider !== "frockbot"
+      ? data.webSearch.provider
+      : undefined;
   const providers = useMemo(
     () => providersOf(data.settings, data.modelCatalog),
     [data],
@@ -236,11 +241,47 @@ export function AccountsPage() {
             detail="For a computer on your own Fly.io account"
             uses="Not used: your computer is FrockBot’s"
           />
-          <ComingRow
-            name="Brave, Exa, Tavily or SearXNG"
-            detail="For your own web search"
-            uses="Not used: you use FrockBot’s search"
-          />
+          {ownSearch ? (
+            <div class="row account">
+              <span class="grow stack-2">
+                <span class="row-title">{nameOfSearch(ownSearch)}</span>
+                <span class="small">
+                  {ownSearch === "searxng" ? "Your server" : "API key"}
+                </span>
+              </span>
+              <span class="small uses">Web search</span>
+              <Pill tone="ok">Connected</Pill>
+              <span class="row-buttons">
+                <button
+                  type="button"
+                  class="rowpill"
+                  onClick={() => go("search")}
+                >
+                  {ownSearch === "searxng" ? "Change address" : "Replace key"}
+                </button>
+              </span>
+            </div>
+          ) : (
+            <div class="row account">
+              <span class="grow stack-2">
+                <span class="row-title">Brave, Exa, Tavily or SearXNG</span>
+                <span class="small">For your own web search</span>
+              </span>
+              <span class="small uses">
+                Not used: you use FrockBot’s search
+              </span>
+              <Pill tone="neutral">Not added</Pill>
+              <span class="row-buttons">
+                <button
+                  type="button"
+                  class="rowpill"
+                  onClick={() => go("search")}
+                >
+                  Add
+                </button>
+              </span>
+            </div>
+          )}
           <ComingRow
             name="Composio"
             detail="For your own connected apps"

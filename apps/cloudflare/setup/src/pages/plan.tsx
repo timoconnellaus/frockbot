@@ -11,7 +11,7 @@ import {
   type Billing,
   type PaymentsAction,
 } from "../model.ts";
-import { Dialog, PageHead, Pill, Problem, Soon, useAction } from "../ui.tsx";
+import { Dialog, PageHead, Pill, Problem, useAction } from "../ui.tsx";
 
 function renewal(billing: Billing): string | undefined {
   const end = billing.subscription?.periodEnd;
@@ -135,23 +135,6 @@ export function PlanPage() {
         lede="Your plan, your credit, and what used it this month."
       />
       <div class="grid-3">
-        <article class="card plan stack-12" aria-labelledby="plan-byo">
-          <div class="plan-head">
-            <span class="plan-name" id="plan-byo">
-              BYO
-            </span>
-            {suggestion.planId === "byo" ? (
-              <Pill tone="ready">Suits your setup</Pill>
-            ) : null}
-            <Soon />
-          </div>
-          <span class="plan-price">US$5 a month</span>
-          <ul class="body plan-list">
-            <li>Hosting, Jev and connected apps</li>
-            <li>Bring your own models and computer</li>
-            <li>No included credit; top up for anything else of ours</li>
-          </ul>
-        </article>
         {billing.plan.subscriptions.map((plan) => {
           const action = actionFor(plan.id);
           const mine = plan.id === current;
@@ -180,11 +163,31 @@ export function PlanPage() {
                 {dollars(plan.monthlyCents)} a month
               </span>
               <ul class="body plan-list">
-                <li>
-                  {microsToDollars(plan.includedMicros)} of credit every month
-                </li>
-                <li>For FrockBot’s computer, Frock AI, voice and search</li>
-                {billing.plan.trial && !current ? (
+                {plan.includedMicros > 0 ? (
+                  <>
+                    <li>
+                      {microsToDollars(plan.includedMicros)} of credit every
+                      month
+                    </li>
+                    <li>For FrockBot’s computer, Frock AI, voice and search</li>
+                  </>
+                ) : (
+                  <>
+                    <li>Hosting, Jev and connected apps</li>
+                    {plan.jevFairUseMicros ? (
+                      <li>
+                        Jev fair use up to{" "}
+                        {microsToDollars(plan.jevFairUseMicros)} a month
+                      </li>
+                    ) : null}
+                    <li>
+                      No included credit; top up for anything else of ours
+                    </li>
+                  </>
+                )}
+                {plan.trial === false ? (
+                  <li>No trial</li>
+                ) : billing.plan.trial && !current ? (
                   <li>{billing.plan.trial.days}-day trial</li>
                 ) : null}
               </ul>

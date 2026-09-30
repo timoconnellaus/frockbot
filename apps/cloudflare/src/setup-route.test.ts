@@ -245,6 +245,7 @@ describe("the reader credential", () => {
       "/api/connection-commands",
       "/api/billing",
       "/api/billing/spending",
+      "/api/web-search",
       "/api/billing/provider/checkout",
       "/api/plugins/connect/connections",
       "/api/plugins/mcp/connections/conn-1/authorize",

@@ -121,11 +121,16 @@ export interface Billing {
   subscribed: boolean;
   includedGrantedMicros: number;
   plan: {
+    /** Cheapest first. A plan with no included credit is BYO. */
     subscriptions: {
       id: string;
       name: string;
       monthlyCents: number;
       includedMicros: number;
+      /** `false` when the plan starts without the deployment's trial. */
+      trial?: false;
+      /** The Jev a paid month covers before credit is drawn. */
+      jevFairUseMicros?: number;
     }[];
     trial: { days: number; creditMicros: number } | null;
     topUpCents: number[];
@@ -584,23 +589,31 @@ export function microsToDollars(micros: number): string {
   return `US$${(micros / 1_000_000).toFixed(2)}`;
 }
 
-export type PlanId = "byo" | string;
+export interface WebSearchChoice {
+  provider: "frockbot" | "brave" | "exa" | "tavily" | "searxng";
+  updatedAt?: string;
+}
 
 /**
  * The plan that suits how this account is set up, and why, in one sentence.
  * FrockBot's computer and Frock AI draw on credit, so they suit a plan that
- * includes some; an account that brings its own models everywhere needs
- * little of it. The person still picks.
+ * includes some; an account that brings its own models needs less of it. The
+ * person still picks.
  */
 export function suggestPlan(
   chat: Chat,
   billing: Billing,
   spentLast30DaysMicros: number | undefined,
-): { planId: PlanId; why: string } {
-  const plans = billing.plan.subscriptions;
-  const standard = plans[0];
-  const bigger = plans.find(
+): { planId: string | undefined; why: string } {
+  const withCredit = billing.plan.subscriptions.filter(
+    (plan) => plan.includedMicros > 0,
+  );
+  const standard = withCredit[0];
+  const bigger = withCredit.find(
     (plan) => standard && plan.includedMicros > standard.includedMicros,
+  );
+  const byo = billing.plan.subscriptions.find(
+    (plan) => plan.includedMicros === 0,
   );
   if (
     bigger &&
@@ -612,14 +625,19 @@ export function suggestPlan(
       planId: bigger.id,
       why: `${bigger.name} suits your setup because your bots used ${microsToDollars(spentLast30DaysMicros)} of credit in the last 30 days, more than ${standard.name} includes.`,
     };
+  if (!standard)
+    return {
+      planId: byo?.id,
+      why: `${byo?.name ?? "BYO"} is the plan this install sells.`,
+    };
   if (chat.mode === "custom")
     return {
-      planId: standard?.id ?? "byo",
-      why: `${standard?.name ?? "Standard"} suits your setup because your bots use FrockBot’s computer, which runs on credit. With your own computer as well as your own models, BYO would be enough.`,
+      planId: standard.id,
+      why: `${standard.name} suits your setup because your bots use FrockBot’s computer, which runs on credit.${byo ? ` With your own computer as well as your own models, ${byo.name} would be enough.` : ""}`,
     };
   return {
-    planId: standard?.id ?? "byo",
-    why: `${standard?.name ?? "Standard"} suits your setup because your bots use FrockBot’s computer and Frock AI, which both run on credit.`,
+    planId: standard.id,
+    why: `${standard.name} suits your setup because your bots use FrockBot’s computer and Frock AI, which both run on credit.`,
   };
 }
 
@@ -685,6 +703,7 @@ export function stripOf(
   chat: Chat,
   providers: Provider[],
   settings: Settings,
+  ownSearch = false,
 ): StripCell[] {
   const own = [
     ...new Set(
@@ -716,10 +735,13 @@ export function stripOf(
     { name: "Voice and dictation", detail: "FrockBot’s", yours: false },
     {
       name: "Search and apps",
-      detail: servers
-        ? `FrockBot’s, and ${servers} server${servers === 1 ? "" : "s"} of yours`
-        : "FrockBot’s",
-      yours: false,
+      detail: [
+        ownSearch ? "Your search" : "FrockBot’s search",
+        servers
+          ? `${servers} server${servers === 1 ? "" : "s"} of yours`
+          : "FrockBot’s apps",
+      ].join(" · "),
+      yours: ownSearch,
     },
   ].map((cell) =>
     cell.name === "Chat and jobs" && own.length && chat.mode === "frock"

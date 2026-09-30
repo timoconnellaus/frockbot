@@ -273,6 +273,16 @@ export async function runPayment(
   openOutside(checkedDestination(link, action.hosts));
 }
 
+/** The account's web search: FrockBot's, or a service of the person's own. */
+export async function setWebSearch(
+  choice:
+    | { provider: "frockbot" }
+    | { provider: "brave" | "exa" | "tavily"; apiKey: string }
+    | { provider: "searxng"; url: string },
+): Promise<void> {
+  await api("/api/web-search", { method: "PUT", body: choice });
+}
+
 /** A move between plans, which the provider settles without a page. */
 export async function changePlan(action: PaymentsAction): Promise<string> {
   if (action.target.kind !== "command")
