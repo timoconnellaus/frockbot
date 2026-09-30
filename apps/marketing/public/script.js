@@ -40,19 +40,35 @@ if (heroStage instanceof HTMLElement) {
   sink();
 }
 
-// Further down, each section's characters pop out while it is on screen.
+// Further down, each character pops out while the card or edge it hides
+// behind is on screen. On a phone a section runs several screens tall, so
+// the section alone would send a character out long before anyone sees it.
 if ("IntersectionObserver" in window) {
   const zones = document.querySelectorAll("[data-peek-zone]");
   if (zones.length) {
     document.documentElement.classList.add("js-peek");
+    const peekers = new Map();
+    const watch = (host, element) => {
+      const list = peekers.get(host) ?? [];
+      list.push(element);
+      peekers.set(host, list);
+    };
+    for (const zone of zones) {
+      watch(zone, zone);
+      for (const character of zone.querySelectorAll(".follow")) {
+        if (character.parentElement) watch(character.parentElement, character);
+      }
+    }
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
-          entry.target.classList.toggle("is-peeking", entry.isIntersecting);
+          for (const element of peekers.get(entry.target) ?? []) {
+            element.classList.toggle("is-peeking", entry.isIntersecting);
+          }
         }
       },
       { rootMargin: "0px 0px -30% 0px" },
     );
-    for (const zone of zones) observer.observe(zone);
+    for (const host of peekers.keys()) observer.observe(host);
   }
 }
