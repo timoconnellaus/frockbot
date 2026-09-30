@@ -205,6 +205,7 @@ import {
 } from "./voice-assistant.js";
 import {
   openVoiceDictationRelayV1,
+  tidyVoiceDictationTranscriptV1,
   type VoiceDictationCleanupV1,
 } from "./voice-dictation.js";
 import { createFrockAiGatewayHostV1 } from "./frock-ai.js";
@@ -1814,6 +1815,14 @@ function voiceGatewayDependencies(env: Env): VoiceGatewayDependencies {
       dictation: voiceDictationConfiguredV1(env),
       assistant: voiceAssistantConfiguredV1(env),
     }),
+    cleanDictation: (userId, text) =>
+      tidyVoiceDictationTranscriptV1(text.trim(), {
+        cleanup: voiceDictationCleanup(env, userId),
+        cleanupJudge: createHostedDictationCleanupJudgeV1({
+          AI: env.AI,
+          JEV_BASE_URL: env.JEV_BASE_URL,
+        }),
+      }),
     openDictation: async (userId, request) => {
       // The account's voice object holds the dictation lease: one capture
       // at a time and a booked window of seconds, decided before the provider

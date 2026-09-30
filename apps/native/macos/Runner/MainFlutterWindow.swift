@@ -63,6 +63,7 @@ class MainFlutterWindow: NSWindow {
     RegisterGeneratedPlugins(registry: flutterViewController)
     DesktopUpdater.shared.bind(flutterViewController.engine.binaryMessenger)
     DeviceHostBridge.shared.bind(flutterViewController.engine.binaryMessenger)
+    LocalDictation.shared.bind(flutterViewController.engine.binaryMessenger)
 
     super.awakeFromNib()
   }

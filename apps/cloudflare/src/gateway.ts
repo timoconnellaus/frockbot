@@ -55,8 +55,11 @@ import type {
 import {
   VOICE_ASSISTANT_PATH_V1,
   VOICE_CAPABILITIES_PATH_V1,
+  VOICE_DICTATION_CLEANUP_PATH_V1,
   VOICE_DICTATION_PATH_V1,
+  decodeVoiceDictationCleanupRequestV1,
   type VoiceCapabilitiesV1,
+  type VoiceDictationCleanupResponseV1,
 } from "@frockbot/app/voice/shared";
 import {
   clientOfHelloV1,
@@ -793,6 +796,30 @@ export function createGateway(
       };
       return Response.json(
         { schemaVersion: 1, ...capabilities } satisfies VoiceCapabilitiesV1,
+        { headers: { "cache-control": "no-store" } },
+      );
+    }
+    if (url.pathname === VOICE_DICTATION_CLEANUP_PATH_V1) {
+      if (request.method !== "POST")
+        return jsonError(405, "method not allowed");
+      if (userId === PUBLIC_APPLICATION_USER_ID) {
+        return jsonError(401, "authentication required");
+      }
+      let text: string;
+      try {
+        text = decodeVoiceDictationCleanupRequestV1(await request.json()).text;
+      } catch (error) {
+        return jsonError(
+          400,
+          error instanceof Error ? error.message : "invalid request",
+        );
+      }
+      const tidied = await dependencies.voice?.cleanDictation(userId, text);
+      return Response.json(
+        {
+          schemaVersion: 1,
+          text: tidied ?? null,
+        } satisfies VoiceDictationCleanupResponseV1,
         { headers: { "cache-control": "no-store" } },
       );
     }

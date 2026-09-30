@@ -829,6 +829,11 @@ export interface VoiceGatewayDependencies {
   /** The composer's dictation relay; the request is an authenticated upgrade. */
   openDictation(userId: string, request: Request): Promise<Response>;
   /**
+   * The relay's tidy-up for text a client transcribed itself. Undefined when
+   * the person's own words stand.
+   */
+  cleanDictation(userId: string, text: string): Promise<string | undefined>;
+  /**
    * The account's voice session object. `deviceKey` names the client device
    * so a socket it replaces rejoins its own call rather than superseding it.
    */

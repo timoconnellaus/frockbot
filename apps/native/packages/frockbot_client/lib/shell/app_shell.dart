@@ -19,6 +19,7 @@ import '../activity/push.dart';
 import '../panels/canvas.dart';
 import '../panels/page_microphone.dart';
 import '../audit/page.dart';
+import '../brand.dart';
 import '../client/auth.dart' show developmentAuth;
 import '../client/document_cache.dart';
 import '../client/bot_sessions.dart';
@@ -72,6 +73,7 @@ import '../voice/capture.dart';
 import '../voice/connect_sound.dart';
 import '../voice/diagnostics.dart';
 import '../voice/dictation.dart';
+import '../voice/local_dictation.dart';
 import '../voice/footer.dart';
 import '../voice/call_chrome.dart';
 import '../voice/motion.dart';
@@ -332,6 +334,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// microphone opens until after the speaker closes.
   VoiceAudioRoute audioRoute = VoiceAudioRoute.forPlatform();
   DictationController? dictation;
+
+  /// Where the capture being started is transcribed, decided at the press so
+  /// a capture meant for this Mac can never open the cloud relay.
+  bool dictatingOnThisMac = false;
   bool footerOpen = false;
   bool footerExiting = false;
 
@@ -366,6 +372,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     unawaited(deviceHost.configure(widget.userId, widget.api));
+    unawaited(localDictation.load(widget.store));
     WidgetsBinding.instance.addObserver(this);
     microphone.assistantLive = () => voiceSession?.active == true;
     microphone.holdAssistant = (held) async =>
@@ -826,15 +833,24 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final bot = selected;
     if (bot == null) return;
     if (!mounted) return;
-    if (voiceProbe.known && !voiceProbe.dictationAvailable) {
+    if (dictation?.active == true) return;
+    final onThisMac = localDictation.onThisMac;
+    if (onThisMac && !localDictation.ready) {
+      _offerDictationModel();
+      return;
+    }
+    if (!onThisMac && voiceProbe.known && !voiceProbe.dictationAvailable) {
       _say(voiceUnavailableMessage);
       return;
     }
-    if (dictation?.active == true) return;
+    dictatingOnThisMac = onThisMac;
     await microphone.acquireForDictation();
     if (!mounted) return;
+    final cloud = dictationSocketOpenerV1(widget.api);
     final controller = dictation ??= DictationController(
-      openSocket: dictationSocketOpenerV1(widget.api),
+      openSocket: () async => dictatingOnThisMac
+          ? localDictation.open(cleanup: dictationCleanerV1(widget.api))
+          : cloud(),
       capture: voiceCapture ??= RecordVoiceCapture(
         minimumBuffer: audioRoute.minimumCaptureBuffer,
       ),
@@ -846,6 +862,39 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (!mounted) return;
     final failure = controller.error;
     if (failure != null) _say(failure);
+  }
+
+  /// On-device dictation was chosen and its model is not here yet. Said, and
+  /// offered, rather than quietly sending the capture to the cloud instead.
+  void _offerDictationModel() {
+    final status = localDictation.status;
+    switch (status.phase) {
+      case LocalDictationPhase.downloading:
+        _say(
+          'The dictation model is still downloading '
+          '(${(status.progress * 100).round()}%).',
+        );
+      case LocalDictationPhase.unsupported:
+        _say(
+          'Dictation on this Mac needs Apple silicon. Choose '
+          '${clientBrand.productName}’s dictation in Your computers.',
+        );
+      case LocalDictationPhase.absent ||
+          LocalDictationPhase.failed ||
+          LocalDictationPhase.ready:
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Dictation on this Mac needs its speech model first '
+              '(${formatDictationModelSizeV1(status.expectedBytes)}).',
+            ),
+            action: SnackBarAction(
+              label: 'Download',
+              onPressed: () => unawaited(localDictation.download()),
+            ),
+          ),
+        );
+    }
   }
 
   Future<void> _stopDictation() async {

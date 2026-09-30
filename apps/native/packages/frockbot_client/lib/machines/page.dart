@@ -16,6 +16,7 @@ import '../client/transport.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/semantics.dart';
 import '../view/surface.dart';
+import '../voice/local_dictation.dart';
 import 'device_host.dart';
 
 /// The kinds `MACHINE_ACTION_KINDS_V1` declares.
@@ -156,7 +157,13 @@ class _MachinesPageState extends State<MachinesPage> {
     documentId: MachineIds.document,
     refreshId: MachineIds.refresh,
     controller: controller,
-    banner: (context) => DeviceHostCard(controller: deviceHost),
+    banner: (context) => Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        DeviceHostCard(controller: deviceHost),
+        LocalDictationCard(controller: localDictation),
+      ],
+    ),
     cacheScope: 'account',
   );
 }

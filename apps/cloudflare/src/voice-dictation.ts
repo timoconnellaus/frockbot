@@ -164,6 +164,68 @@ export async function fetchVoiceUpstreamSocketV1(
 }
 
 /**
+ * The tidied form of one transcript, or undefined when the person's own words
+ * stand.
+ *
+ * Shared by the relay and by `POST /api/voice/dictation/cleanup`, which
+ * tidies text the Mac transcribed on the device. A deployment with no
+ * gateway, an account out of allowance, a transcript not worth a call, a
+ * model that fails or takes too long, a cheap refusal, Jev refusing or Jev
+ * missing all answer undefined. Nothing here can lose text.
+ */
+export async function tidyVoiceDictationTranscriptV1(
+  transcript: string,
+  options: {
+    cleanup?: VoiceDictationCleanupV1;
+    cleanupJudge?: DictationCleanupJudgeV1;
+    timeoutMs?: number;
+  },
+): Promise<string | undefined> {
+  const cleanup = options.cleanup;
+  if (!cleanup || !voiceDictationCleanupWorthwhileV1(transcript)) {
+    return undefined;
+  }
+  const deadline = new AbortController();
+  const timer = setTimeout(
+    () => deadline.abort(new Error("the tidy-up took too long")),
+    options.timeoutMs ?? VOICE_DICTATION_CLEANUP_TIMEOUT_MS_V1,
+  );
+  try {
+    const answer = await cleanup.run(
+      voiceDictationCleanupBodyV1(transcript),
+      deadline.signal,
+    );
+    if (answer === undefined) return undefined;
+    const result = voiceDictationCleanupResultV1(transcript, answer);
+    if (result.status === "kept") {
+      // Named rather than silent: "cleanup is off" and "cleanup keeps
+      // eating people's negations" look identical without this line.
+      console.log("voice dictation cleanup kept the raw transcript", {
+        reason: result.reason,
+      });
+      return undefined;
+    }
+    const judge = options.cleanupJudge;
+    const verdict = judge
+      ? await judge.review(
+          { raw: transcript, tidied: result.text },
+          deadline.signal,
+        )
+      : "unavailable";
+    if (verdict === "faithful") return result.text;
+    console.log("voice dictation cleanup kept the raw transcript", {
+      reason: verdict,
+    });
+    return undefined;
+  } catch (error) {
+    console.error("voice dictation cleanup failed", error);
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Answers the authenticated `GET /api/voice/dictation` upgrade.
  *
  * The response is the 101 the gateway hands back; everything after it is the
@@ -421,55 +483,17 @@ function runRelay(
       return;
     }
     send(client, { schemaVersion: 1, type: "cleaning" });
-    const deadline = new AbortController();
-    const timer = after(cleanupTimeoutMs, () =>
-      deadline.abort(new Error("the tidy-up took too long")),
-    );
-    try {
-      const answer = await cleanup.run(
-        voiceDictationCleanupBodyV1(transcript),
-        deadline.signal,
-      );
-      // The person closed the composer, sent, or navigated away while we
-      // asked. Their draft is not ours to touch any more.
-      if (closed) return;
-      if (answer !== undefined) {
-        const result = voiceDictationCleanupResultV1(transcript, answer);
-        if (result.status === "kept") {
-          // Named rather than silent: "cleanup is off" and "cleanup keeps
-          // eating people's negations" look identical without this line.
-          console.log("voice dictation cleanup kept the raw transcript", {
-            reason: result.reason,
-          });
-        } else {
-          const judge = options.cleanupJudge;
-          const verdict = judge
-            ? await judge.review(
-                { raw: transcript, tidied: result.text },
-                deadline.signal,
-              )
-            : "unavailable";
-          if (closed) return;
-          if (verdict === "faithful") {
-            send(client, {
-              schemaVersion: 1,
-              type: "cleaned",
-              text: result.text,
-            });
-          } else {
-            console.log("voice dictation cleanup kept the raw transcript", {
-              reason: verdict,
-            });
-          }
-        }
-      }
-    } catch (error) {
-      console.error("voice dictation cleanup failed", error);
-    } finally {
-      clearTimeout(timer);
-      timers.delete(timer);
-    }
+    const tidied = await tidyVoiceDictationTranscriptV1(transcript, {
+      cleanup,
+      cleanupJudge: options.cleanupJudge,
+      timeoutMs: cleanupTimeoutMs,
+    });
+    // The person closed the composer, sent, or navigated away while we
+    // asked. Their draft is not ours to touch any more.
     if (closed) return;
+    if (tidied !== undefined) {
+      send(client, { schemaVersion: 1, type: "cleaned", text: tidied });
+    }
     done();
   };
 

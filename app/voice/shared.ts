@@ -29,6 +29,36 @@ export function decodeVoiceCapabilitiesV1(input: unknown): VoiceCapabilitiesV1 {
 export const VOICE_DICTATION_PATH_V1 = "/api/voice/dictation";
 export const VOICE_ASSISTANT_PATH_V1 = "/api/voice/assistant";
 export const VOICE_CAPABILITIES_PATH_V1 = "/api/voice/capabilities";
+/**
+ * The tidy-up alone, for a transcript a client produced itself — the Mac's
+ * on-device dictation. Text goes up, never audio.
+ */
+export const VOICE_DICTATION_CLEANUP_PATH_V1 = "/api/voice/dictation/cleanup";
+
+/** `POST /api/voice/dictation/cleanup` body. */
+export interface VoiceDictationCleanupRequestV1 {
+  schemaVersion: 1;
+  text: string;
+}
+
+/** The tidied text, or null when the person's own words stand. */
+export interface VoiceDictationCleanupResponseV1 {
+  schemaVersion: 1;
+  text: string | null;
+}
+
+export function decodeVoiceDictationCleanupRequestV1(
+  input: unknown,
+): VoiceDictationCleanupRequestV1 {
+  const value = record(input, "dictation cleanup");
+  if (value.schemaVersion !== 1) {
+    throw new Error("dictation cleanup schemaVersion is unsupported");
+  }
+  if (typeof value.text !== "string") {
+    throw new Error("dictation cleanup text must be a string");
+  }
+  return { schemaVersion: 1, text: value.text };
+}
 
 /** What dictation captures and sends: PCM16 mono at this rate. */
 export const VOICE_DICTATION_SAMPLE_RATE_V1 = 24_000;
