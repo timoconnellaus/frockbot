@@ -263,24 +263,14 @@ function storedRun(
   return codec.require(storage.values.get(`run:${runId}`));
 }
 
-async function settle(): Promise<void> {
-  for (let turn = 0; turn < 8; turn += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
-}
-
 /**
- * Until the run leaves `running`. How many ticks that takes depends on the
- * digests and storage writes after its last boundary, which a loaded machine
- * spreads over more of them.
+ * Until `done` holds. How many ticks the work after a boundary takes depends
+ * on its digests and storage writes, which a loaded machine spreads over more
+ * of them, so a test waits on the state it is about to check.
  */
-async function settledRun(
-  storage: MemoryStorage,
-  runId: string,
-): Promise<void> {
+async function until(done: () => boolean): Promise<void> {
   const deadline = Date.now() + 5_000;
-  while (storedRun(storage, runId).status === "running") {
-    if (Date.now() > deadline) return;
+  while (!done() && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
 }
@@ -389,7 +379,7 @@ describe("a person's message during a Routine", () => {
         sessionId: "user-1:elsewhere",
       }),
     );
-    await settle();
+    await until(() => storage.values.has("run:agent-1"));
     expect(storedRun(storage, "agent-1").phase).toBe("queued");
     await expect(probe.authority.run(routine("fire-2"))).rejects.toThrow(
       /bot already has an active run/,
@@ -502,7 +492,7 @@ describe("Turns that are not the person's", () => {
     expect(await probe.authority.userMessageWaiting("handoff-1")).toBe("yield");
     probe.boundary("handoff-1", 2).open();
     await handoff;
-    await settle();
+    await until(() => probe.settled.length >= 2);
 
     expect(probe.settled).toEqual(["handoff-1", "msg-1"]);
     expect(storedRun(storage, "handoff-1").status).toBe("completed");
@@ -519,7 +509,7 @@ describe("Turns that are not the person's", () => {
     expect(await probe.authority.userMessageWaiting("msg-1")).toBe("yield");
     probe.boundary("msg-1", 2).open();
     await first;
-    await settle();
+    await until(() => probe.settled.length >= 2);
     expect(probe.settled).toEqual(["msg-1", "msg-2"]);
     expect(storage.values.get(PARKED_RUN_KEY)).toBeUndefined();
   });
@@ -554,7 +544,7 @@ describe("Stop on a parked Routine", () => {
 
     // The person's Turn is untouched by it.
     probe.boundary("msg-1", 2).open();
-    await settledRun(storage, "msg-1");
+    await until(() => storedRun(storage, "msg-1").status !== "running");
     expect(storedRun(storage, "msg-1").status).toBe("completed");
     expect(probe.observed.map((input) => input.command.runId)).toEqual([
       "fire-1",
