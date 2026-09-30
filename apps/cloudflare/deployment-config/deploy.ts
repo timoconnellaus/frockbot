@@ -23,6 +23,7 @@ import {
   checkInstallNameV1,
   workerUploadMetadataV1,
   type BundleWorkerKeyV1,
+  type BundleWorkerV1,
   type DeployBundleManifestV1,
   type DeployedInstallV1,
   type InstallV1,
@@ -232,11 +233,6 @@ export async function deployBundleV1(
       );
     }
   }
-  const app = manifest.workers.app;
-  if (app.customDomains && install.hostnames.length === 0) {
-    throw new Error("The install names no hostname for the app");
-  }
-
   await ensureResourcesV1(api, account, manifest, install, say);
   await uploadApplicationArtifactV1(
     api,
@@ -436,13 +432,16 @@ async function deployWorkerV1(
     {
       method: "POST",
       path: `${account}/workers/scripts/${script}/subdomain`,
-      json: { enabled: worker.workersDev, previews_enabled: false },
+      json: {
+        enabled: onWorkersDevV1(worker, install),
+        previews_enabled: false,
+      },
       headers: { "Cloudflare-Workers-Script-Api-Date": "2025-08-01" },
     },
     `set ${script}'s workers.dev route`,
   );
 
-  if (worker.customDomains) {
+  if (worker.customDomains && install.hostnames.length > 0) {
     await expectOk(
       api,
       {
@@ -459,6 +458,22 @@ async function deployWorkerV1(
     );
     say(`  domains    ${install.hostnames.join(", ")}`);
   }
+}
+
+/**
+ * Whether a Worker answers on `workers.dev`. One that takes the install's
+ * hostnames falls back to it when the install names none: an install made
+ * from the deploy page lives at `<install>.<subdomain>.workers.dev`, with
+ * Access in front of it, and needs no zone.
+ */
+export function onWorkersDevV1(
+  worker: Pick<BundleWorkerV1, "workersDev" | "customDomains">,
+  install: Pick<InstallV1, "hostnames">,
+): boolean {
+  return (
+    worker.workersDev ||
+    (worker.customDomains && install.hostnames.length === 0)
+  );
 }
 
 /** Whether an upload session's JWT asks for one call per file, as wrangler reads it. */

@@ -747,6 +747,37 @@ describe("deploying through the API", () => {
     expect(assets).toBe("completion");
   });
 
+  test("an install with no hostname answers on workers.dev and attaches no domain", async () => {
+    const account = fakeAccountV1();
+    const manifest = await manifestV1();
+    const workersDev: Record<string, unknown> = {};
+    const api = {
+      call: (request: Parameters<typeof account.api.call>[0]) => {
+        const match = request.path.match(
+          /\/workers\/scripts\/([^/]+)\/subdomain$/,
+        );
+        if (match) {
+          workersDev[match[1]!] = (
+            request.json as { enabled: boolean }
+          ).enabled;
+        }
+        return account.api.call(request);
+      },
+    };
+    const outcome = await deployBundleV1({
+      api,
+      manifest,
+      files: await filesFor(manifest),
+      install: install({ hostnames: [], computerHost: false }),
+    });
+    expect(workersDev.acme).toBe(true);
+    expect(workersDev["acme-applet-build"]).toBe(false);
+    expect(
+      account.calls.some((call) => call.includes("/domains/records")),
+    ).toBe(false);
+    expect(outcome.url).toBeUndefined();
+  });
+
   test("the next release updates in place: same scripts, only the new migrations, images rolled", async () => {
     const account = fakeAccountV1();
     const first = await manifestV1("1.2.3");
