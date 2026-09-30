@@ -48,7 +48,9 @@ test("changing chat in Setup changes what a Bot answers with, and back", async (
 
   // Out of the box, Frock AI answers: no key, nothing to set up.
   await sendMessage(page, viaOwnModel(), { replies: 1 });
-  await expect(page.getByText("Reply from the Frock AI stub.")).toBeVisible();
+  await expect(
+    page.getByText("Reply from the Frock AI stub.").last(),
+  ).toBeVisible();
 
   await connectOllamaInSetup(page, {
     apiKey: E2E_OLLAMA_GOOD_API_KEY,
@@ -67,7 +69,7 @@ test("changing chat in Setup changes what a Bot answers with, and back", async (
 
   await openApplication(page, userId);
   await sendMessage(page, viaOwnModel(), { replies: 1 });
-  await expect(page.getByText(OWN_MODEL_REPLY)).toBeVisible();
+  await expect(page.getByText(OWN_MODEL_REPLY).last()).toBeVisible();
 
   // Frock AI again is one press, and nothing is left chosen behind it.
   await openSetup(page, "ai");
