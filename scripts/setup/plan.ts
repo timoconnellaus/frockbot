@@ -12,7 +12,7 @@ import type {
   DeploymentProfileV1,
   DeploymentRegionV1,
 } from "../../apps/cloudflare/deployment-config/profile.ts";
-import { resourceNamesV1 } from "../../apps/cloudflare/deployment-config/generate.ts";
+import type { InstallV1 } from "../../apps/cloudflare/deployment-config/bundle.ts";
 import {
   OPTIONAL_PRODUCTION_SECRETS_V1,
   REQUIRED_PRODUCTION_SECRETS_V1,
@@ -27,18 +27,13 @@ export const MINTED_SECRETS_FILE_V1 = `.deployment/${SIMPLE_PROFILE_NAME_V1}/sec
 /** Where the release's container images are published (ADR 0028 step 5). */
 export const PUBLISHED_IMAGE_REGISTRY_V1 = "docker.io/timoconnellaus";
 
-/** The GitHub repository a release is downloaded from. */
-export const RELEASE_REPOSITORY_V1 = "timoconnellaus/frockbot";
-
 /**
- * The Vectorize index the memory Package reads and writes.
- *
- * 768 cosine dimensions, which is `@cf/baai/bge-base-en-v1.5` — the embedding
- * model it uses on Cloudflare. `--preset` is how wrangler is told both at once,
- * and an index created with any other shape rejects every vector the Package
- * writes.
+ * The Vectorize index the memory Package reads and writes: 768 cosine
+ * dimensions, which is `@cf/baai/bge-base-en-v1.5` — the embedding model it
+ * uses on Cloudflare, and the preset `main.yml` creates staging's with. An index
+ * with any other shape rejects every vector the Package writes.
  */
-export const MEMORY_INDEX_PRESET_V1 = "@cf/baai/bge-base-en-v1.5";
+export const MEMORY_INDEX_DIMENSIONS_V1 = 768;
 
 /** One Cloudflare account, as `wrangler whoami` lists it. */
 export interface WhoamiAccountV1 {
@@ -223,53 +218,8 @@ export function imageTagV1(
   return {
     tag: "latest",
     warning:
-      "This checkout is not on a release tag, so the container images and the release assets " +
-      "will be whatever `latest` is right now. Check out a tag and run this again to pin a release.",
-  };
-}
-
-/** What the installer downloads from the release for its tag. */
-export interface ReleaseAssetsV1 {
-  readonly webClient: string;
-  readonly applicationArtifact: string;
-}
-
-/**
- * The asset names `release.yml` attached for a version.
- *
- * One spelling, checked against the workflow by `setup.test.ts`: a name that
- * drifted would download nothing, and the installer would deploy a Worker with
- * no client and an artifact hash pointing at an empty bucket.
- */
-export function releaseAssetNamesV1(version: string): ReleaseAssetsV1 {
-  return {
-    webClient: `frockbot-web-client-${version}.zip`,
-    applicationArtifact: `frockbot-application-artifact-${version}.mjs`,
-  };
-}
-
-/** The two R2 buckets and the one index a deployment needs. */
-export interface DeploymentResourcesV1 {
-  readonly buckets: readonly string[];
-  readonly memoryIndex: string;
-  /** Where the application artifact is uploaded, and the Worker loads it from. */
-  readonly applicationArtifactsBucket: string;
-}
-
-/**
- * What to create, taken from the generator rather than derived again.
- *
- * A profile may name its resources instead of deriving them from the prefix, and
- * a second derivation here would create a bucket nothing opens.
- */
-export function deploymentResourcesV1(
-  profile: DeploymentProfileV1,
-): DeploymentResourcesV1 {
-  const named = resourceNamesV1(profile);
-  return {
-    buckets: [named.applicationArtifactsBucket, named.memoryFilesBucket],
-    memoryIndex: named.memoryIndex,
-    applicationArtifactsBucket: named.applicationArtifactsBucket,
+      "This checkout is not on a release tag, so the deploy bundle and its container images " +
+      "will be whatever the newest release is right now. Check out a tag and run this again to pin a release.",
   };
 }
 
@@ -589,4 +539,43 @@ export function accessDashboardStepsV1(
 /** The R2 key the Worker loads its application artifact from. */
 export function applicationArtifactKeyV1(sha256: string): string {
   return `applications/${sha256}.mjs`;
+}
+
+/**
+ * What the deploy bundle is installed with, from the profile and the secrets.
+ * The profile's prefix is the install name, so an install `bun run setup`
+ * made and one the deploy page made are the same install.
+ */
+export function setupInstallV1(
+  profile: DeploymentProfileV1,
+  secrets: Readonly<Record<string, string>>,
+): InstallV1 {
+  if (!profile.access) throw new Error("The profile names no Access team.");
+  // A bundle names every Worker and resource from the install name alone, so
+  // an update lands on the same ones whoever deploys it. A profile that names
+  // one by hand describes an install no bundle can reach.
+  const named = [
+    ...Object.keys(profile.resources ?? {}),
+    ...Object.entries(profile.workers ?? {})
+      .filter(([, worker]) => worker?.name !== undefined)
+      .map(([key]) => `workers.${key}.name`),
+  ];
+  if (named.length > 0) {
+    throw new Error(
+      `The profile names ${named.join(", ")} by hand; a simple install names everything from its prefix.`,
+    );
+  }
+  return {
+    accountId: profile.accountId,
+    name: profile.prefix,
+    hostnames: profile.workers?.app?.hostnames ?? [],
+    // The Computer is in every simple deployment (ADR 0028).
+    computerHost: true,
+    vars: {
+      ACCESS_TEAM_DOMAIN: profile.access.teamDomain,
+      ACCESS_AUD: profile.access.aud,
+    },
+    secrets,
+    ...(profile.region ? { location: profile.region } : {}),
+  };
 }

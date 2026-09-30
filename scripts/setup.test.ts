@@ -18,14 +18,13 @@ import {
   formatMintedSecretsV1,
   HUMAN_SECRETS_V1,
   imageTagV1,
-  MEMORY_INDEX_PRESET_V1,
+  MEMORY_INDEX_DIMENSIONS_V1,
   MINTED_SECRETS_V1,
   mintPlanV1,
   parseMintedSecretsV1,
   parseWhoamiAccountsV1,
   PUBLISHED_IMAGE_REGISTRY_V1,
-  releaseAssetNamesV1,
-  deploymentResourcesV1,
+  setupInstallV1,
   simpleProfileV1,
   UNISSUED_ACCESS_AUD_V1,
 } from "./setup/plan.ts";
@@ -172,18 +171,6 @@ describe("which release a checkout installs", () => {
     expect(imageTagV1("v0.7.20-3-gabc", "0.0.1").tag).toBe("latest");
   });
 
-  test("the asset names are the ones release.yml attaches", () => {
-    const workflow = readFileSync(
-      join(REPO_ROOT_V1, ".github", "workflows", "release.yml"),
-      "utf8",
-    );
-    const assets = releaseAssetNamesV1("$VERSION");
-    // A name that drifted would download nothing and deploy a Worker with no
-    // client and an artifact hash pointing at an empty bucket.
-    expect(workflow).toContain(assets.webClient);
-    expect(workflow).toContain(assets.applicationArtifact);
-  });
-
   test("the artifact's R2 key is its own sha256, as the release deploy writes it", () => {
     expect(applicationArtifactKeyV1("e".repeat(64))).toBe(
       `applications/${"e".repeat(64)}.mjs`,
@@ -191,39 +178,49 @@ describe("which release a checkout installs", () => {
   });
 });
 
-describe("the resources a deployment needs", () => {
-  test("two buckets and one index, named from the prefix", () => {
-    expect(deploymentResourcesV1(simpleProfileV1(ANSWERS))).toEqual({
-      buckets: ["example-application-artifacts", "example-memory-files"],
-      memoryIndex: "example-memory",
-      applicationArtifactsBucket: "example-application-artifacts",
+describe("the install a profile deploys", () => {
+  test("is named from the prefix, with the Access vars and the Computer", () => {
+    const install = setupInstallV1(simpleProfileV1(ANSWERS), {
+      JEV_API_KEY: "k",
+    });
+    expect(install).toEqual({
+      accountId: ANSWERS.accountId,
+      name: "example",
+      hostnames: ["bot.example.com"],
+      computerHost: true,
+      vars: {
+        ACCESS_TEAM_DOMAIN: "example.cloudflareaccess.com",
+        ACCESS_AUD: UNISSUED_ACCESS_AUD_V1,
+      },
+      secrets: { JEV_API_KEY: "k" },
+      location: "enam",
     });
   });
 
-  test("a profile that names its resources gets those, not the derived ones", () => {
-    // The generator binds what the profile names, so creating a derived name
-    // would create a bucket nothing opens.
-    expect(
-      deploymentResourcesV1({
-        ...simpleProfileV1(ANSWERS),
-        resources: { applicationArtifactsBucket: "named-by-hand" },
-      }),
-    ).toMatchObject({
-      applicationArtifactsBucket: "named-by-hand",
-      buckets: ["named-by-hand", "example-memory-files"],
-    });
+  test("a profile that names a resource by hand is refused", () => {
+    // The bundle derives every name from the install name, so it would create
+    // a bucket nothing the profile described opens.
+    expect(() =>
+      setupInstallV1(
+        {
+          ...simpleProfileV1(ANSWERS),
+          resources: { applicationArtifactsBucket: "named-by-hand" },
+        },
+        {},
+      ),
+    ).toThrow(/applicationArtifactsBucket/);
   });
 
   test("the index shape is the embedding model the memory Package uses", () => {
     // An index with any other dimensions or metric rejects every vector it
-    // writes; `main.yml` creates staging's the same way.
-    expect(MEMORY_INDEX_PRESET_V1).toBe("@cf/baai/bge-base-en-v1.5");
+    // writes; `main.yml` creates staging's from the model's preset.
+    expect(MEMORY_INDEX_DIMENSIONS_V1).toBe(768);
     expect(
       readFileSync(
         join(REPO_ROOT_V1, ".github", "workflows", "main.yml"),
         "utf8",
       ),
-    ).toContain(MEMORY_INDEX_PRESET_V1);
+    ).toContain("@cf/baai/bge-base-en-v1.5");
   });
 });
 

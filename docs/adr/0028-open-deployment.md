@@ -273,8 +273,9 @@ what it did:
 Until a throwaway-account job exists in CI, a dry-run mode that prints every
 command is the gate, plus one real run against a fresh account (step 6).
 
-**Built.** Eight steps, not seven: fetching the web client and the application
-artifact from the release is its own step before the deploy. Seven internal
+**Built.** Seven steps, not the seven above: fetching the release's deploy bundle
+is its own step before the deploy, and creating the buckets and the index is part
+of the deploy (step 5, _Built later_). Seven internal
 secrets, not six — `NATIVE_TOKEN_SECRET` joins them, because the Access build has
 no better-auth secret to sign the native door with — recorded in
 `.deployment/simple/secrets.env` at mode 0600, since `wrangler secret list` says
@@ -286,10 +287,10 @@ it": Allow on the app's own hostname — the document, the client, sign-out and 
 native flow, and the policy that is the deployment's allowlist — and Bypass on
 `/api`, which reaches the Worker, which authenticates every one of those requests
 itself from the Access cookie or the bearer. `ui.<app hostname>` is in neither: an
-Applet's page is anonymous by design. Secrets go in with `wrangler deploy
---secrets-file` rather than `wrangler secret put`, which addresses a Worker that
-does not exist yet on a first install, and the file is removed even on a failed
-deploy. `--dry-run`, `--yes`, `--profile`, `--account` and
+Applet's page is anonymous by design. Secrets go in with the script upload
+itself, as `secret_text` bindings beside `keep_bindings`, rather than a separate
+put that would address a Worker that does not exist yet on a first install; a
+key skipped on a later run keeps the value already set. `--dry-run`, `--yes`, `--profile`, `--account` and
 `--allow-hosted-account` are the flags; the last exists because the installer
 refuses the account `deployments/hosted.json` names.
 
@@ -333,6 +334,27 @@ attached by `github-release`:
 `frockbot-web-client-<version>.zip` and
 `frockbot-application-artifact-<version>.mjs`, the second as bytes rather than an
 archive because the R2 key the Worker loads it under is that file's own sha256.
+
+**Built later, as deploy bundles.** The two assets were superseded by a deploy
+bundle per release: `frockbot-deploy-<version>.tar.gz`, holding the three Workers
+prebuilt with the web client and the application artifact, and the manifest
+`frockbot-deploy-<version>.json`. The manifest names every Worker's modules,
+bindings, migrations, secrets and images, with `{install}` where the install's
+name goes. `bun run setup` installs it through the Cloudflare API rather than
+wrangler, the same calls the deploy page makes, so nothing is generated or built
+on the deployer's machine. That also removed the installer's own resource and
+upload steps.
+
+The equivalence gate gains three checks for bundles:
+
+- the bundle's identity is held to a fixture;
+- each release's bundle is held to the previous release's, so no Worker, bucket
+  or container application is renamed and the migration history only grows;
+- a deploy is held to the live install, refusing a script at a migration tag
+  the bundle does not know.
+
+The format, the gate and the proof script are
+[docs/deploy-bundles.md](../deploy-bundles.md).
 
 ### 6. Documentation and the first external deploy
 
