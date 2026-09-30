@@ -93,6 +93,7 @@ import {
   type CardListViewV1,
   type CardViewV1,
 } from "@frockbot/app/shell/cards";
+import { decodeWebSearchChoiceViewV1 } from "@frockbot/app/web/search-choice";
 import {
   decodeSecretListViewV1,
   decodeSecretSubmitCommandV1,
@@ -271,6 +272,7 @@ interface Env {
   STRIPE_WEBHOOK_SECRET?: string;
   STRIPE_MONTHLY_PRICE_ID?: string;
   STRIPE_PLUS_PRICE_ID?: string;
+  STRIPE_BYO_PRICE_ID?: string;
   FCM_SERVICE_ACCOUNT?: string;
   /** Explicit qualification gate; not enabled by the production configuration. */
   NATIVE_SLICE_2_AUTH?: string;
@@ -305,11 +307,16 @@ interface Env {
   VOICE_ASSISTANTS: DurableObjectNamespace<VoiceAssistant>;
   /** One object per Group Chat, `idFromName("<userId>:<groupId>")`. */
   GROUP_CHATS: DurableObjectNamespace<GroupChat>;
-  /** The composer's dictation upstream. Absent closes dictation, visibly. */
+  /**
+   * The composer's dictation upstream, and the voice session on OpenAI
+   * Realtime. Absent closes dictation, visibly.
+   */
   OPENAI_API_KEY?: string;
-  /** The voice session itself: Gemini Live. Absent closes it, visibly. */
+  /** The voice session on Gemini Live. Absent closes it there, visibly. */
   GEMINI_API_KEY?: string;
-  /** A local Live stand-in for the test harness; never set in production. */
+  /** `gemini-live` (unset) or `openai-realtime`: which provider a call runs on. */
+  VOICE_PROVIDER?: string;
+  /** A local stand-in upstream for the test harness; never set in production. */
   VOICE_ASSISTANT_UPSTREAM_URL?: string;
   VOICE_ASSISTANT_MODEL?: string;
   /**
@@ -773,6 +780,10 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     getBotRegistration: (request) => rpc.getBotRegistration(request),
     hasBot: (request) => rpc.hasBot(request),
     readConnectionsFrame: (request) => rpc.readConnectionsFrame(request),
+    readWebSearchChoice: async (request) =>
+      decodeWebSearchChoiceViewV1(await rpc.readWebSearchChoice(request)),
+    setWebSearchChoice: async (request) =>
+      decodeWebSearchChoiceViewV1(await rpc.setWebSearchChoice(request)),
     listSecrets: async (request) =>
       decodeSecretListViewV1(await rpc.listSecrets(request)),
     deleteSecret: (request) => rpc.deleteSecret(request),

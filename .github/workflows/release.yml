@@ -1786,6 +1786,7 @@ jobs:
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
           STRIPE_MONTHLY_PRICE_ID: ${{ secrets.STRIPE_MONTHLY_PRICE_ID }}
           STRIPE_PLUS_PRICE_ID: ${{ secrets.STRIPE_PLUS_PRICE_ID }}
+          STRIPE_BYO_PRICE_ID: ${{ secrets.STRIPE_BYO_PRICE_ID }}
           FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
           APPLET_BUILD_TOKEN: ${{ secrets.APPLET_BUILD_TOKEN }}
           # The manifest requires both voice keys; the deploy step below
@@ -1947,12 +1948,45 @@ jobs:
             -c ../../.deployment/hosted/applet-build/wrangler.jsonc \
             --secrets-file "$secrets_file"
 
+      - name: Deploy push relay
+        # push.frockbot.com: every server without FCM credentials of its own,
+        # self-hosted ones included, reaches the released apps through it. It
+        # holds the same service account as the app Worker and nothing else.
+        working-directory: apps/push-relay
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$FCM_SERVICE_ACCOUNT" ]]; then
+            echo "Missing production configuration: FCM_SERVICE_ACCOUNT" >&2
+            exit 1
+          fi
+          secrets_file="$RUNNER_TEMP/frockbot-push-relay.env"
+          trap 'rm -f "$secrets_file"' EXIT
+
+          node <<'NODE' > "$secrets_file"
+          const names = ['FCM_SERVICE_ACCOUNT'];
+          console.log(
+            JSON.stringify(
+              Object.fromEntries(names.map((name) => [name, process.env[name]])),
+            ),
+          );
+          NODE
+
+          bunx wrangler deploy \
+            -c ../../.deployment/hosted/push-relay/wrangler.jsonc \
+            --secrets-file "$secrets_file"
+
       - name: Verify billing launch readiness
         env:
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
           STRIPE_MONTHLY_PRICE_ID: ${{ secrets.STRIPE_MONTHLY_PRICE_ID }}
           STRIPE_PLUS_PRICE_ID: ${{ secrets.STRIPE_PLUS_PRICE_ID }}
+          STRIPE_BYO_PRICE_ID: ${{ secrets.STRIPE_BYO_PRICE_ID }}
         run: bun scripts/check-billing-release.ts
 
       - name: Deploy Worker
@@ -1975,6 +2009,7 @@ jobs:
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
           STRIPE_MONTHLY_PRICE_ID: ${{ secrets.STRIPE_MONTHLY_PRICE_ID }}
           STRIPE_PLUS_PRICE_ID: ${{ secrets.STRIPE_PLUS_PRICE_ID }}
+          STRIPE_BYO_PRICE_ID: ${{ secrets.STRIPE_BYO_PRICE_ID }}
           FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
           # Required: the same shared secret the plugin build Worker and its
           # container check. A Turn's plugin_check and plugin_publish both call

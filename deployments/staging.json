@@ -33,5 +33,8 @@
   },
   "aiGateway": {
     "accountId": "374784ce2915a597adcecf9bcb2c5ee6"
+  },
+  "voice": {
+    "provider": "openai-realtime"
   }
 }

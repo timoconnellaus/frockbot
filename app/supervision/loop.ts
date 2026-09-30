@@ -51,6 +51,13 @@ import {
   callApprovalWordingV1,
   type CallApprovalsV1,
 } from "./call-approval.js";
+import {
+  FETCH_REVIEW_TOOLS_V1,
+  fetchCarriesDataV1,
+  fetchUrlSeenV1,
+  fetchUrlV1,
+  refusedFetchResultV1,
+} from "./fetch-review.js";
 import { loopSignalsV1, progressCheckDueV1 } from "./loop-health.js";
 
 // Turn supervision, mounted into the loop. Jev judges; this file enforces.
@@ -458,6 +465,20 @@ function priorResults(events: readonly SessionEvent[], turn: number) {
       },
     ];
   });
+}
+
+/**
+ * Everything handed to the Bot rather than written by it: what the person
+ * said, and what tools returned.
+ */
+function handedOverTextsV1(events: readonly SessionEvent[]): string[] {
+  return events.flatMap((event) =>
+    event.type === "user/message"
+      ? [event.text]
+      : event.type === "tool/result"
+        ? [event.content]
+        : [],
+  );
 }
 
 /** What a call was given: a dynamic call's inner arguments, else its input. */
@@ -955,6 +976,61 @@ export function createSupervisionRuntimeFeatureV1(
         : undefined;
     };
 
+    /**
+     * A fetch of an address the Bot composed, with room to carry something,
+     * asked about before it leaves. A link the person or a tool handed over
+     * whole is fetched as it is: it carries only what its author put there.
+     */
+    const reviewFetchIfComposed = async (
+      call: ToolCall,
+      context: ToolExecutionContext,
+      session: Session,
+      at: { turn: number; step: number },
+    ) => {
+      const outer = context.toolCall ?? call;
+      const tool = resolveDynamicToolNameV1(outer.name, outer.input);
+      if (context.effect === "mutate" || !FETCH_REVIEW_TOOLS_V1.has(tool)) {
+        return undefined;
+      }
+      const args = isRecord(call.input) ? call.input : {};
+      const url = fetchUrlV1(args);
+      if (!url || !fetchCarriesDataV1(url)) return undefined;
+      const events = session.activeRunJournal;
+      if (fetchUrlSeenV1(String(args.url), handedOverTextsV1(events))) {
+        return undefined;
+      }
+      const reviewed = { tool, arguments: args };
+      const callDigest = await reviewedCallDigestV1(reviewed);
+      let verdict = callDecisionOf(events, context.effectId, callDigest);
+      if (!verdict) {
+        const started = Date.now();
+        verdict = await host.supervisor.reviewFetch(
+          callReviewEvidenceOfV1(events, at.turn, host.origin, reviewed),
+          context.signal,
+        );
+        session.append({
+          type: "supervision/call",
+          turn: at.turn,
+          step: at.step,
+          occurrenceId: context.effectId,
+          tool,
+          callDigest,
+          decision: verdict,
+          latencyMs: elapsed(started),
+        });
+        await session.flush();
+      }
+      if (verdict.decision === "allow") return undefined;
+      return {
+        kind: "denied" as const,
+        call,
+        result: {
+          content: refusedFetchResultV1(personPresentV1(host.origin)),
+          isError: true,
+        },
+      };
+    };
+
     /** Whether `step` opens stuck, asking Jev only when a check is due. */
     const checkProgress = async (
       session: Session,
@@ -1281,6 +1357,13 @@ export function createSupervisionRuntimeFeatureV1(
               },
             };
           }
+          const fetched = await reviewFetchIfComposed(
+            call,
+            context,
+            session,
+            at,
+          );
+          if (fetched) return fetched;
           if (context.effect === "mutate") {
             const outer = context.toolCall ?? call;
             const tool = resolveDynamicToolNameV1(outer.name, outer.input);

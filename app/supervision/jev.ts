@@ -46,6 +46,7 @@ import {
   factsUnsupportedV1,
   reviewClaimV1,
 } from "./claim-check.js";
+import { composeFetchDecisionV1, reviewFetchV1 } from "./fetch-review.js";
 import { composeProgressDecisionV1, reviewProgressV1 } from "./loop-health.js";
 import { composeOutcomeDecisionV1, reviewOutcomeV1 } from "./outcome.js";
 import {
@@ -298,6 +299,22 @@ export function createJevTurnSupervisorV1(
         throw classifyJevFailure(error);
       }
     },
+    async reviewFetch(evidence, signal) {
+      signal?.throwIfAborted();
+      try {
+        const review = await reviewFetchV1(
+          options.client,
+          callReviewEvidenceV1(evidence),
+          { signal, budget },
+        );
+        return composeFetchDecisionV1({
+          answers: review.answers,
+          model: review.model,
+        });
+      } catch (error) {
+        throw classifyJevFailure(error);
+      }
+    },
   };
 }
 
@@ -401,8 +418,9 @@ export function workersAiJevFetchV1(ai: JevAiBindingV1): Fetch {
     if (!isRecord(body)) throw new TypeError("A Jev request has no body.");
     const signal = init.signal ?? undefined;
     signal?.throwIfAborted();
-    // Raced as well as passed: a binding that ignores the signal must not
-    // hold an attempt past the client's timeout.
+    // Raced, not passed: an AbortSignal cannot cross the binding's RPC
+    // ("AbortSignal serialization is not enabled"), and a race still stops an
+    // attempt at the client's timeout.
     const aborted = new Promise<never>((_resolve, reject) => {
       signal?.addEventListener("abort", () => reject(signal.reason), {
         once: true,
@@ -411,11 +429,10 @@ export function workersAiJevFetchV1(ai: JevAiBindingV1): Fetch {
     let answer: unknown;
     try {
       answer = await Promise.race([
-        ai.run(
-          WORKERS_AI_JEV_MODEL_V1,
-          { state: body.state ?? null, questions: body.questions },
-          signal ? { signal } : {},
-        ),
+        ai.run(WORKERS_AI_JEV_MODEL_V1, {
+          state: body.state ?? null,
+          questions: body.questions,
+        }),
         aborted,
       ]);
     } catch (error) {
@@ -438,12 +455,22 @@ export function workersAiJevFetchV1(ai: JevAiBindingV1): Fetch {
   };
 }
 
+/**
+ * Wraps the transport a hosted Jev client sends through, whichever one the
+ * deployment uses; this is how an account's plan meters Turn supervision.
+ */
+export type JevFetchMeterV1 = (send: Fetch) => Fetch;
+
 /** A Jev client over the `AI` binding: billed to the account, no key. */
-export function createWorkersAiJevClientV1(ai: JevAiBindingV1): TypeSafeClient {
+export function createWorkersAiJevClientV1(
+  ai: JevAiBindingV1,
+  meter?: JevFetchMeterV1,
+): TypeSafeClient {
+  const send = workersAiJevFetchV1(ai);
   return createJevClientV1({
     // The client refuses to construct without one; nothing sends it.
     apiKey: WORKERS_AI_JEV_TRANSPORT_V1,
-    fetch: workersAiJevFetchV1(ai),
+    fetch: meter ? meter(send) : send,
   });
 }
 
@@ -463,13 +490,20 @@ export interface HostedJevEnvV1 {
 export function hostedJevClientV1(
   env: HostedJevEnvV1,
   fetch?: Fetch,
+  meter?: JevFetchMeterV1,
 ): TypeSafeClient | undefined {
   const baseURL = (env.JEV_BASE_URL ?? "").trim();
   if (baseURL) {
-    return createJevClientV1({ apiKey: "stand-in", fetch, baseURL });
+    const send: Fetch =
+      fetch ?? ((input, init) => globalThis.fetch(input, init));
+    return createJevClientV1({
+      apiKey: "stand-in",
+      fetch: meter ? meter(send) : fetch,
+      baseURL,
+    });
   }
   return isJevAiBinding(env.AI)
-    ? createWorkersAiJevClientV1(env.AI)
+    ? createWorkersAiJevClientV1(env.AI, meter)
     : undefined;
 }
 
@@ -481,8 +515,9 @@ export function createHostedTurnSupervisorV1(
   env: HostedJevEnvV1,
   productName: string,
   fetch?: Fetch,
+  meter?: JevFetchMeterV1,
 ): TurnSupervisor {
-  const client = hostedJevClientV1(env, fetch);
+  const client = hostedJevClientV1(env, fetch, meter);
   if (!client) {
     return createUnavailableTurnSupervisorV1(
       "Turn supervision is unavailable: no Workers AI binding is configured.",

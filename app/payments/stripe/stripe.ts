@@ -4,18 +4,31 @@ import type {
   PaymentsLedgerPortV1,
   PaymentsPlanV1,
   PaymentsSubscriptionV1,
+  PaymentsSubscriptionPlanV1,
 } from "@frockbot/core/contracts";
 import { withDeadlineV1 } from "@frockbot/core/deadline";
 
 /**
- * FrockBot's plans. The markup is in the usage rates, so Standard includes as
- * much usage as it costs and Plus more. A first subscription starts with a
+ * FrockBot's plans. BYO is for people who bring their own models and
+ * Computer: hosting, Jev up to US$2 a month and connected apps, with no usage
+ * credit and no trial; anything else of ours it uses is paid from top-ups.
+ * The markup is in the usage rates, so Standard includes as much usage as it
+ * costs and Plus more. A first Standard or Plus subscription starts with a
  * 7-day trial carrying US$3 of credit; top-ups are spendable only while
- * subscribed. Each plan is also a Stripe price (`STRIPE_MONTHLY_PRICE_ID`,
- * `STRIPE_PLUS_PRICE_ID`), and a subscription on any other is refused.
+ * subscribed. Each plan is also a Stripe price (`STRIPE_BYO_PRICE_ID`,
+ * `STRIPE_MONTHLY_PRICE_ID`, `STRIPE_PLUS_PRICE_ID`), and a subscription on
+ * any other is refused.
  */
 export const STRIPE_PLAN_V1 = {
   subscriptions: [
+    {
+      id: "byo",
+      name: "BYO",
+      monthlyCents: 500,
+      includedMicros: 0,
+      trial: false,
+      jevFairUseMicros: 2_000_000,
+    },
     {
       id: "standard",
       name: "Standard",
@@ -36,7 +49,7 @@ export const STRIPE_PLAN_V1 = {
 
 export type StripePlanIdV1 =
   (typeof STRIPE_PLAN_V1.subscriptions)[number]["id"];
-export function stripePlanV1(id: StripePlanIdV1) {
+export function stripePlanV1(id: StripePlanIdV1): PaymentsSubscriptionPlanV1 {
   return STRIPE_PLAN_V1.subscriptions.find((plan) => plan.id === id)!;
 }
 
@@ -48,6 +61,8 @@ export interface StripeConfig {
   monthlyPriceId: string;
   /** Absent, Plus is not offered. */
   plusPriceId?: string;
+  /** Absent, BYO is not offered. */
+  byoPriceId?: string;
   origin: string;
 }
 
@@ -56,7 +71,11 @@ export function planPriceIdV1(
   config: StripeConfig,
   plan: StripePlanIdV1,
 ): string | undefined {
-  return plan === "standard" ? config.monthlyPriceId : config.plusPriceId;
+  return plan === "standard"
+    ? config.monthlyPriceId
+    : plan === "plus"
+      ? config.plusPriceId
+      : config.byoPriceId;
 }
 function planForPrice(
   config: StripeConfig,
@@ -64,6 +83,7 @@ function planForPrice(
 ): StripePlanIdV1 | undefined {
   if (priceId === config.monthlyPriceId) return "standard";
   if (config.plusPriceId && priceId === config.plusPriceId) return "plus";
+  if (config.byoPriceId && priceId === config.byoPriceId) return "byo";
   return undefined;
 }
 export function isStripePlanV1(value: unknown): value is StripePlanIdV1 {
@@ -363,8 +383,10 @@ export class AccountPayments {
           ? {}
           : {
               plan,
-              // One trial per account, and never after a subscription.
+              // One trial per account, never after a subscription, and
+              // never on a plan without one.
               trial:
+                stripePlanV1(plan).trial !== false &&
                 !this.ledger.account().trialUsed &&
                 !this.ledger.account().subscription,
             }),

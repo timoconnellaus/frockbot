@@ -30,10 +30,16 @@ import {
 } from "./rates.js";
 
 export interface AccountUsage {
-  reserve(
-    reservation: UsageReservation,
-  ): Promise<{ status: "reserved" | "settled" | "released"; created: boolean }>;
+  reserve(reservation: UsageReservation): Promise<{
+    status: "reserved" | "settled" | "released" | "covered";
+    created: boolean;
+  }>;
   settle(settlement: UsageSettlement): Promise<void>;
+  /**
+   * Refuses, in the words the person reads, an account on no plan: what the
+   * deployment's own provider accounts need, such as connected apps.
+   */
+  requirePlan?(): Promise<void>;
 }
 export interface ModelBilling {
   account: AccountUsage;

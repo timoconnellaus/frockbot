@@ -8,8 +8,10 @@ import {
   normalizeComputerPath,
 } from "./core.js";
 import {
+  computerAssignmentForChoiceV1,
   ComputerRegistry,
   decodeComputerDoctorReportV1,
+  decodeComputerHostChoiceV1,
   type ComputerHostCapabilitiesV1,
   type ComputerHostSessionV1,
   type ComputerHostV1,
@@ -18,6 +20,7 @@ import {
 /** A host that offers nothing beyond the operations under test. */
 const TEST_HOST_CAPABILITIES: ComputerHostCapabilitiesV1 = {
   viewerFrameOrigins: [],
+  availability: "always",
 };
 
 function provider(id: string, opened: string[]): ComputerHostV1 {
@@ -373,5 +376,21 @@ describe("the self-check report", () => {
         JSON.stringify(value),
       ).toBeUndefined();
     }
+  });
+});
+
+describe("Computer host choice", () => {
+  test("a User who never chose runs on the deployment's own host", () => {
+    expect(decodeComputerHostChoiceV1(undefined)).toEqual({ kind: "frockbot" });
+    expect(
+      computerAssignmentForChoiceV1({ kind: "frockbot" }, "computer-host"),
+    ).toEqual({ providerId: "computer-host" });
+  });
+
+  test("a stored choice this deployment does not offer is refused", () => {
+    expect(() =>
+      decodeComputerHostChoiceV1({ kind: "tether", machineId: "m1" }),
+    ).toThrow();
+    expect(() => decodeComputerHostChoiceV1(null)).toThrow();
   });
 });

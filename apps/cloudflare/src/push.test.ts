@@ -5,9 +5,13 @@ import {
   registerPushDevice,
   RetryablePushError,
   sendFcm,
+  sendRelay,
   type PushDevice,
+  type PushRelayAddressV1,
   type PushUpdate,
 } from "./push.js";
+import { base64urlEncodeV1 } from "@frockbot/core/crypto";
+import { openPushV1 } from "@frockbot/core/push";
 
 class MemoryStorage {
   readonly values = new Map<string, unknown>();
@@ -725,5 +729,284 @@ describe("device records", () => {
     );
 
     expect(await durable.list({ prefix: "push:delivery:" })).toEqual(new Map());
+  });
+});
+
+/** A relay address with a key the test can open what was sealed to it. */
+async function relayAddress(seed = "a") {
+  const pair = (await crypto.subtle.generateKey(
+    { name: "ECDH", namedCurve: "P-256" },
+    true,
+    ["deriveBits"],
+  )) as CryptoKeyPair;
+  const address: PushRelayAddressV1 = {
+    handle: `ph_${seed.repeat(43)}`,
+    p256dh: base64urlEncodeV1(
+      new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey)),
+    ),
+    auth: base64urlEncodeV1(crypto.getRandomValues(new Uint8Array(16))),
+  };
+  return { address, privateKey: pair.privateKey };
+}
+
+describe("push relay", () => {
+  test("a relay registration is an address in place of a token", async () => {
+    const { address } = await relayAddress();
+    expect(
+      decodePushRegistration({ deviceId: "phone-1", relay: address }),
+    ).toEqual({ deviceId: "phone-1", relay: address });
+    for (const relay of [
+      { ...address, handle: "ph_short" },
+      { ...address, p256dh: address.auth },
+      { ...address, auth: address.p256dh },
+      { ...address, extra: "x" },
+      { handle: address.handle },
+      "ph_" + "a".repeat(43),
+    ])
+      expect(() =>
+        decodePushRegistration({ deviceId: "phone-1", relay }),
+      ).toThrow();
+    // An installation has one address, never both.
+    expect(() =>
+      decodePushRegistration({
+        deviceId: "phone-1",
+        token: TOKEN_A,
+        relay: address,
+      }),
+    ).toThrow();
+  });
+
+  test("a relay handle replaces a token, and a presence update keeps it", async () => {
+    const durable = storage();
+    const { address } = await relayAddress();
+    const now = Date.now();
+    await registerPushDevice(
+      durable,
+      { deviceId: "phone-1", token: TOKEN_A, platform: "ios" },
+      now,
+    );
+    expect(
+      await registerPushDevice(
+        durable,
+        { deviceId: "phone-1", relay: address },
+        now,
+      ),
+    ).toBe(true);
+    await registerPushDevice(
+      durable,
+      { deviceId: "phone-1", activeBotId: "primary" },
+      now,
+    );
+    expect(await durable.get<PushDevice>("push:device:phone-1")).toEqual({
+      deviceId: "phone-1",
+      relay: address,
+      activeBotId: "primary",
+      updatedAt: now,
+    });
+    // The same handle again gives the Bots nothing new.
+    expect(
+      await registerPushDevice(
+        durable,
+        { deviceId: "phone-1", relay: address },
+        now,
+      ),
+    ).toBe(false);
+  });
+
+  test("a deployment with no FCM credentials reaches relay devices and skips tokens", async () => {
+    const durable = storage();
+    const { address, privateKey } = await relayAddress();
+    await registerPushDevice(durable, {
+      deviceId: "old-phone",
+      token: TOKEN_A,
+    });
+    await registerPushDevice(durable, { deviceId: "phone-1", relay: address });
+    const relayed: Array<{ handle: string; data: Record<string, string> }> = [];
+    const fcm = async () => {
+      throw new Error("no FCM credentials here");
+    };
+    await deliverPush(
+      durable,
+      "user-1",
+      message(),
+      undefined,
+      fcm,
+      async (target, data, notify) => {
+        const sent = await sendRelay(
+          "https://relay.test",
+          target,
+          data,
+          notify,
+          (async (_url: unknown, init?: RequestInit) => {
+            relayed.push(JSON.parse(String(init?.body)));
+            return new Response("{}", { status: 200 });
+          }) as unknown as typeof fetch,
+        );
+        return sent;
+      },
+    );
+    expect(relayed).toHaveLength(1);
+    const [sent] = relayed as [
+      { handle: string; data: Record<string, string>; notify: boolean },
+    ];
+    expect(sent.handle).toBe(address.handle);
+    expect(sent.notify).toBe(true);
+    // The words travel sealed, never as fields the relay could read.
+    expect(Object.keys(sent.data).sort()).toEqual([
+      "botId",
+      "cursor",
+      "kind",
+      "notify",
+      "sealed",
+      "userId",
+    ]);
+    expect(JSON.stringify(sent)).not.toContain("Hello");
+    expect(
+      JSON.parse(
+        await openPushV1({ privateKey, key: address }, sent.data.sealed!),
+      ),
+    ).toEqual({ title: "Primary", body: "Hello" });
+  });
+
+  test("a read goes unsealed and collapses per conversation", async () => {
+    const { address } = await relayAddress();
+    let sent: Record<string, unknown> | undefined;
+    await sendRelay(
+      "https://relay.test",
+      address,
+      {
+        userId: "user-1",
+        botId: "primary",
+        cursor: "message-00000000000000000001",
+        kind: "read",
+        title: "",
+        body: "",
+        notify: "false",
+      },
+      false,
+      (async (_url: unknown, init?: RequestInit) => {
+        sent = JSON.parse(String(init?.body));
+        return new Response("{}");
+      }) as unknown as typeof fetch,
+    );
+    expect(sent).toEqual({
+      handle: address.handle,
+      data: {
+        userId: "user-1",
+        botId: "primary",
+        cursor: "message-00000000000000000001",
+        kind: "read",
+        notify: "false",
+      },
+      notify: false,
+      collapse: "read:primary",
+    });
+  });
+
+  test("the relay's answers map to the delivery rules", async () => {
+    const { address } = await relayAddress();
+    const send = (status: number) =>
+      sendRelay(
+        "https://relay.test",
+        address,
+        { botId: "primary", kind: "message", notify: "false" },
+        false,
+        (async () => new Response("{}", { status })) as unknown as typeof fetch,
+      );
+    expect(await send(200)).toBe("sent");
+    expect(await send(410)).toBe("unregistered");
+    await expect(send(429)).rejects.toBeInstanceOf(RetryablePushError);
+    await expect(send(503)).rejects.toBeInstanceOf(RetryablePushError);
+    await expect(send(502)).rejects.not.toBeInstanceOf(RetryablePushError);
+    const refused = send(400);
+    await expect(refused).rejects.toThrow(/refused/);
+    await expect(refused).rejects.not.toBeInstanceOf(RetryablePushError);
+  });
+
+  test("a handle the relay revoked drops the device, but not a newer handle", async () => {
+    const durable = storage();
+    const first = await relayAddress("a");
+    const second = await relayAddress("b");
+    await registerPushDevice(durable, {
+      deviceId: "phone-1",
+      relay: first.address,
+    });
+    await deliverPush(
+      durable,
+      "user-1",
+      message(),
+      undefined,
+      sendFcm,
+      async () => {
+        // The app re-registered while this attempt was in flight.
+        await registerPushDevice(durable, {
+          deviceId: "phone-1",
+          relay: second.address,
+        });
+        return "unregistered";
+      },
+    );
+    expect(
+      (await durable.get<PushDevice>("push:device:phone-1"))?.relay?.handle,
+    ).toBe(second.address.handle);
+    await deliverPush(
+      durable,
+      "user-1",
+      message("message-00000000000000000002"),
+      undefined,
+      sendFcm,
+      async () => "unregistered",
+    );
+    expect(await durable.get("push:device:phone-1")).toBeUndefined();
+  });
+
+  test("a relay rejection is retried later and an ambiguous one is never repeated", async () => {
+    const durable = storage();
+    const { address } = await relayAddress();
+    await registerPushDevice(durable, { deviceId: "phone-1", relay: address });
+    let attempts = 0;
+    await expect(
+      deliverPush(
+        durable,
+        "user-1",
+        message(),
+        undefined,
+        sendFcm,
+        async () => {
+          attempts += 1;
+          throw new RetryablePushError("Push relay rejected the attempt (429)");
+        },
+      ),
+    ).rejects.toBeInstanceOf(RetryablePushError);
+    expect(
+      await durable.get("push:delivery:primary:message:phone-1"),
+    ).toMatchObject({ status: "retry" });
+
+    const other = storage();
+    await registerPushDevice(other, { deviceId: "phone-1", relay: address });
+    const ambiguous = async () => {
+      attempts += 1;
+      throw new TypeError("network connection lost");
+    };
+    await deliverPush(
+      other,
+      "user-1",
+      message(),
+      undefined,
+      sendFcm,
+      ambiguous,
+    );
+    await deliverPush(
+      other,
+      "user-1",
+      message(),
+      undefined,
+      sendFcm,
+      ambiguous,
+    );
+    expect(attempts).toBe(2);
+    expect(
+      await other.get("push:delivery:primary:message:phone-1"),
+    ).toMatchObject({ status: "uncertain" });
   });
 });

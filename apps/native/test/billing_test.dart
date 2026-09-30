@@ -20,6 +20,14 @@ final _renews = _now + 20 * _dayMs;
 const _plan = {
   'subscriptions': [
     {
+      'id': 'byo',
+      'name': 'BYO',
+      'monthlyCents': 500,
+      'includedMicros': 0,
+      'trial': false,
+      'jevFairUseMicros': 2000000,
+    },
+    {
       'id': 'standard',
       'name': 'Standard',
       'monthlyCents': 2000,
@@ -72,8 +80,12 @@ List<Map<String, Object?>> _actions(
   bool plus = true,
 }) {
   final subscription = account['subscription'] as Map?;
-  final plans = ['standard', if (plus) 'plus'];
-  String name(String plan) => plan == 'plus' ? 'Plus' : 'Standard';
+  final plans = ['byo', 'standard', if (plus) 'plus'];
+  String name(String plan) => switch (plan) {
+    'plus' => 'Plus',
+    'byo' => 'BYO',
+    _ => 'Standard',
+  };
   final canSubscribe =
       subscription == null ||
       {'canceled', 'incomplete_expired'}.contains(subscription['status']);
@@ -553,7 +565,7 @@ void main() {
     );
     expect(
       _inPlans(find.text('Ends the trial and charges the first month now.')),
-      findsNWidgets(2),
+      findsNWidgets(3),
     );
     await tester.tap(_inPlans(find.widgetWithText(FilledButton, 'Start now')));
     await tester.pumpAndSettle();
@@ -622,23 +634,84 @@ void main() {
       );
       expect(
         _inPlans(find.text('Starts when your plan renews.')),
-        findsOneWidget,
+        findsNWidgets(2),
       );
       api.close();
     },
   );
 
-  testWidgets('a subscription recorded before plans had ids reads as the '
-      'first plan', (tester) async {
-    final account = subscribed({'includedMicros': 10000000});
-    (account['subscription']! as Map).remove('planId');
-    final api = _api(account);
+  testWidgets('BYO is sold beside the others, for your own models, with no '
+      'usage included', (tester) async {
+    final asked = <(String, Object?)>[];
+    final api = _api(billing({'canSpend': false}), asked: asked);
     await _show(tester, api);
-    expect(find.text('50% left'), findsOneWidget);
-    expect(find.text('of this month’s Standard plan'), findsOneWidget);
-    expect(spendAllowance(account), 20000000);
+    expect(_inPlans(find.text('US\$5')), findsOneWidget);
+    expect(
+      _inPlans(
+        find.text(
+          'For your own models and Computer. Jev and connected apps included.',
+        ),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      _inPlans(
+        find.text(
+          'No usage included · Jev up to US\$2 a month · everything else of ours from top-ups',
+        ),
+      ),
+      findsOneWidget,
+    );
+    // Standard is still measured against itself, not against BYO's nothing.
+    expect(
+      _inPlans(find.text('Room for everyday chats and a few Routines.')),
+      findsOneWidget,
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Start BYO'));
+    await tester.pumpAndSettle();
+    expect(asked.last.$2, containsPair('plan', 'byo'));
     api.close();
   });
+
+  testWidgets('on BYO: the month is measured in Jev fair use, with top-ups '
+      'for the rest', (tester) async {
+    final account = subscribed({
+      'purchasedMicros': 4000000,
+      'jevFairUse': {'remainingMicros': 1500000, 'grantedMicros': 2000000},
+    }, plan: 'byo');
+    final api = _api(account);
+    await _show(tester, api);
+    expect(find.text('75% of Jev left'), findsOneWidget);
+    expect(
+      _inGauge(
+        find.textContaining('US\$4.00 of top-up credit for our Computer'),
+      ),
+      findsOneWidget,
+    );
+    expect(spendAllowance(account), isNull);
+    api.close();
+  });
+
+  testWidgets(
+    'on BYO with Jev fair use and credit spent: paused, and told why',
+    (tester) async {
+      final api = _api(
+        subscribed({
+          'jevFairUse': {'remainingMicros': 0, 'grantedMicros': 2000000},
+        }, plan: 'byo'),
+      );
+      await _show(tester, api);
+      expect(find.text('Paused until ${spendDate(_renews)}'), findsOneWidget);
+      expect(
+        find.text(
+          'This month’s Jev fair use is used up. Top up to keep your Bots replying now.',
+        ),
+        findsOneWidget,
+      );
+      expect(_inGauge(find.text('Top up')), findsOneWidget);
+      api.close();
+    },
+  );
 
   testWidgets('the gauge measures every live allowance as granted', (
     tester,

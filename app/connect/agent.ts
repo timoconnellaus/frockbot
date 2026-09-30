@@ -63,6 +63,23 @@ export interface ConnectRuntimeConfig {
   readAccountCatalog?(toolName?: string): Promise<unknown>;
   /** Live permission for this Connection. Absent keeps the admitted snapshot. */
   permitConnection?(): Promise<boolean>;
+  /**
+   * Refuses, in the words the person reads, an account whose plan does not
+   * cover connected apps. Absent where the deployment does not bill.
+   */
+  requirePlan?(): Promise<void>;
+}
+
+/** Why the account's plan does not cover this call, or nothing when it does. */
+async function planRefusal(
+  config: ConnectRuntimeConfig,
+): Promise<string | undefined> {
+  try {
+    await config.requirePlan?.();
+    return undefined;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
 }
 
 /** The pinned catalog, as a later mount of the same Turn reads it back. */
@@ -137,7 +154,13 @@ export function createConnectFeature(
       registerComputerEgressAccountV1(runtime.tools, {
         toolkit: metadata.toolkitSlug,
         label: labelOf(config, metadata),
-        ...(config.permitConnection ? { permit: config.permitConnection } : {}),
+        ...(config.permitConnection || config.requirePlan
+          ? {
+              permit: async () =>
+                (await planRefusal(config)) ??
+                (!config.permitConnection || (await config.permitConnection())),
+            }
+          : {}),
         send: (request, endpoint) =>
           sendAsConnectedAccountV1(
             client,
@@ -210,6 +233,8 @@ async function resolveConnectTool(
     }
   | { status: "unavailable" | "stale-contract"; message: string }
 > {
+  const refused = await planRefusal(config);
+  if (refused) return { status: "unavailable", message: refused };
   if (config.permitConnection && !(await config.permitConnection())) {
     return {
       status: "stale-contract",
@@ -243,6 +268,8 @@ async function resolveConnectTool(
         idempotent: false,
         unkeyed: true,
         execute: async (input) => {
+          const refused = await planRefusal(config);
+          if (refused) return { content: refused, isError: true };
           if (config.permitConnection && !(await config.permitConnection())) {
             return {
               content: CONNECT_STALE_CONTRACT_MESSAGE_V1,
@@ -421,6 +448,7 @@ export function createConfiguredConnectRuntimeContribution(config: {
   pinToolCatalog?: ConnectRuntimeConfig["pinToolCatalog"];
   readAccountCatalog?: ConnectRuntimeConfig["readAccountCatalog"];
   permitConnection?: ConnectRuntimeConfig["permitConnection"];
+  requirePlan?: ConnectRuntimeConfig["requirePlan"];
 }): RuntimeFeatureV1<AgentRuntimeV1> | undefined {
   if (
     config.capability.packageId !== CONNECT_PACKAGE_ID ||
@@ -445,5 +473,6 @@ export function createConfiguredConnectRuntimeContribution(config: {
     ...(config.permitConnection
       ? { permitConnection: config.permitConnection }
       : {}),
+    ...(config.requirePlan ? { requirePlan: config.requirePlan } : {}),
   });
 }

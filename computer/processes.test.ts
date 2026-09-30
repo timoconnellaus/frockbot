@@ -26,6 +26,7 @@ import { FakeWorkspace } from "@frockbot/computer/fake";
 /** A host that offers nothing beyond the operations under test. */
 const TEST_HOST_CAPABILITIES: ComputerHostCapabilitiesV1 = {
   viewerFrameOrigins: [],
+  availability: "always",
 };
 
 /** Storage enough for the store: a map with a prefix listing. */

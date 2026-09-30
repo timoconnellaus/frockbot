@@ -499,6 +499,15 @@ export interface TurnSupervisor {
     signal?: AbortSignal,
   ): Promise<CallDecisionV1>;
 
+  /**
+   * Whether a fetch's address sends its site something the person did not
+   * ask to share with it. Asked only for an address the Bot composed.
+   */
+  reviewFetch(
+    evidence: CallReviewEvidenceV1,
+    signal?: AbortSignal,
+  ): Promise<CallDecisionV1>;
+
   routeQuestion(
     evidence: QuestionRouteEvidenceV1,
     signal?: AbortSignal,
@@ -1013,6 +1022,7 @@ export function createFakeTurnSupervisorV1(options?: {
   reviewStep?: TurnSupervisor["reviewStep"];
   reviewSend?: TurnSupervisor["reviewSend"];
   reviewCall?: TurnSupervisor["reviewCall"];
+  reviewFetch?: TurnSupervisor["reviewFetch"];
   routeQuestion?: TurnSupervisor["routeQuestion"];
   reviewProgress?: TurnSupervisor["reviewProgress"];
   reviewOutcome?: TurnSupervisor["reviewOutcome"];
@@ -1036,6 +1046,11 @@ export function createFakeTurnSupervisorV1(options?: {
     async reviewCall(evidence, signal) {
       throwIfAborted(signal);
       if (options?.reviewCall) return options.reviewCall(evidence, signal);
+      return allowCallDecisionV1();
+    },
+    async reviewFetch(evidence, signal) {
+      throwIfAborted(signal);
+      if (options?.reviewFetch) return options.reviewFetch(evidence, signal);
       return allowCallDecisionV1();
     },
     async routeQuestion(evidence, signal) {
@@ -1074,6 +1089,7 @@ export function createUnavailableTurnSupervisorV1(
     reviewStep: fail,
     reviewSend: fail,
     reviewCall: fail,
+    reviewFetch: fail,
     routeQuestion: fail,
     reviewProgress: fail,
     reviewOutcome: fail,

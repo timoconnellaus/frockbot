@@ -58,6 +58,9 @@ export const DEPLOYMENT_PROFILE_SCHEMA_V1 = {
         adminPortal: {
           $ref: "#/$defs/worker",
         },
+        pushRelay: {
+          $ref: "#/$defs/worker",
+        },
       },
     },
     images: {
@@ -340,6 +343,18 @@ export const DEPLOYMENT_PROFILE_SCHEMA_V1 = {
       properties: {
         domain: {
           $ref: "#/$defs/hostname",
+        },
+      },
+    },
+    voice: {
+      description:
+        "The voice call's provider. `provider` becomes the app Worker's `VOICE_PROVIDER` var: `gemini-live` (Gemini Live on `GEMINI_API_KEY`) or `openai-realtime` (OpenAI Realtime on `OPENAI_API_KEY`). Absent, calls run on Gemini Live. Dictation is OpenAI either way.",
+      type: "object",
+      additionalProperties: false,
+      required: ["provider"],
+      properties: {
+        provider: {
+          enum: ["gemini-live", "openai-realtime"],
         },
       },
     },

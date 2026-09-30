@@ -117,6 +117,14 @@ export interface BotUserConfigurationRpcTargetV1
   settleToolCredential(
     input: UserRpcEnvelopeV1<{ connectionId: string; effectId: string }>,
   ): Promise<void>;
+  /** Which web search the account chose; never its key or address. */
+  readWebSearchChoice(input: UserRpcEnvelopeV1): Promise<object>;
+  leaseWebSearchCredential(
+    input: UserRpcEnvelopeV1<{ effectId: string; generation: string }>,
+  ): Promise<unknown>;
+  settleWebSearchCredential(
+    input: UserRpcEnvelopeV1<{ effectId: string }>,
+  ): Promise<void>;
   /** Seals a value a person typed on this Bot's secret-request card. */
   storeSecret(
     input: UserRpcEnvelopeV1<{
@@ -213,6 +221,8 @@ export interface BotUserConfigurationRpcTargetV1
   operateMemory(
     input: BotRpcEnvelopeV1<{ action: string; request: object }>,
   ): Promise<object>;
+  /** Where the User's Computer runs; see `ComputerHostChoiceV1`. */
+  readComputerHost(input: UserRpcEnvelopeV1): Promise<object>;
   /** The User's sealed browser sign-ins; `./computer-logins.ts` is both halves. */
   readComputerLogins(
     input: UserRpcEnvelopeV1<{ capture: boolean }>,

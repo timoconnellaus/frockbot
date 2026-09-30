@@ -11,7 +11,16 @@ import {
   type VoiceBotReuseContextV1,
 } from "../src/voice-assistant.ts";
 import { GeminiFakeV1, type GeminiFakeFrameV1 } from "./voice-gemini-fake.ts";
+import {
+  OpenAiRealtimeFakeV1,
+  type VoiceUpstreamFakeV1,
+} from "./voice-openai-fake.ts";
 import type { VoiceDelegationRecordV1 } from "@frockbot/app/voice/ledger";
+import type { VoiceProviderEndpointV1 } from "@frockbot/app/voice/provider";
+import {
+  chooseVoiceProviderV1,
+  type VoiceProviderChoiceV1,
+} from "@frockbot/app/voice/providers";
 import type {
   VoiceMemoryJobV1,
   VoiceMemoryRecordV1,
@@ -48,6 +57,8 @@ export interface VoiceProbeScript {
   closeUpstreamWith?: number;
   /** The upstream takes this long to answer the upgrade. */
   slowUpstreamMs?: number;
+  /** The call runs on this provider rather than the deployment's Gemini. */
+  provider?: "openai-realtime";
   /** The Bot directory takes this long to answer. */
   slowDirectoryMs?: number;
   /** This many directory reads fail before the authority answers again. */
@@ -125,7 +136,7 @@ export interface VoiceTimingLine {
 }
 
 export class WorkerdVoiceAssistant extends VoiceAssistant {
-  #fakes: GeminiFakeV1[] = [];
+  #fakes: VoiceUpstreamFakeV1[] = [];
   #script: VoiceProbeScript = {};
   #dropDispatches = 0;
   #dispatched: string[] = [];
@@ -142,6 +153,19 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
     return this.#now ? new Date(this.#now) : super.now();
   }
 
+  protected override voiceChoice(): VoiceProviderChoiceV1 {
+    if (this.#script.provider !== "openai-realtime") return super.voiceChoice();
+    return chooseVoiceProviderV1({
+      deployment: "openai-realtime",
+      keys: { OPENAI_API_KEY: "workerd-openai-key" },
+    });
+  }
+
+  /** The headers the newest session was opened with. */
+  async probeUpstreamHeaders(): Promise<Record<string, string>> {
+    return { ...(this.#fake()?.headers ?? {}) };
+  }
+
   protected override modelSilenceTimeoutMs(): number {
     return this.#silenceTimeoutMs ?? super.modelSilenceTimeoutMs();
   }
@@ -155,10 +179,11 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
    * from `VOICE_ASSISTANT_UPSTREAM_URL`, so the test still proves the object
    * reads the var and puts its key on it.
    */
-  protected override async openGeminiSocket(
-    url: string,
+  protected override async openVoiceSocket(
+    endpoint: VoiceProviderEndpointV1,
     signal?: AbortSignal,
   ): Promise<WebSocket> {
+    const url = endpoint.url;
     if (signal?.aborted) {
       throw new DOMException("The operation was aborted.", "AbortError");
     }
@@ -191,7 +216,10 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
     client.accept();
     // Outbound Worker sockets deliver Google's binary JSON as Blobs by default.
     client.binaryType = "blob";
-    const fake = new GeminiFakeV1(url, server);
+    const fake: VoiceUpstreamFakeV1 =
+      this.#script.provider === "openai-realtime"
+        ? new OpenAiRealtimeFakeV1(url, endpoint.headers, server)
+        : new GeminiFakeV1(url, server);
     this.#fakes.push(fake);
     const closeWith = this.#script.closeUpstreamWith;
     if (closeWith !== undefined) {
@@ -351,7 +379,7 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
   // -- driving the fake upstream --------------------------------------------
 
   /** The newest session the object opened, which is the live one. */
-  #fake(): GeminiFakeV1 | undefined {
+  #fake(): VoiceUpstreamFakeV1 | undefined {
     return this.#fakes.at(-1);
   }
 

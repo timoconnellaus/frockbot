@@ -474,6 +474,22 @@ describe("the system prompt", () => {
     },
   );
 
+  test("sends current questions to subagent when the session cannot search", () => {
+    const base = {
+      productName: "FrockBot",
+      bot: { botId: "sunny", name: "Sunny" },
+      bots: [],
+      memory: { logDays: 30 },
+      now: new Date("2026-09-12T23:35:42.000Z"),
+    };
+    expect(renderVoiceSystemPromptV1({ ...base, webSearch: true })).toContain(
+      "You can search the web yourself",
+    );
+    const blind = renderVoiceSystemPromptV1({ ...base, webSearch: false });
+    expect(blind).not.toContain("search the web");
+    expect(blind).toContain("You cannot look anything up yourself");
+  });
+
   test("uses an explicit UTC clock when no User timezone is set", () => {
     const prompt = renderVoiceSystemPromptV1({
       productName: "FrockBot",

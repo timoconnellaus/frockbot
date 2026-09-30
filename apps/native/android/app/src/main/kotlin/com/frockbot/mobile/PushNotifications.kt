@@ -50,6 +50,28 @@ object PushNotifications {
             readingBot = null
         }
     }
+    /**
+     * The key this account's server seals alerts to when it sends through the
+     * push relay: made once per account, and dropped with the account's other
+     * state on sign-out. The private half never leaves this app's storage.
+     */
+    @Synchronized fun relayKey(context: Context): Map<String, String> {
+        val store = prefs(context)
+        if (store.getString("relay.private", null) == null) {
+            val keys = PushSeal.generate()
+            store.edit().putString("relay.private", PushSeal.encode(keys.privateKey))
+                .putString("relay.p256dh", keys.p256dh).putString("relay.auth", keys.auth).commit()
+        }
+        return mapOf("p256dh" to store.getString("relay.p256dh", "")!!, "auth" to store.getString("relay.auth", "")!!)
+    }
+    /** What a relayed alert says, opened with this account's key; null when it cannot be. */
+    private fun opened(context: Context, sealed: String): JSONObject? {
+        val store = prefs(context)
+        val key = store.getString("relay.private", null) ?: return null
+        return try {
+            JSONObject(PushSeal.open(PushSeal.decode(key), store.getString("relay.p256dh", "")!!, store.getString("relay.auth", "")!!, sealed))
+        } catch (_: Exception) { null }
+    }
     @Synchronized fun read(context: Context, botId: String, cursor: String) {
         val store = prefs(context)
         val previous = store.getString("read:$botId", "")!!
@@ -124,7 +146,12 @@ object PushNotifications {
         val newest = store.getString("newest:$key", "")!!
         val alert = cursor > newest
         if (alert) store.edit().putString("newest:$key", cursor).commit()
-        messages.put(JSONObject().put("cursor",cursor).put("title",data["title"] ?: "FrockBot").put("body",data["body"] ?: "New message").put("at",System.currentTimeMillis()))
+        // A server that sends through the relay seals the words; one that
+        // sends to FCM itself puts them in the data.
+        val words = data["sealed"]?.let { opened(context, it) }
+        val title = words?.optString("title")?.takeIf { it.isNotEmpty() } ?: data["title"]?.takeIf { it.isNotEmpty() } ?: "FrockBot"
+        val body = words?.optString("body")?.takeIf { it.isNotEmpty() } ?: data["body"]?.takeIf { it.isNotEmpty() } ?: "New message"
+        messages.put(JSONObject().put("cursor",cursor).put("title",title).put("body",body).put("at",System.currentTimeMillis()))
         val ordered = (0 until messages.length()).map { messages.getJSONObject(it) }.sortedBy { it.getString("cursor") }.takeLast(25)
         val saved = JSONArray(ordered)
         store.edit().putString("messages:$key",saved.toString()).commit()

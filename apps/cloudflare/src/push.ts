@@ -1,20 +1,43 @@
 import { BRAND_V1 } from "#brand";
 import { isPublicIdentifier } from "@frockbot/core/configuration";
 import { withDeadlineV1 } from "@frockbot/core/deadline";
+import {
+  isPushKeyV1,
+  PUSH_DELIVERY_LIFETIME_S,
+  PUSH_PLATFORMS_V1,
+  RetryablePushError,
+  sealPushV1,
+  sendFcmMessageV1,
+  type PushKeyV1,
+  type PushPlatformV1,
+} from "@frockbot/core/push";
+
+export { RetryablePushError, type PushPlatformV1 };
 
 /**
- * Which app holds an FCM token. An iPhone's token reaches APNs, which draws
- * the alert itself and needs an `apns` block to say what to draw; an Android
- * app draws its own from the data alone.
+ * Where a deployment with no FCM credentials of its own sends its pushes: the
+ * relay that holds the released apps' credentials. `PUSH_RELAY_URL` points a
+ * deployment at another one, such as staging's.
  */
-export type PushPlatformV1 = "android" | "ios";
-const PUSH_PLATFORMS_V1: readonly PushPlatformV1[] = ["android", "ios"];
+export const DEFAULT_PUSH_RELAY_URL = "https://push.frockbot.com";
+
+/**
+ * A device reached through the push relay: the relay's opaque handle for the
+ * phone's token, and the key the app generated so the alert's text can be
+ * sealed to it. The relay and Google carry only ciphertext.
+ */
+export interface PushRelayAddressV1 extends PushKeyV1 {
+  handle: string;
+}
+const RELAY_HANDLE = /^ph_[A-Za-z0-9_-]{43}$/;
 
 export interface PushDevice {
   deviceId: string;
   token?: string;
   /** Set with the token it describes. */
   platform?: PushPlatformV1;
+  /** In place of a token, on a deployment that sends through the relay. */
+  relay?: PushRelayAddressV1;
   activeBotId?: string;
   updatedAt: number;
 }
@@ -35,6 +58,7 @@ export interface PushRegistration {
   deviceId: string;
   token?: string;
   platform?: PushPlatformV1;
+  relay?: PushRelayAddressV1;
   activeBotId?: string;
   remove?: boolean;
 }
@@ -49,9 +73,14 @@ export function decodePushRegistration(input: unknown): PushRegistration {
   if (
     Object.keys(value).some(
       (key) =>
-        !["deviceId", "token", "platform", "activeBotId", "remove"].includes(
-          key,
-        ),
+        ![
+          "deviceId",
+          "token",
+          "platform",
+          "relay",
+          "activeBotId",
+          "remove",
+        ].includes(key),
     ) ||
     !isPublicIdentifier(value.deviceId)
   )
@@ -70,6 +99,20 @@ export function decodePushRegistration(input: unknown): PushRegistration {
       !PUSH_PLATFORMS_V1.includes(value.platform as PushPlatformV1))
   )
     throw new Error("Invalid push platform");
+  // A relay registration is the device's address in place of a token.
+  if (value.relay !== undefined) {
+    const relay = value.relay as Record<string, unknown> | null;
+    if (
+      value.token !== undefined ||
+      !relay ||
+      typeof relay !== "object" ||
+      typeof relay.handle !== "string" ||
+      !RELAY_HANDLE.test(relay.handle) ||
+      !isPushKeyV1({ p256dh: relay.p256dh, auth: relay.auth }) ||
+      Object.keys(relay).length !== 3
+    )
+      throw new Error("Invalid push relay registration");
+  }
   if (value.activeBotId !== undefined && !isPublicIdentifier(value.activeBotId))
     throw new Error("Invalid active Bot");
   if (value.remove !== undefined && typeof value.remove !== "boolean")
@@ -78,8 +121,9 @@ export function decodePushRegistration(input: unknown): PushRegistration {
 }
 
 /**
- * Records one registration. Answers whether it gave the Bots a token they
- * could not reach before: a new installation, or a refreshed token.
+ * Records one registration. Answers whether it gave the Bots an address they
+ * could not reach before: a new installation, a refreshed token, or a new
+ * relay handle.
  */
 export async function registerPushDevice(
   storage: DurableObjectStorage,
@@ -95,35 +139,54 @@ export async function registerPushDevice(
   for (const [oldKey, device] of devices)
     if (
       now - device.updatedAt >
-      (device.token ? 30 * 86400_000 : PRESENCE_MS * 4)
+      (addressed(device) ? 30 * 86400_000 : PRESENCE_MS * 4)
     ) {
       await forgetDevice(storage, oldKey, device.deviceId);
       devices.delete(oldKey);
     }
   if (!devices.has(key) && devices.size >= 32)
     throw new Error("Too many registered devices");
-  // A refreshed token replaces the installation's old token, never adds
-  // another recipient. A registration that carries no token is a presence
-  // update — the device says which Bot it is reading, from the first frame,
-  // before the FCM token has been fetched — so it keeps the token already
-  // registered rather than erasing the only address the Bot can reach. Every
-  // other field is stated afresh: an omitted `activeBotId` means this device
-  // is no longer reading anything, and merging it would suppress its alerts.
-  // The platform is the token's, so it is kept or replaced with it.
+  // A refreshed address replaces the installation's old one, never adds
+  // another recipient: a token or a relay handle, whichever came last. A
+  // registration that carries neither is a presence update — the device says
+  // which Bot it is reading, from the first frame, before the FCM token has
+  // been fetched — so it keeps the address already registered rather than
+  // erasing the only one the Bot can reach. Every other field is stated
+  // afresh: an omitted `activeBotId` means this device is no longer reading
+  // anything, and merging it would suppress its alerts. The platform is the
+  // token's, so it is kept or replaced with it.
   const previous = devices.get(key);
-  const token = value.token ?? previous?.token;
-  const platform =
-    value.token === undefined ? previous?.platform : value.platform;
+  const fresh = value.token !== undefined || value.relay !== undefined;
+  const token = fresh ? value.token : previous?.token;
+  const platform = fresh ? value.platform : previous?.platform;
+  const relay = fresh ? value.relay : previous?.relay;
   await storage.put(key, {
     deviceId: value.deviceId,
     ...(token === undefined ? {} : { token }),
     ...(platform === undefined ? {} : { platform }),
+    ...(relay === undefined
+      ? {}
+      : {
+          relay: {
+            handle: relay.handle,
+            p256dh: relay.p256dh,
+            auth: relay.auth,
+          },
+        }),
     ...(value.activeBotId === undefined
       ? {}
       : { activeBotId: value.activeBotId }),
     updatedAt: now,
   } satisfies PushDevice);
-  return value.token !== undefined && value.token !== previous?.token;
+  return (
+    (value.token !== undefined && value.token !== previous?.token) ||
+    (value.relay !== undefined &&
+      value.relay.handle !== previous?.relay?.handle)
+  );
+}
+
+function addressed(device: PushDevice): boolean {
+  return device.token !== undefined || device.relay !== undefined;
 }
 
 /**
@@ -149,108 +212,6 @@ async function forgetDeliveries(
     if (receiptKey.endsWith(`:${deviceId}`)) await storage.delete(receiptKey);
 }
 
-export class RetryablePushError extends Error {}
-
-interface ServiceAccount {
-  project_id: string;
-  client_email: string;
-  private_key: string;
-}
-const encoder = new TextEncoder();
-function base64url(bytes: Uint8Array): string {
-  return btoa(String.fromCharCode(...bytes))
-    .replace(/=/g, "")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_");
-}
-
-/**
- * The minted access token, reused until it is nearly expired.
- *
- * The assertion buys an hour; signing and exchanging one per device per message
- * turned a burst into a run of RSA signings and round trips to Google for no
- * gain. A token that stops being accepted is dropped and re-minted rather than
- * cached into a permanent failure.
- */
-const accessTokens = new Map<string, { token: string; expiresAt: number }>();
-const ACCESS_TOKEN_MARGIN_MS = 300_000;
-
-async function accessToken(
-  account: ServiceAccount,
-  request: typeof fetch,
-): Promise<string> {
-  const cached = accessTokens.get(account.client_email);
-  if (cached && cached.expiresAt > Date.now()) return cached.token;
-  const now = Math.floor(Date.now() / 1000);
-  const header = base64url(
-    encoder.encode(JSON.stringify({ alg: "RS256", typ: "JWT" })),
-  );
-  const claims = base64url(
-    encoder.encode(
-      JSON.stringify({
-        iss: account.client_email,
-        scope: "https://www.googleapis.com/auth/firebase.messaging",
-        aud: "https://oauth2.googleapis.com/token",
-        iat: now,
-        exp: now + 3600,
-      }),
-    ),
-  );
-  const pem = account.private_key
-    .replace(/-----[^-]+-----/g, "")
-    .replace(/\s/g, "");
-  const key = await crypto.subtle.importKey(
-    "pkcs8",
-    Uint8Array.from(atob(pem), (c) => c.charCodeAt(0)),
-    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const signature = await crypto.subtle.sign(
-    "RSASSA-PKCS1-v1_5",
-    key,
-    encoder.encode(`${header}.${claims}`),
-  );
-  const deadline = withDeadlineV1(10_000);
-  let access: { access_token: string; expires_in?: number };
-  try {
-    const auth = await request("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-        assertion: `${header}.${claims}.${base64url(new Uint8Array(signature))}`,
-      }),
-      signal: deadline.signal,
-    }).catch(() => {
-      throw new RetryablePushError("Push authorization is unavailable");
-    });
-    if (!auth.ok)
-      throw new RetryablePushError(
-        `Push authorization failed (${auth.status})`,
-      );
-    access = (await auth.json()) as {
-      access_token: string;
-      expires_in?: number;
-    };
-  } finally {
-    deadline.clear();
-  }
-  accessTokens.set(account.client_email, {
-    token: access.access_token,
-    expiresAt:
-      Date.now() +
-      Math.max(
-        60_000,
-        (access.expires_in ?? 3600) * 1000 - ACCESS_TOKEN_MARGIN_MS,
-      ),
-  });
-  return access.access_token;
-}
-
-/** Read signals, like the Android `ttl`, stop being worth delivering after a day. */
-const DELIVERY_LIFETIME_S = 86_400;
-
 /**
  * What APNs draws on an iPhone. A suspended app cannot draw an alert from
  * data, so a message to be told arrives as the alert itself, threaded per
@@ -263,7 +224,7 @@ function apnsMessage(
   notify: boolean,
 ): Record<string, unknown> {
   const expiration = String(
-    Math.floor(Date.now() / 1000) + DELIVERY_LIFETIME_S,
+    Math.floor(Date.now() / 1000) + PUSH_DELIVERY_LIFETIME_S,
   );
   if (!notify)
     return {
@@ -300,61 +261,69 @@ export async function sendFcm(
   notify: boolean,
   request: typeof fetch = fetch,
 ): Promise<"sent" | "unregistered"> {
-  const account = JSON.parse(secret) as ServiceAccount;
-  const bearer = await accessToken(account, request);
+  return sendFcmMessageV1(
+    secret,
+    {
+      token: target.token,
+      data,
+      android: {
+        priority: notify ? "HIGH" : "NORMAL",
+        ttl: `${PUSH_DELIVERY_LIFETIME_S}s`,
+      },
+      ...(target.platform === "ios" ? { apns: apnsMessage(data, notify) } : {}),
+    },
+    request,
+  );
+}
+
+/**
+ * Sends one update through the push relay. The relay accepts only the fields
+ * the apps read, and never an alert's words: those travel sealed to the key
+ * the app registered, so the relay and Google see ciphertext.
+ */
+export async function sendRelay(
+  relayUrl: string,
+  address: PushRelayAddressV1,
+  data: Record<string, string>,
+  notify: boolean,
+  request: typeof fetch = fetch,
+): Promise<"sent" | "unregistered"> {
+  const { title, body, ...rest } = data;
+  const payload: Record<string, string> = rest;
+  if (notify)
+    payload.sealed = await sealPushV1(
+      address,
+      JSON.stringify({ title: title ?? "", body: body ?? "" }),
+    );
+  const target = data.groupId ? `group:${data.groupId}` : data.botId;
   const deadline = withDeadlineV1(10_000);
   let result: Response;
   try {
-    result = await request(
-      `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(account.project_id)}/messages:send`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${bearer}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          message: {
-            token: target.token,
-            data,
-            android: {
-              priority: notify ? "HIGH" : "NORMAL",
-              ttl: `${DELIVERY_LIFETIME_S}s`,
-            },
-            ...(target.platform === "ios"
-              ? { apns: apnsMessage(data, notify) }
-              : {}),
-          },
-        }),
-        signal: deadline.signal,
-      },
-    );
+    result = await request(new URL("/send", relayUrl), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        handle: address.handle,
+        data: payload,
+        notify,
+        // A newer read replaces an undelivered older one; a message never
+        // replaces another, because each is a line in the notification.
+        ...(data.kind === "read" ? { collapse: `read:${target}` } : {}),
+      }),
+      signal: deadline.signal,
+    });
   } finally {
     deadline.clear();
   }
-  if (result.status === 404) {
-    const error = (await result.json()) as {
-      error?: { details?: { errorCode?: string }[] };
-    };
-    if (
-      error.error?.details?.some(
-        (detail) => detail.errorCode === "UNREGISTERED",
-      )
-    )
-      return "unregistered";
-  }
-  if (result.status === 401 || result.status === 403) {
-    accessTokens.delete(account.client_email);
-    throw new RetryablePushError(
-      `Push authorization was rejected (${result.status})`,
-    );
-  }
-  if (result.status === 429 || result.status >= 500)
-    throw new RetryablePushError(
-      `Push service rejected the attempt (${result.status})`,
-    );
-  if (!result.ok) throw new Error(`Push delivery failed (${result.status})`);
   await result.body?.cancel();
+  if (result.status === 410) return "unregistered";
+  // Only a refusal the relay says was never sent is retried. Anything else,
+  // its 502 for an FCM call that may have landed included, is uncertain.
+  if (result.status === 429 || result.status === 503)
+    throw new RetryablePushError(
+      `Push relay rejected the attempt (${result.status})`,
+    );
+  if (!result.ok) throw new Error(`Push relay refused (${result.status})`);
   return "sent";
 }
 
@@ -365,20 +334,30 @@ export async function deliverPush(
   update: PushUpdate,
   secret: string | undefined,
   sender = sendFcm,
+  relay: (
+    address: PushRelayAddressV1,
+    data: Record<string, string>,
+    notify: boolean,
+  ) => Promise<"sent" | "unregistered"> = (address, data, notify) =>
+    sendRelay(DEFAULT_PUSH_RELAY_URL, address, data, notify),
 ): Promise<void> {
   const devices = await storage.list<PushDevice>({ prefix: DEVICE_PREFIX });
   const now = Date.now();
   for (const [key, device] of devices) {
     if (
       now - device.updatedAt >
-      (device.token ? 30 * 86400_000 : PRESENCE_MS * 4)
+      (addressed(device) ? 30 * 86400_000 : PRESENCE_MS * 4)
     ) {
       await forgetDevice(storage, key, device.deviceId);
       devices.delete(key);
     }
   }
-  if (![...devices.values()].some((device) => device.token)) return;
-  if (!secret) throw new Error("Firebase push is not configured");
+  // A token needs this deployment's own FCM credentials. Without them it is an
+  // address nothing here can reach, and the app replaces it with a relay
+  // handle once its registration is answered `delivery: "relay"`.
+  const reachable = (device: PushDevice) =>
+    device.relay !== undefined || (device.token !== undefined && !!secret);
+  if (![...devices.values()].some(reachable)) return;
   const target = update.groupId ?? update.botId;
   const beingRead = [...devices.values()].some(
     (device) =>
@@ -391,7 +370,7 @@ export async function deliverPush(
       "Waiting for the visible message's read receipt",
     );
   for (const [deviceKey, device] of devices) {
-    if (!device.token) continue;
+    if (!reachable(device)) continue;
     const key = update.groupId
       ? `${DELIVERY_PREFIX}group:${update.groupId}:${update.kind}:${device.deviceId}`
       : `${DELIVERY_PREFIX}${update.botId}:${update.kind}:${device.deviceId}`;
@@ -432,28 +411,37 @@ export async function deliverPush(
     if (!claimed) continue;
     const notify =
       update.kind === "message" && update.notify === true && !beingRead;
+    const data = {
+      userId,
+      botId: update.botId,
+      ...(update.groupId ? { groupId: update.groupId } : {}),
+      cursor: update.cursor,
+      kind: update.kind,
+      title: update.title ?? "",
+      body: update.body ?? "",
+      notify: String(notify),
+    };
     try {
-      const result = await sender(
-        secret,
-        {
-          token: device.token,
-          ...(device.platform ? { platform: device.platform } : {}),
-        },
-        {
-          userId,
-          botId: update.botId,
-          ...(update.groupId ? { groupId: update.groupId } : {}),
-          cursor: update.cursor,
-          kind: update.kind,
-          title: update.title ?? "",
-          body: update.body ?? "",
-          notify: String(notify),
-        },
-        notify,
-      );
+      const result = device.relay
+        ? await relay(device.relay, data, notify)
+        : await sender(
+            secret!,
+            {
+              token: device.token!,
+              ...(device.platform ? { platform: device.platform } : {}),
+            },
+            data,
+            notify,
+          );
       if (result === "unregistered") {
+        // Only the address this attempt used is dropped: a device that
+        // re-registered meanwhile keeps its new one.
         const removed = await storage.transaction(async (tx) => {
-          if ((await tx.get<PushDevice>(deviceKey))?.token !== device.token)
+          const current = await tx.get<PushDevice>(deviceKey);
+          if (
+            current?.token !== device.token ||
+            current?.relay?.handle !== device.relay?.handle
+          )
             return false;
           await tx.delete(deviceKey);
           return true;

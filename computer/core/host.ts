@@ -954,6 +954,54 @@ export interface ComputerHostCapabilitiesV1 {
    * A CSP entry, so a wildcard host pattern is admitted.
    */
   viewerFrameOrigins: readonly string[];
+  /**
+   * When the Computer can be reached. `"always"` for a host the platform
+   * keeps running; `"while-connected"` for one that exists only while the
+   * person's own machine is connected to it.
+   */
+  availability: "always" | "while-connected";
+}
+
+/**
+ * Where a User's Computer runs, as the User chose it.
+ *
+ * `frockbot` is the Computer this deployment hosts. The choice is the User's,
+ * so every Bot they own opens the same one. Other kinds (a host account the
+ * User connected, a machine they tether) are planned and not yet offered.
+ */
+export type ComputerHostChoiceV1 = { kind: "frockbot" };
+
+export const DEFAULT_COMPUTER_HOST_CHOICE_V1: ComputerHostChoiceV1 = {
+  kind: "frockbot",
+};
+
+/** A stored choice, or the default when none was ever made. */
+export function decodeComputerHostChoiceV1(
+  value: unknown,
+): ComputerHostChoiceV1 {
+  if (value === undefined) return DEFAULT_COMPUTER_HOST_CHOICE_V1;
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { kind?: unknown }).kind === "frockbot"
+  ) {
+    return { kind: "frockbot" };
+  }
+  throw new Error("Computer host choice is not one this deployment offers");
+}
+
+/**
+ * The registry assignment a choice resolves to. `frockbotProviderId` is the
+ * host this deployment registered for its own Computer.
+ */
+export function computerAssignmentForChoiceV1(
+  choice: ComputerHostChoiceV1,
+  frockbotProviderId: string,
+): { providerId: string; configuration?: unknown } {
+  switch (choice.kind) {
+    case "frockbot":
+      return { providerId: frockbotProviderId };
+  }
 }
 
 /**
@@ -997,8 +1045,9 @@ export interface ComputerHostV1 {
   id: string;
   /**
    * What this host is. Declared here and not only on an open session, because
-   * every reader needs it before there is a session: the app builds its
-   * `frame-src` from `viewerFrameOrigins` while no Bot is running, and the
+   * every reader needs it before there is a session: the app's `frame-src`
+   * admits each offered host's `viewerFrameOrigins` while no Bot is running,
+   * and the
    * Computer tools describe and refuse a command without waking a Computer to
    * ask. A session carries this same declaration.
    */

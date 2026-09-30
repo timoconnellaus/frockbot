@@ -3,10 +3,8 @@ import { describe, expect, test } from "bun:test";
 import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
 import type { ToolExecutionContext } from "@frockbot/core/contracts";
 import type { SearchMeterV1 } from "@frockbot/app/billing/search";
-import {
-  BRAVE_WEB_SEARCH_ENDPOINT_V1,
-  createConfiguredWebSearchRuntimeContribution,
-} from "./brave.ts";
+import { BRAVE_WEB_SEARCH_ENDPOINT_V1 } from "./brave.ts";
+import { createConfiguredWebSearchRuntimeContribution } from "./search.ts";
 import { webSearchEffectIdV1 } from "./contract.ts";
 
 const API_KEY = "brave-test-key";
@@ -76,7 +74,7 @@ async function mount(options: {
 }) {
   const recorded: Recorded[] = [];
   const root = createAgentRuntimeHarness();
-  const feature = createConfiguredWebSearchRuntimeContribution({
+  const feature = await createConfiguredWebSearchRuntimeContribution({
     capability: CAPABILITY,
     apiKey: API_KEY,
     ...(options.meter ? { meter: options.meter } : {}),
@@ -244,21 +242,21 @@ describe("web_search on Brave Search", () => {
     await root.dispose();
   });
 
-  test("mounts only for its own Capability, and only with a key", () => {
+  test("mounts only for its own Capability, and only with a key", async () => {
     expect(
-      createConfiguredWebSearchRuntimeContribution({
+      await createConfiguredWebSearchRuntimeContribution({
         capability: { packageId: "web", capabilityId: "web-fetch" },
         apiKey: API_KEY,
       }),
     ).toBeUndefined();
     expect(
-      createConfiguredWebSearchRuntimeContribution({
+      await createConfiguredWebSearchRuntimeContribution({
         capability: CAPABILITY,
         apiKey: undefined,
       }),
     ).toBeUndefined();
     expect(
-      createConfiguredWebSearchRuntimeContribution({
+      await createConfiguredWebSearchRuntimeContribution({
         capability: CAPABILITY,
         apiKey: "",
       }),

@@ -55,6 +55,17 @@ final class PushNotifications: NSObject, MessagingDelegate {
           self.read(bot, cursor)
         }
         result(nil)
+      case "relayKey":
+        // The key a server that sends through the push relay seals this
+        // account's alerts to; the Notification Service Extension opens them.
+        guard let keys = PushKeychain.load() ?? PushKeychain.create() else {
+          result(FlutterError(code: "keychain", message: "Push key unavailable", details: nil))
+          return
+        }
+        result([
+          "p256dh": keys.privateKey.publicKey.x963Representation.base64url,
+          "auth": keys.auth.base64url,
+        ])
       case "logout":
         self.account(nil, origin: nil)
         result(nil)
@@ -128,6 +139,7 @@ final class PushNotifications: NSObject, MessagingDelegate {
       for key in store.dictionaryRepresentation().keys where key.hasPrefix("push.") {
         store.removeObject(forKey: key)
       }
+      PushKeychain.delete()
       store.set(userId, forKey: "push.userId")
     }
     if let origin { store.set(origin, forKey: "push.origin") }

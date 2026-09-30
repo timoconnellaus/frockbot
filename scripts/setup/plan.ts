@@ -437,7 +437,8 @@ export const HUMAN_SECRETS_V1: readonly HumanSecretV1[] = [
   },
   {
     name: "FCM_SERVICE_ACCOUNT",
-    enables: "push notifications to an Android app you build yourself",
+    enables:
+      "push sent to FCM yourself; without it, push goes through the relay",
     where: "a Firebase project's service-account JSON",
     workers: ["app"],
   },
@@ -496,6 +497,7 @@ export const DELIBERATELY_UNSET_V1: readonly string[] = [
   "STRIPE_WEBHOOK_SECRET",
   "STRIPE_MONTHLY_PRICE_ID",
   "STRIPE_PLUS_PRICE_ID",
+  "STRIPE_BYO_PRICE_ID",
   "FROCK_AI_GATEWAY_TOKEN",
 ];
 

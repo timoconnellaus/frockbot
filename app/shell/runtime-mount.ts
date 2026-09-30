@@ -5,6 +5,7 @@
 // into a mounted runtime, so both an admitted Turn (`app/shell/turn.ts`) and an
 // isolate's `ai` grant (`app/isolates/bot.ts`) resolve the same way.
 
+import { decodeComputerHostChoiceV1 } from "@frockbot/computer/core/host";
 import { hostedJevClientV1 } from "@frockbot/app/supervision/jev";
 import { createCallApprovalStoreV1 } from "@frockbot/app/supervision/call-approval";
 import { askRoutineApprovalV1 } from "@frockbot/app/routines/approval-bot";
@@ -12,7 +13,10 @@ import {
   createBrowserTaskDeciderV1,
   createJevEgressV1,
 } from "@frockbot/app/supervision/jev-egress";
-import { createJevMeterV1 } from "@frockbot/app/billing/jev";
+import {
+  createJevMeterV1,
+  createPlatformJevFetchV1,
+} from "@frockbot/app/billing/jev";
 import type { StoredRunCauseV1 } from "@frockbot/core/durable";
 import {
   COMPUTER_EGRESS_PATH_V1,
@@ -86,6 +90,7 @@ import {
   readBotSettingsV1,
   userAccountFeaturesReaderV1,
   userConfigurationV1,
+  userWebSearchAccountV1,
 } from "@frockbot/app/settings/bot";
 import type { PreparedTurnInputsV1 } from "./prepared-inputs.js";
 import type { PluginSkillContributionV1 } from "@frockbot/app/skills/plugin";
@@ -448,6 +453,14 @@ export async function agentRuntime(
   // Filled in once this Turn's model binding is resolved, below. The tool
   // and the prompt section both read it lazily, from inside the Turn.
   const subagentModels: SubagentModelOptionV1[] = [];
+  // The account this Turn's platform-paid work is charged to, where the
+  // deployment bills.
+  const turnBilling = turn
+    ? state.env.BILLING?.(identity.userId, identity.botId, turn.sessionId, {
+        runId: turn.runId,
+        ...(turn.cause ? { cause: turn.cause } : {}),
+      })
+    : undefined;
   // A Bot dispatches a subagent only inside an admitted Turn, whose run
   // the task record names, and only where a Subagent Durable Object can
   // actually be addressed.
@@ -462,7 +475,19 @@ export async function agentRuntime(
       ...(turn
         ? {
             supervision: {
-              supervisor: state.turnSupervisor,
+              // Metered where the account's plan has a Jev fair-use
+              // allowance; every other plan covers it.
+              supervisor: state.turnSupervisor(
+                turnBilling
+                  ? (send) =>
+                      createPlatformJevFetchV1({
+                        account: turnBilling.account,
+                        botId: identity.botId,
+                        sessionId: turn.sessionId,
+                        fetch: send,
+                      })
+                  : undefined,
+              ),
               origin: turn.inputOrigin ?? "user",
               approvals: createCallApprovalStoreV1(state.ctx.storage),
               runId: turn.runId,
@@ -709,15 +734,7 @@ export async function agentRuntime(
                 JEV_BASE_URL: state.env.JEV_BASE_URL,
               });
               if (!client) return {};
-              const billing = state.env.BILLING?.(
-                identity.userId,
-                identity.botId,
-                turn.sessionId,
-                {
-                  runId: turn.runId,
-                  ...(turn.cause ? { cause: turn.cause } : {}),
-                },
-              );
+              const billing = turnBilling;
               return {
                 computerJev: createJevEgressV1({
                   client,
@@ -789,9 +806,23 @@ export async function agentRuntime(
               : {}),
           }
         : {}),
-      // The Computer host this deployment runs, when it has one. Which host
-      // that is was chosen by the shell that holds the bindings.
-      ...(state.computerHost ? { computerHost: state.computerHost } : {}),
+      // The Computer host this deployment runs, when it has one, chosen by the
+      // shell that holds the bindings; whether a User's Computer runs on it is
+      // that User's choice, kept on their Durable Object.
+      ...(state.computerHost
+        ? {
+            computerHost: state.computerHost,
+            computerHostChoice: async () =>
+              decodeComputerHostChoiceV1(
+                await state.env.USER_CONFIGURATIONS.get(
+                  state.env.USER_CONFIGURATIONS.idFromName(identity.userId),
+                ).readComputerHost({
+                  schemaVersion: 1,
+                  userId: identity.userId,
+                }),
+              ),
+          }
+        : {}),
     }),
     ...(await state.application.runtime.enabled(plan, {
       userId: identity.userId,
@@ -830,6 +861,8 @@ export async function agentRuntime(
             ).account,
           }
         : {}),
+      webSearchAccount: () =>
+        userWebSearchAccountV1(state, identity, readSecret),
       // Enabled Contributions reach the network through the same
       // outbound seam the model provider uses, so a deployment that stubs
       // it stubs every one of them.

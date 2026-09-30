@@ -29,10 +29,12 @@ export const VOICE_REALTIME_TRANSCRIPTION_URL_V1 =
 export const VOICE_REALTIME_PCM_RATE_V1 = 24_000;
 
 /** One frame of PCM16 as the upstream takes it. */
-export function voiceRealtimeAppendV1(pcm: ArrayBuffer): string {
+export function voiceRealtimeAppendV1(pcm: ArrayBuffer | Uint8Array): string {
   return JSON.stringify({
     type: "input_audio_buffer.append",
-    audio: voiceRealtimeBase64V1(new Uint8Array(pcm)),
+    audio: voiceRealtimeBase64V1(
+      pcm instanceof Uint8Array ? pcm : new Uint8Array(pcm),
+    ),
   });
 }
 

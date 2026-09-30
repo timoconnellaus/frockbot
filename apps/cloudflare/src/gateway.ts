@@ -3,6 +3,7 @@ import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 import { settingsDocumentV1 } from "@frockbot/app/settings/document";
 import { connectionsCatalogQueryV1 } from "@frockbot/app/settings/frame";
 import { secretsDocumentV1 } from "@frockbot/app/secrets/document";
+import { decodeWebSearchChoiceInputV1 } from "@frockbot/app/web/search-choice";
 import {
   botPluginsDocumentV1,
   decodeBotPluginsCommandV1,
@@ -915,6 +916,42 @@ export function createGateway(
         });
       } catch {
         return jsonError(503, "Connections are temporarily unavailable.");
+      }
+    }
+
+    // The account's web search: FrockBot's, or a provider the person brings.
+    // A key or address goes in once, sealed, and never comes back out.
+    if (url.pathname === "/api/web-search") {
+      if (request.method !== "GET" && request.method !== "PUT") {
+        return jsonError(405, "method not allowed");
+      }
+      const owner = dependencies.userConfigurationFor(userId);
+      let answer;
+      if (request.method === "PUT") {
+        let choice;
+        try {
+          choice = decodeWebSearchChoiceInputV1(await request.json());
+        } catch (error) {
+          return jsonError(
+            400,
+            error instanceof Error && !(error instanceof SyntaxError)
+              ? error.message
+              : "Invalid web search choice",
+          );
+        }
+        answer = owner.setWebSearchChoice({ schemaVersion: 1, userId, choice });
+      } else {
+        answer = owner.readWebSearchChoice({ schemaVersion: 1, userId });
+      }
+      try {
+        return Response.json(await answer, {
+          headers: { "cache-control": "no-store" },
+        });
+      } catch {
+        return jsonError(
+          503,
+          "Web search settings are temporarily unavailable.",
+        );
       }
     }
 

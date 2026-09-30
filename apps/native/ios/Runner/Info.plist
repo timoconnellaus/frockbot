@@ -35,6 +35,8 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>FrockBotKeychainGroup</key>
+	<string>$(FROCKBOT_KEYCHAIN_GROUP)</string>
 	<key>FirebaseAppDelegateProxyEnabled</key>
 	<false/>
 	<key>FlutterDeepLinkingEnabled</key>

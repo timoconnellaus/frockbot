@@ -338,7 +338,10 @@ Order, each step a pull request that lands its own failing eval cases or tests f
 9. **Approval cards replace conversational re-asking**, including in Routines. _Done:_ a refused outward call, or one allowed only in the uncertain band, records an Approval over the digest of its exact tool and arguments and draws the approval card; the same call made again after approval runs once without Jev. A subagent or group Turn still refuses in words ([architecture §4](architecture.md#turn-supervision--appsupervisionloopts)).
 10. **Routine grants**, built as the policy model in [`jev-supervision-plan.md`](jev-supervision-plan.md#policy-model). Plugin `package-tool:` calls are supervised, and an effect id supervision cannot place is refused. _Done:_ a Bot or Plugin's Routine create, prompt, schedule or trigger change, and pause or delete of a User's Routine, wait on a card and are applied with `promptApprovalId`, so they fire as the person's; `userAsked` is gone.
 11. **At-most-once on resume.** A non-idempotent call records that it was dispatched; one with no result settles as uncertain and is never sent again. Review ids are content-derived and a stored verdict names the call it approved.
-12. **The request ledger**, built as [continuation state](jev-supervision-plan.md#continuation-state).
+12. **The request ledger**, built as [continuation state](jev-supervision-plan.md#continuation-state). _Waiting:_ built only if harvested refusals show the cards and code-first call review still refusing what people asked for.
+13. **A fetch cannot carry the Turn away.** _Done:_ a `web_fetch` of an address the Bot composed, with room to carry data, is asked whether it sends the site something the person did not ask to share ([architecture §4](architecture.md#turn-supervision--appsupervisionloopts)).
+
+Decided against, until a harvested run shows the need: a second withhold of an unsupported claim (a reply the person can see is wrong beats none), failing the advisory checks closed, a hard deny for a repeated refused call (a repeat now points at its card, and a stuck Turn stops), and telling group members apart (a group Turn gets no cards, and its extraction waits for it).
 
 Jev evals run by hand when a question, threshold or evidence shape changes, never in CI: `EVAL_REPEAT=5 bun run eval:call-review`, and `EVAL_ONLY=<set or name>` to run part of a suite. A threshold is chosen from the spread the repeats show, and every future incident is harvested into cases with `bun scripts/harvest-supervision.ts`.
 
@@ -348,11 +351,11 @@ _Done._ Applets folded into Plugins by deletion, not by renaming the facet. A Pl
 
 ## Not now
 
-Billing, package publishing, a Plugin marketplace, and avatar wearables. Each is an addition to the target, not a change to it. Voice exists, scoped to one Bot ([ADR 0029](adr/0029-voice-per-bot.md)) and, since [ADR 0031](adr/0031-voice-gemini-live.md), one Gemini Live session that is the Bot's other mode rather than a layer over its chat model. Composer toolbar, message actions and bot-profile slots stay closed until a host region draws them.
+Billing, package publishing, a Plugin marketplace, and avatar wearables. Each is an addition to the target, not a change to it. Voice exists, scoped to one Bot ([ADR 0029](adr/0029-voice-per-bot.md)) and, since [ADR 0031](adr/0031-voice-gemini-live.md), one speech-to-speech session (Gemini Live by default, or OpenAI Realtime; [`voice.md`](voice.md)) that is the Bot's other mode rather than a layer over its chat model. Composer toolbar, message actions and bot-profile slots stay closed until a host region draws them.
 
 ## Billing implementation awaiting launch
 
-The US$20 and US$50 account plans with their included allowances, the 7-day trial, prepaid top-ups, Stripe adapter,
+The BYO, Standard and Plus account plans with their included allowances, the 7-day trial, prepaid top-ups, Stripe adapter,
 account ledger, model metering, native/web billing screens, and marketing pricing
 section are implemented locally. Launch is blocked on a verified Sprites resource
 meter and prepaid computer cutoff; adding Stripe keys alone does not make this

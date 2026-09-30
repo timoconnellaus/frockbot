@@ -13,10 +13,7 @@
  * nothing else.
  */
 import type { ShellComputerHostOptionsV1 } from "@frockbot/app/shell/backend-runtime";
-import type {
-  ComputerHostCapabilitiesV1,
-  ComputerHostV1,
-} from "@frockbot/computer/core/host";
+import type { ComputerHostV1 } from "@frockbot/computer/core/host";
 import { FlyHostTransportV1 } from "@frockbot/computer/fly/host-client";
 import {
   FLY_HOST_CAPABILITIES_V1,
@@ -24,12 +21,14 @@ import {
 } from "@frockbot/computer/fly/provider";
 
 /**
- * What this deployment's Computer host is, for the surfaces that must know
- * before a Bot is running — the app's `frame-src` above all, which is built
- * from `viewerFrameOrigins` while no Computer is open.
+ * The origins any Computer host this deployment offers frames its viewer
+ * from, for the app's `frame-src`. The page is built before any Computer is
+ * open and serves every User, so it admits the union; which host a User's
+ * Computer runs on is read from its assignment, not from here.
  */
-export const COMPUTER_HOST_CAPABILITIES_V1: ComputerHostCapabilitiesV1 =
-  FLY_HOST_CAPABILITIES_V1;
+export const COMPUTER_HOST_FRAME_ORIGINS_V1: readonly string[] = [
+  ...new Set([FLY_HOST_CAPABILITIES_V1].flatMap((c) => c.viewerFrameOrigins)),
+];
 
 /**
  * The `COMPUTER_HOST` service binding and the secret presented on it.

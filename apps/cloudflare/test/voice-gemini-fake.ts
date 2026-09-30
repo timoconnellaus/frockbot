@@ -22,7 +22,15 @@ const SAMPLE_BYTE = String.fromCharCode(1);
 /** One client frame the fake received, in the shape a test asserts on. */
 export interface GeminiFakeFrameV1 {
   kind:
-    "setup" | "audio" | "text" | "tool-response" | "turn-boundary" | "other";
+    | "setup"
+    | "audio"
+    | "text"
+    | "tool-response"
+    | "turn-boundary"
+    /** OpenAI only: the object asked for a response, or cut one short. */
+    | "response"
+    | "truncate"
+    | "other";
   /** For `audio`: the decoded byte length, and the first byte as a tag. */
   bytes?: number;
   tag?: number;
@@ -38,12 +46,16 @@ export interface GeminiFakeFrameV1 {
   callName?: string;
   result?: string;
   scheduling?: string;
+  /** For `truncate`: the item cut, and how much of it was heard. */
+  itemId?: string;
+  audioEndMs?: number;
 }
 
 /** What the fake was opened with, and what it has been told to do since. */
 export class GeminiFakeV1 {
   readonly frames: GeminiFakeFrameV1[] = [];
   readonly url: string;
+  readonly headers: Record<string, string> = {};
   private readonly socket: WebSocket;
   private open = true;
 

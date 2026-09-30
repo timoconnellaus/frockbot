@@ -103,7 +103,8 @@ The identity vars the app Worker gains: `NATIVE_SLICE_2_AUTH` (the profile's
 `nativeAuth` list, comma-joined),
 `FROCK_AI_GATEWAY_ID`, `FROCK_AI_ACCOUNT_ID`, `FROCK_AI_AUTO_ROUTE`, `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD` when the profile
 builds the Access auth Package, and `EMAIL_DOMAIN` when it names an `email`
-domain (below), and `NATIVE_APPS` — the profile's `nativeApps` as JSON — when it
+domain (below), `VOICE_PROVIDER` when it names a `voice.provider`
+(`gemini-live`, the default, or `openai-realtime`; `docs/voice.md`), and `NATIVE_APPS` — the profile's `nativeApps` as JSON — when it
 names the signed apps its association files list, and the `authEnvironment.vars`
 of a profile whose auth Package is its own (below). `FROCK_AI_ACCOUNT_ID` is what selects the compat
 HTTP transport, the only one that accepts a `dynamic/<route>` model

@@ -2,6 +2,7 @@ import type { BrandV1 } from "@frockbot/core/contracts";
 import type { PackageDefinitionV1 } from "@frockbot/core/contracts";
 import type { CredentialLeaseV1 } from "@frockbot/core/connection";
 import type { AccountUsage } from "@frockbot/app/billing/model";
+import type { AccountWebSearchV1 } from "@frockbot/app/web/search";
 import type {
   BotExecutionPlanV1,
   ConnectionView,
@@ -11,6 +12,7 @@ import type {
 } from "@frockbot/core/configuration";
 import type { FoundationAgentPackage } from "@frockbot/app/agent-runtime";
 import type {
+  ComputerHostChoiceV1,
   ComputerHostV1,
   ComputerSyncHostV1,
 } from "@frockbot/computer/core/host";
@@ -71,6 +73,11 @@ export interface ShellHostedRuntimeHostV1 {
    * surface reads as unconfigured, which is the truth.
    */
   computerHost?: ShellComputerHostFactoryV1;
+  /**
+   * Where the User chose to run their Computer, read from the User's Durable
+   * Object. Absent, the deployment's own host.
+   */
+  computerHostChoice?(): Promise<ComputerHostChoiceV1>;
   /**
    * The Skills seam, supplied by the Bot Durable Object for one admitted
    * Turn. Absent outside a Turn, and outside one whose Workspace reads are
@@ -245,6 +252,8 @@ export interface ShellEnabledRuntimeHostV1 {
    * an enabled Contribution spends is metered.
    */
   billing?: AccountUsage;
+  /** The account's web search choice, read when `web_search` mounts. */
+  webSearchAccount?(): Promise<AccountWebSearchV1>;
 }
 
 /** What the Shell hands the application to mount this Turn's model provider. */

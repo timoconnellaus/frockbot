@@ -9,6 +9,7 @@ import {
 import {
   createHostedRoutineEventJudgeV1,
   createHostedTurnSupervisorV1,
+  type JevFetchMeterV1,
 } from "@frockbot/app/supervision";
 import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
 import {
@@ -418,7 +419,12 @@ export class ShellBotStateV1 {
    * verdict and still admits; Cut 4 is what skips.
    */
   readonly routineEventJudge: RoutineEventJudgeV1;
-  readonly turnSupervisor: TurnSupervisor;
+  /**
+   * A Turn's supervisor. Given a meter, the hosted one sends its Jev
+   * requests through it, which is how the account's plan meters them; a
+   * supervisor the host injected is used as it is.
+   */
+  readonly turnSupervisor: (meter?: JevFetchMeterV1) => TurnSupervisor;
   readonly routineReportJudge: RoutineReportJudgeV1 | undefined;
   readonly compactionChooser: CompactionChooserV1 | undefined;
   readonly toolResultPruner: ToolResultPrunerV1 | undefined;
@@ -496,15 +502,26 @@ export class ShellBotStateV1 {
         AI: host.env.AI,
         JEV_BASE_URL: host.env.JEV_BASE_URL,
       });
-    this.turnSupervisor =
+    const hostedSupervisor = createHostedTurnSupervisorV1(
+      {
+        AI: host.env.AI,
+        JEV_BASE_URL: host.env.JEV_BASE_URL,
+      },
+      host.brand.productName,
+    );
+    this.turnSupervisor = (meter) =>
       host.turnSupervisor ??
-      createHostedTurnSupervisorV1(
-        {
-          AI: host.env.AI,
-          JEV_BASE_URL: host.env.JEV_BASE_URL,
-        },
-        host.brand.productName,
-      );
+      (meter
+        ? createHostedTurnSupervisorV1(
+            {
+              AI: host.env.AI,
+              JEV_BASE_URL: host.env.JEV_BASE_URL,
+            },
+            host.brand.productName,
+            undefined,
+            meter,
+          )
+        : hostedSupervisor);
     this.now = host.now ?? (() => new Date());
     this.sleep =
       host.sleep ??

@@ -8,7 +8,7 @@ import { createComputerAgentFeature } from "./agent.js";
 
 const host: ComputerHostV1 = {
   id: "fixture",
-  capabilities: { viewerFrameOrigins: [] },
+  capabilities: { viewerFrameOrigins: [], availability: "always" },
   open: () => Promise.reject(new Error("deleting a recording opens nothing")),
 };
 

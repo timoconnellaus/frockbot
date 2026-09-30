@@ -69,7 +69,11 @@ import {
   backendDescriptorsV1,
   shellBotContribution,
 } from "@frockbot/app/contributions";
-import { ComputerRegistry } from "@frockbot/computer/core/host";
+import {
+  computerAssignmentForChoiceV1,
+  ComputerRegistry,
+  decodeComputerHostChoiceV1,
+} from "@frockbot/computer/core/host";
 import {
   mountRuntimeFeaturesV1,
   type TurnSupervisor,
@@ -857,6 +861,7 @@ export class BotState
                   settle: (
                     settlement: import("@frockbot/app/billing/ledger").UsageSettlement,
                   ) => account.settleUsage({ userId, settlement }),
+                  requirePlan: () => account.requirePlan({ userId }),
                 },
               };
             },
@@ -902,11 +907,12 @@ export class BotState
         // chooses which host that is.
         const binding = computerHostBindingV1(this.backendEnv);
         const computerConfigured = Boolean(binding);
+        const frockbotHost = binding
+          ? createComputerHostV1(binding)
+          : undefined;
         const disposeComputers = await mountRuntimeFeaturesV1({ computers }, [
           ({ computers: registry }) =>
-            binding
-              ? registry.register(createComputerHostV1(binding))
-              : undefined,
+            frockbotHost ? registry.register(frockbotHost) : undefined,
         ]);
         // Where each descriptor's mounted value lands as the mount runs. The
         // Shell and Flock Contributions need each other, and each reaches the
@@ -1070,10 +1076,23 @@ export class BotState
                   uploadIds,
                 ),
             },
-            openComputer: (userId, botId, effectId) => {
+            openComputer: async (userId, botId, effectId) => {
               const identity = { userId };
-              if (!computers.assignment(identity)) {
-                computers.assign(identity, "computer-host");
+              if (!computers.assignment(identity) && frockbotHost) {
+                const user = this.backendEnv.USER_CONFIGURATIONS.get(
+                  this.backendEnv.USER_CONFIGURATIONS.idFromName(userId),
+                );
+                const chosen = computerAssignmentForChoiceV1(
+                  decodeComputerHostChoiceV1(
+                    await user.readComputerHost({ schemaVersion: 1, userId }),
+                  ),
+                  frockbotHost.id,
+                );
+                computers.assign(
+                  identity,
+                  chosen.providerId,
+                  chosen.configuration,
+                );
               }
               return computers.open(identity, { botId }, { effectId });
             },

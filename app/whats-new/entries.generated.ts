@@ -3,6 +3,7 @@ import entry_add_a_model from "./entries/add-a-model.ts";
 import entry_approval_cards from "./entries/approval-cards.ts";
 import entry_attachments from "./entries/attachments.ts";
 import entry_avatar_colour_flash from "./entries/avatar-colour-flash.ts";
+import entry_byo_plan from "./entries/byo-plan.ts";
 import entry_chat_scroll from "./entries/chat-scroll.ts";
 import entry_chat_type from "./entries/chat-type.ts";
 import entry_committed_chat from "./entries/committed-chat.ts";
@@ -53,6 +54,7 @@ export const WHATS_NEW_ENTRY_FILES_V1 = [
   entry_approval_cards,
   entry_attachments,
   entry_avatar_colour_flash,
+  entry_byo_plan,
   entry_chat_scroll,
   entry_chat_type,
   entry_committed_chat,

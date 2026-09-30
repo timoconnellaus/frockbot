@@ -56,8 +56,12 @@ import {
 } from "@frockbot/app/admin/shared";
 import {
   decodePushRegistration,
+  DEFAULT_PUSH_RELAY_URL,
   registerPushDevice,
   deliverPush,
+  sendFcm,
+  sendRelay,
+  type PushRelayAddressV1,
   type PushUpdate,
 } from "./push.js";
 import { decodeThemeDocumentV1, decodeBotLookV1 } from "@frockbot/core/theme";
@@ -293,6 +297,14 @@ import {
   type SecretVaultV1,
 } from "@frockbot/app/secrets/user";
 import {
+  createWebSearchChoiceStoreV1,
+  type WebSearchChoiceStoreV1,
+} from "@frockbot/app/web/search-choice-user";
+import {
+  decodeWebSearchChoiceInputV1,
+  WEB_SEARCH_GENERATION_PATTERN_V1,
+} from "@frockbot/app/web/search-choice";
+import {
   isSecretIdV1,
   isSecretRequestIdV1,
   SECRET_LIMITS_V1,
@@ -333,6 +345,7 @@ import {
   computerHostBindingV1,
   createComputerHostV1,
 } from "./computer-host.js";
+import { decodeComputerHostChoiceV1 } from "@frockbot/computer/core/host";
 import type { AuthPackageEnvironmentV1 } from "#auth-package";
 import { BRAND_V1 } from "#brand";
 import type { VoiceAssistant } from "./voice-assistant.js";
@@ -355,12 +368,19 @@ const USER_IDENTITY_KEY = "user:identity";
 const USER_FEATURES_KEY = "user:features:v1";
 /** One receipt per "Delete my Computer" press that destroyed a Computer. */
 const COMPUTER_TEARDOWN_RECEIPT_PREFIX = "computer:teardown:";
+/**
+ * Where this User's Computer runs. Absent means FrockBot's own host, which is
+ * every account today: nothing writes it until a second host is offered.
+ */
+const COMPUTER_HOST_KEY = "computer:host:v1";
 
 interface UserConfigurationEnv
   extends BillingEnv, AccountDeletionEnvV1, AuthPackageEnvironmentV1 {
   /** Product events (app/analytics/events.ts); absent writes none. */
   ANALYTICS?: AnalyticsEngineDataset;
   FCM_SERVICE_ACCOUNT?: string;
+  /** The push relay a deployment without FCM credentials sends through. */
+  PUSH_RELAY_URL?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
   /** Where every Bot's email address is, and what it sends from. */
   EMAIL_DOMAIN?: string;
@@ -837,9 +857,14 @@ export class UserConfiguration
     await this.assertUserIdentity(input.userId);
     this.billing().settle(input.settlement);
   }
-  async requirePaidAccount(input: { userId: string }) {
+  async requirePlan(input: { userId: string }) {
     await this.assertUserIdentity(input.userId);
-    this.billing().requireSubscription();
+    this.requireAccountPlan();
+  }
+  /** Connected apps need a plan wherever the deployment bills. */
+  private requireAccountPlan() {
+    if (!hostedBillingEnabledV1(this.env as BillingSwitchEnv)) return;
+    this.billing().requirePlan();
   }
 
   /**
@@ -927,7 +952,20 @@ export class UserConfiguration
           : { platform: registration.platform }),
       });
     }
-    return { ok: true };
+    // A deployment with no FCM credentials of its own cannot reach a token,
+    // so the app registers with the relay and hands this deployment a handle.
+    return this.env.FCM_SERVICE_ACCOUNT
+      ? { ok: true }
+      : { ok: true, delivery: "relay" as const };
+  }
+
+  private relaySender() {
+    const relayUrl = this.env.PUSH_RELAY_URL || DEFAULT_PUSH_RELAY_URL;
+    return (
+      address: PushRelayAddressV1,
+      data: Record<string, string>,
+      notify: boolean,
+    ) => sendRelay(relayUrl, address, data, notify);
   }
 
   async deliverPush(input: { userId: string; update: PushUpdate }) {
@@ -944,6 +982,8 @@ export class UserConfiguration
       input.userId,
       input.update,
       this.env.FCM_SERVICE_ACCOUNT,
+      sendFcm,
+      this.relaySender(),
     );
   }
 
@@ -976,6 +1016,8 @@ export class UserConfiguration
         notify: true,
       },
       this.env.FCM_SERVICE_ACCOUNT,
+      sendFcm,
+      this.relaySender(),
     );
     return { schemaVersion: 1 } as const;
   }
@@ -1026,6 +1068,7 @@ export class UserConfiguration
               : name === "COMPOSIO_API_KEY"
                 ? this.env.COMPOSIO_API_KEY
                 : this.env.CREDENTIAL_KEYRING,
+        requirePlan: async () => this.requireAccountPlan(),
         // The transcript index (parity register row 52). It lives on this
         // object's own SQL storage because "The User's Durable Object is the
         // authority for everything User-scoped", and it is a *projection*:
@@ -2418,6 +2461,65 @@ export class UserConfiguration
     });
   }
 
+  private async webSearchChoice(): Promise<WebSearchChoiceStoreV1> {
+    return createWebSearchChoiceStoreV1({
+      storage: this.ctx.storage,
+      credentials: (await this.contributions()).credentials,
+    });
+  }
+
+  /** Which web search the account uses; never its key or address. */
+  async readWebSearchChoice(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertUserIdentity(request.userId as string);
+    return (await this.webSearchChoice()).read();
+  }
+
+  /**
+   * Changes the account's web search. A key or address is sealed on arrival
+   * and read back by nothing but a search's lease; a refusal names the field,
+   * never what was in it.
+   */
+  async setWebSearchChoice(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      choice: (value) => value,
+    });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    await this.assertAccountOpen();
+    return (await this.webSearchChoice()).set(
+      userId,
+      decodeWebSearchChoiceInputV1(request.choice),
+    );
+  }
+
+  /** An expiring lease over the account's search secret, for one search. */
+  async leaseWebSearchCredential(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      effectId: rpcString(256),
+      generation: rpcPattern(WEB_SEARCH_GENERATION_PATTERN_V1, 32),
+    });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    await this.assertAccountOpen();
+    return (await this.webSearchChoice()).lease({
+      accountId: userId,
+      effectId: request.effectId as string,
+      generation: request.generation as string,
+    });
+  }
+
+  async settleWebSearchCredential(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      effectId: rpcString(256),
+    });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    await (
+      await this.webSearchChoice()
+    ).settle({ accountId: userId, effectId: request.effectId as string });
+  }
+
   private async secretVault(): Promise<SecretVaultV1> {
     return createSecretVaultV1({
       storage: this.ctx.storage,
@@ -2964,6 +3066,15 @@ export class UserConfiguration
       this.skillBodies(),
       { kind: "user-instructions", userId },
       held.revisions,
+    );
+  }
+
+  /** Where the User chose to run their Computer, for every Bot they own. */
+  async readComputerHost(input: unknown): Promise<object> {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertUserIdentity(request.userId as string);
+    return decodeComputerHostChoiceV1(
+      await this.ctx.storage.get<unknown>(COMPUTER_HOST_KEY),
     );
   }
 

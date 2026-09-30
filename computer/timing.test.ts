@@ -33,6 +33,7 @@ import { computerFrameSinkV1 } from "./frame.js";
 
 const TEST_HOST_CAPABILITIES: ComputerHostCapabilitiesV1 = {
   viewerFrameOrigins: [],
+  availability: "always",
 };
 
 const COMPOSITION = {
