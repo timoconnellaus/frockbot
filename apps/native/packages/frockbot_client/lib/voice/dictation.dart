@@ -223,6 +223,10 @@ class DictationController extends ChangeNotifier {
   int _generation = 0;
   DictationDraftRange _range = DictationDraftRange();
 
+  /// This capture's bound on the wait after stop; [finalTimeout] unless
+  /// [start] was given another.
+  Duration _finalTimeout = voiceDictationFinalTimeoutV1;
+
   DictationState get state => _state;
   String? get error => _error;
 
@@ -258,8 +262,12 @@ class DictationController extends ChangeNotifier {
   /// The overlay flips the moment [start] is called, and the socket is opened
   /// the moment the microphone is, with audio held until `ready`. Waiting for
   /// the handshake to paint the pill is the delay this exists to remove.
-  Future<void> start(Object context) async {
+  ///
+  /// [finalTimeout] replaces the controller's for this capture: a Mac that
+  /// transcribes on the device may first have to load its model.
+  Future<void> start(Object context, {Duration? finalTimeout}) async {
     if (active) return;
+    _finalTimeout = finalTimeout ?? this.finalTimeout;
     if (_state == DictationState.cleaning) await _teardown();
     final generation = ++_generation;
     _context = context;
@@ -526,7 +534,7 @@ class DictationController extends ChangeNotifier {
     // is held, and the commit goes out in order the moment the socket is
     // there — which is what `_connect` does with `_stopRequested`.
     _finalTimer?.cancel();
-    _finalTimer = Timer(finalTimeout, () => unawaited(_finish(null)));
+    _finalTimer = Timer(_finalTimeout, () => unawaited(_finish(null)));
     if (_socket != null) _commit();
     await _finished?.future;
   }

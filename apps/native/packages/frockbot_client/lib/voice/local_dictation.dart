@@ -52,6 +52,11 @@ const dictationSourceKeyV1 = 'voice.dictation.source.v1';
 /// The route that tidies a transcript the device produced.
 const voiceDictationCleanupPathV1 = '/api/voice/dictation/cleanup';
 
+/// How long stop waits for the Mac's transcript. Parakeet reads five minutes
+/// of speech in seconds, but the first capture after launch may also load the
+/// model onto the Neural Engine.
+const localDictationFinalTimeoutV1 = Duration(seconds: 60);
+
 /// A capture nobody stops is ended, as the relay ends one: five minutes.
 const localDictationMaxBytesV1 = 5 * 60 * voiceDictationSampleRateV1 * 2;
 

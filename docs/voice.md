@@ -410,7 +410,9 @@ clock, stop, draft range and five-minute cap. It answers `start` with
 `ready`, holds the audio, and at `stop` hands the whole capture — the same
 PCM16 at 24 kHz — to the native engine over `com.frockbot/local-dictation`,
 then answers `segment` and `final`. There are no live deltas, which costs
-nothing: the composer never shows them.
+nothing: the composer never shows them. Stop waits up to 60 s for the transcript rather than
+the relay's 6 s, because the first capture after launch may also be loading
+the model.
 
 The tidy-up still applies. When the transcript is worth tidying (24 to
 12,000 characters) the socket sends `cleaning` and posts the text — never

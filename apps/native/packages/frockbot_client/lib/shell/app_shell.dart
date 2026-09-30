@@ -858,7 +858,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       readDraft: _readDictatedDraft,
       onFinished: microphone.releaseDictation,
     )..addListener(_repaint);
-    await controller.start(bot.botId.value);
+    await controller.start(
+      bot.botId.value,
+      finalTimeout: onThisMac ? localDictationFinalTimeoutV1 : null,
+    );
     if (!mounted) return;
     final failure = controller.error;
     if (failure != null) _say(failure);

@@ -27,6 +27,7 @@ class FakeEngine implements LocalDictationEngine {
   );
   String transcript = '';
   Object? failure;
+  Duration delay = Duration.zero;
   final List<Uint8List> heard = [];
   final List<int> rates = [];
   int prepares = 0;
@@ -59,6 +60,7 @@ class FakeEngine implements LocalDictationEngine {
   Future<String> transcribe(Uint8List pcm16, {required int sampleRate}) async {
     heard.add(pcm16);
     rates.add(sampleRate);
+    await Future<void>.delayed(delay);
     final failed = failure;
     if (failed != null) throw failed;
     return transcript;
@@ -82,7 +84,7 @@ class Harness {
   final List<String> cleaned = [];
   late final DictationController controller;
 
-  Harness({DictationCleaner? cleanup, int? maxBytes}) {
+  Harness({DictationCleaner? cleanup, int? maxBytes, Duration? finalTimeout}) {
     controller = DictationController(
       openSocket: () async => LocalDictationSocket(
         engine: engine,
@@ -97,6 +99,7 @@ class Harness {
       capture: capture,
       onDraft: drafts.setDraft,
       readDraft: drafts.draftFor,
+      finalTimeout: finalTimeout ?? voiceDictationFinalTimeoutV1,
     );
   }
 
@@ -183,6 +186,25 @@ void main() {
     expect(harness.drafts.draftFor('bot-a'), 'yes');
     harness.controller.dispose();
   });
+
+  test(
+    'a capture may wait longer than the relay for a model still loading',
+    () async {
+      final harness = Harness(finalTimeout: const Duration(milliseconds: 10))
+        ..engine.transcript = 'send it on Friday'
+        ..engine.delay = const Duration(milliseconds: 80);
+      await harness.controller.start(
+        'bot-a',
+        finalTimeout: const Duration(seconds: 5),
+      );
+      await settle();
+      harness.speak(1);
+      await harness.controller.stop();
+      await settle();
+      expect(harness.drafts.draftFor('bot-a'), 'send it on Friday');
+      harness.controller.dispose();
+    },
+  );
 
   test('an engine failure is said, not sent to the cloud', () async {
     final harness = Harness()..engine.failure = StateError('no model');
