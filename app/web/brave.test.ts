@@ -3,10 +3,8 @@ import { describe, expect, test } from "bun:test";
 import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
 import type { ToolExecutionContext } from "@frockbot/core/contracts";
 import type { SearchMeterV1 } from "@frockbot/app/billing/search";
-import {
-  BRAVE_WEB_SEARCH_ENDPOINT_V1,
-  createConfiguredWebSearchRuntimeContribution,
-} from "./brave.ts";
+import { BRAVE_WEB_SEARCH_ENDPOINT_V1 } from "./brave.ts";
+import { createConfiguredWebSearchRuntimeContribution } from "./search.ts";
 import { webSearchEffectIdV1 } from "./contract.ts";
 
 const API_KEY = "brave-test-key";

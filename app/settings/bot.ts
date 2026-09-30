@@ -46,6 +46,11 @@ import {
 } from "@frockbot/app/shell/prepared-inputs";
 import { rpcJsonSnapshotV1 } from "@frockbot/app/durable-rpc";
 import {
+  createAccountWebSearchV1,
+  type AccountWebSearchV1,
+} from "@frockbot/app/web/search";
+import { decodeWebSearchChoiceViewV1 } from "@frockbot/app/web/search-choice";
+import {
   decodeDirectoryViewV1,
   decodeFlockReceiptV1,
   decodeVoiceIdentityViewV1,
@@ -668,6 +673,40 @@ export async function userAccountFeaturesV1(
       await rpc.readFeatures({ schemaVersion: 1, userId: identity.userId }),
     ),
   );
+}
+
+/**
+ * The account's web search choice as this Turn mounts it, with its secret
+ * leased from the User Durable Object for each search and opened here.
+ */
+export async function userWebSearchAccountV1(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+  readSecret: (name: "CREDENTIAL_KEYRING") => string | undefined,
+): Promise<AccountWebSearchV1> {
+  const id = state.env.USER_CONFIGURATIONS.idFromName(identity.userId);
+  const rpc = state.env.USER_CONFIGURATIONS.get(id);
+  const userId = identity.userId;
+  return createAccountWebSearchV1({
+    accountId: userId,
+    choice: decodeWebSearchChoiceViewV1(
+      rpcJsonSnapshotV1(
+        await rpc.readWebSearchChoice({ schemaVersion: 1, userId }),
+      ),
+    ),
+    lease: async (effectId, generation) =>
+      decodeCredentialLeaseV1(
+        await rpc.leaseWebSearchCredential({
+          schemaVersion: 1,
+          userId,
+          effectId,
+          generation,
+        }),
+      ),
+    settle: (effectId) =>
+      rpc.settleWebSearchCredential({ schemaVersion: 1, userId, effectId }),
+    readSecret,
+  });
 }
 
 export function userConfigurationV1(

@@ -7,8 +7,8 @@
 // provider can satisfy it unchanged — the two-provider check the constitution
 // applies to the model interface.
 //
-// This module holds no transport. `./brave` implements {@link WebSearchV1}
-// over Brave's Web Search API; nothing here imports it.
+// This module holds no transport. `./brave` and `./account-providers`
+// implement {@link WebSearchV1}; nothing here imports them.
 import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import type {
   ToolDefinition,

@@ -93,6 +93,7 @@ import {
   type CardListViewV1,
   type CardViewV1,
 } from "@frockbot/app/shell/cards";
+import { decodeWebSearchChoiceViewV1 } from "@frockbot/app/web/search-choice";
 import {
   decodeSecretListViewV1,
   decodeSecretSubmitCommandV1,
@@ -777,6 +778,10 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     getBotRegistration: (request) => rpc.getBotRegistration(request),
     hasBot: (request) => rpc.hasBot(request),
     readConnectionsFrame: (request) => rpc.readConnectionsFrame(request),
+    readWebSearchChoice: async (request) =>
+      decodeWebSearchChoiceViewV1(await rpc.readWebSearchChoice(request)),
+    setWebSearchChoice: async (request) =>
+      decodeWebSearchChoiceViewV1(await rpc.setWebSearchChoice(request)),
     listSecrets: async (request) =>
       decodeSecretListViewV1(await rpc.listSecrets(request)),
     deleteSecret: (request) => rpc.deleteSecret(request),

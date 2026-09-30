@@ -2,6 +2,7 @@ import type { BrandV1 } from "@frockbot/core/contracts";
 import type { PackageDefinitionV1 } from "@frockbot/core/contracts";
 import type { CredentialLeaseV1 } from "@frockbot/core/connection";
 import type { AccountUsage } from "@frockbot/app/billing/model";
+import type { AccountWebSearchV1 } from "@frockbot/app/web/search";
 import type {
   BotExecutionPlanV1,
   ConnectionView,
@@ -251,6 +252,8 @@ export interface ShellEnabledRuntimeHostV1 {
    * an enabled Contribution spends is metered.
    */
   billing?: AccountUsage;
+  /** The account's web search choice, read when `web_search` mounts. */
+  webSearchAccount?(): Promise<AccountWebSearchV1>;
 }
 
 /** What the Shell hands the application to mount this Turn's model provider. */
