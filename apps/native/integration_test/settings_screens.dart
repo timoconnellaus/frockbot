@@ -8,8 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:frockbot_client/client/transport.dart';
 import 'package:frockbot_client/client/plain_store.dart';
-import 'package:frockbot_client/settings/page.dart';
-import 'package:frockbot_client/connections/page.dart';
+import 'package:frockbot_client/settings/personal_details.dart';
 import 'package:frockbot_client/theme/frock_theme.dart';
 import 'package:frockbot_client/brand.dart';
 import 'package:frockbot_native/brand.dart';
@@ -72,30 +71,16 @@ Future<void> main() async {
     store,
     Uri.parse(const String.fromEnvironment('NATIVE_TEST_ORIGIN')),
   );
-  const home = String.fromEnvironment(
-    'NATIVE_TEST_HOME',
-    defaultValue: 'application',
-  );
-  if (!{'application', 'models', 'connections', 'inbox'}.contains(home)) {
-    throw StateError('Unknown design page');
-  }
   runApp(
     MaterialApp(
       title: 'FrockBot',
       debugShowCheckedModeBanner: false,
       theme: FrockTheme.theme(Brightness.dark),
-      home: home == 'connections'
-          ? ConnectionsPage(
-              api: api,
-              store: store,
-              userId: 'native-settings-local',
-            )
-          : SettingsPage(
-              api: api,
-              store: store,
-              userId: 'native-settings-local',
-              home: home,
-            ),
+      home: PersonalDetailsPage(
+        api: api,
+        store: store,
+        userId: 'native-settings-local',
+      ),
     ),
   );
 }

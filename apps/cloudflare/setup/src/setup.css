@@ -817,10 +817,9 @@ select.pick {
 .table-head,
 .job {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.3fr) minmax(
-      0,
-      1.3fr
-    ) minmax(0, 1fr);
+  grid-template-columns:
+    minmax(0, 1.2fr) minmax(0, 1.3fr) minmax(0, 1.3fr)
+    minmax(0, 1fr);
   gap: 12px;
   align-items: center;
   padding: 10px 20px;
@@ -1013,4 +1012,15 @@ select.pick {
     flex-direction: column;
     align-items: flex-start;
   }
+}
+
+.advanced summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font:
+    500 13.5px/1.2 Inter,
+    sans-serif;
+  color: var(--accent-text);
 }

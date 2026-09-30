@@ -92,19 +92,6 @@ function statusNode(text: string): ViewNode {
   return { type: "text", text, style: "status" };
 }
 
-function credentialLine(status: Section["credentialStatus"]): string {
-  switch (status) {
-    case "connected":
-      return "Account connected";
-    case "revoked":
-      return "Account revoked";
-    case "missing":
-      return "Connect an account to use this provider";
-    default:
-      return "Ready to use";
-  }
-}
-
 /**
  * One section as a titled group, plus the actions it declares.
  *
@@ -119,8 +106,6 @@ function projectSection(
 ): { node: ViewNode; actions: Action[] } {
   const actions: Action[] = [];
   const children: ViewNode[] = [];
-  if (section.credentialStatus)
-    children.push(statusNode(credentialLine(section.credentialStatus)));
   if (section.failure) children.push({ type: "text", text: section.failure });
 
   const properties: Action["schema"]["properties"] = {
@@ -168,32 +153,6 @@ function projectSection(
     });
   }
 
-  for (const [order, action] of (section.actions ?? []).entries()) {
-    if (actions.length >= budget) break;
-    const id = `section-${index}-${order}`;
-    actions.push({
-      id,
-      schema: {
-        type: "object",
-        properties: {
-          sectionId: { type: "string", maxLength: 256 },
-          kind: {
-            type: "string",
-            enum: ["manage-provider"],
-          },
-        },
-        required: ["sectionId", "kind"],
-        additionalProperties: false,
-      },
-    });
-    children.push({
-      type: "action",
-      actionId: id,
-      label: action.label,
-      input: { sectionId: section.id, kind: action.kind },
-    });
-  }
-
   // Reset lives on its own action because a `field` node has no affordance for
   // "use the default" and a null cannot travel through an action input.
   for (const [order, field] of resettable.entries()) {
@@ -231,30 +190,7 @@ function projectSection(
       type: "group",
       orientation: "column",
       title: section.label,
-      children: section.id.startsWith("provider.")
-        ? [
-            ...children.filter(
-              (node) =>
-                node.type === "text" ||
-                (node.type === "action" && node.input?.kind),
-            ),
-            ...(section.fields.length
-              ? [
-                  {
-                    type: "group" as const,
-                    orientation: "column" as const,
-                    title: "Advanced settings",
-                    collapsed: true,
-                    children: children.filter(
-                      (node) =>
-                        node.type !== "text" &&
-                        !(node.type === "action" && node.input?.kind),
-                    ),
-                  },
-                ]
-              : []),
-          ]
-        : children,
+      children,
     },
     actions,
   };

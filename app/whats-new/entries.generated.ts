@@ -31,6 +31,7 @@ import entry_quiet_delivery from "./entries/quiet-delivery.ts";
 import entry_release_version from "./entries/release-version.ts";
 import entry_replies_as_written from "./entries/replies-as-written.ts";
 import entry_secret_fill from "./entries/secret-fill.ts";
+import entry_setup from "./entries/setup.ts";
 import entry_spending from "./entries/spending.ts";
 import entry_steering from "./entries/steering.ts";
 import entry_stop_command from "./entries/stop-command.ts";
@@ -80,6 +81,7 @@ export const WHATS_NEW_ENTRY_FILES_V1 = [
   entry_release_version,
   entry_replies_as_written,
   entry_secret_fill,
+  entry_setup,
   entry_spending,
   entry_steering,
   entry_stop_command,

@@ -272,7 +272,7 @@ Widget _sidebar({required bool phone, bool archived = false}) => ShellSidebar(
   onSearch: () {},
   onProfile: () {},
   onWhatsNew: () {},
-  onMarketplace: () {},
+  onSetup: () {},
   onToggleHidden: () {},
   onRetry: () async {},
 );

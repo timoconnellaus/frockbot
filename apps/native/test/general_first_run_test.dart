@@ -71,16 +71,11 @@ class FirstRunApi extends NativeApi {
         'schemaVersion': 1,
         'ownerId': 'test-user',
         'revision': 0,
-        'modelInUse': 'Auto',
         'accounts': <Object>[],
         'providers': <Object>[],
       };
     }
-    if (body == null &&
-        [
-          '/api/settings/models',
-          '/api/settings/application',
-        ].contains(uri.path)) {
+    if (body == null && uri.path == '/api/settings/application') {
       return {
         'schemaVersion': 1,
         'surfaceId': 'settings-${uri.path.split('/').last}',

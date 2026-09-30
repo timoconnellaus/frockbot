@@ -7,8 +7,6 @@ import {
   connectionsCatalogQueryV1,
   connectionsFrame,
   modelSettingsOptions,
-  modelsSettingsFrame,
-  modelsSettingsCommand,
 } from "./settings-frame.js";
 import type {
   AvailableUserPackage,
@@ -104,7 +102,7 @@ test("large catalogs page completely, search beyond the first page, and fence re
   ).toThrow("revision");
 });
 
-test("disabled, revoked and wrong-version providers disappear while saved choices remain inspectable", () => {
+test("disabled, revoked and wrong-version providers leave the model choices", () => {
   const user = settings();
   user.accountModel = { connectionId: "work", providerModelId: "model-150" };
   for (const mutate of [
@@ -125,25 +123,7 @@ test("disabled, revoked and wrong-version providers disappear while saved choice
         (c) => c.value,
       ),
     ).toEqual([null]);
-    const field = modelsSettingsFrame(
-      "tim",
-      unavailable,
-      [provider],
-      "FrockBot",
-    ).sections[0]!.fields[0]!;
-    expect(field.value).toEqual({ ...user.accountModel! });
-    expect(field.choices?.at(-1)?.label).toContain("unavailable");
   }
-  const platform = modelsSettingsFrame(
-    "tim",
-    user,
-    [{ ...provider, platformOwned: true }],
-    "FrockBot",
-  );
-  expect(platform.sections).toHaveLength(1);
-  expect(platform.sections[0]!.fields[0]!.choices![0]!.label).toBe(
-    "Automatic — recommended",
-  );
 });
 
 test("one manifest home, disabled controls absent, reset distinct from explicit nullable values", () => {
@@ -290,98 +270,6 @@ test("the platform binding has one Auto choice", () => {
     null,
     { connectionId: "work", providerModelId: "model-1" },
   ]);
-});
-
-test("provider knobs have one Models home, and a provider that is not added has no section", () => {
-  const user = settings(1);
-  const declared = {
-    ...provider,
-    settings: [
-      {
-        id: "limit",
-        schemaVersion: 1 as const,
-        scopes: ["user" as const],
-        schema: { type: "integer" as const, minimum: 1, maximum: 10 },
-      },
-    ],
-  };
-  user.packages[0]!.values = { limit: 4 };
-  expect(
-    modelsSettingsFrame("tim", user, [declared], "FrockBot").sections[1]!
-      .fields,
-  ).toMatchObject([{ id: "limit", value: 4, canReset: true }]);
-  expect(
-    applicationSettingsFrame("tim", user, [declared], "FrockBot").sections,
-  ).toHaveLength(2);
-  // Removed with a key left behind is not added: the Marketplace is the way
-  // back, and the values wait for it.
-  user.packages[0]!.state = "disabled";
-  expect(
-    modelsSettingsFrame("tim", user, [declared], "FrockBot").sections.map(
-      (section) => section.id,
-    ),
-  ).toEqual(["model"]);
-  expect(user.packages[0]!.values).toEqual({ limit: 4 });
-  expect(
-    modelsSettingsCommand({
-      schemaVersion: 1,
-      commandId: "reset-limit",
-      ownerId: "tim",
-      expectedRevision: 8,
-      sectionId: "provider.provider",
-      values: {},
-      unset: ["limit"],
-    }),
-  ).toMatchObject({ type: "user/set-package-settings", unset: ["limit"] });
-});
-
-test("Models lists only providers already added, not the rest of the catalog", () => {
-  const user = settings();
-  const together: AvailableUserPackage = {
-    ...provider,
-    packageId: "provider-together",
-    displayName: "Together",
-  };
-  expect(
-    modelsSettingsFrame(
-      "tim",
-      user,
-      [provider, together],
-      "FrockBot",
-    ).sections.map((section) => section.id),
-  ).toEqual(["model", "provider.provider"]);
-  expect(() =>
-    modelsSettingsCommand({
-      schemaVersion: 1,
-      commandId: "add-together",
-      ownerId: "tim",
-      expectedRevision: 8,
-      sectionId: "add-provider",
-      values: { provider: "provider-together" },
-    }),
-  ).toThrow("Unknown model section");
-  user.packages.push({
-    packageId: "provider-together",
-    version: "1.0.0",
-    state: "disabled",
-  });
-  expect(
-    modelsSettingsFrame(
-      "tim",
-      user,
-      [provider, together],
-      "FrockBot",
-    ).sections.map((section) => section.id),
-  ).toEqual(["model", "provider.provider"]);
-  user.packages[1]!.state = "installed";
-  expect(
-    modelsSettingsFrame(
-      "tim",
-      user,
-      [provider, together],
-      "FrockBot",
-    ).sections.map((section) => section.id),
-  ).toEqual(["model", "provider.provider", "provider.provider-together"]);
 });
 
 test("the Marketplace catalog lists uninstalled models and installed connectors", () => {
@@ -694,20 +582,6 @@ test("a Marketplace read is decoded from its query string, and refused when malf
   ]) {
     expect(() => catalogQuery(malformed)).toThrow("Marketplace");
   }
-});
-
-test("a provider section's one action names the next step", () => {
-  const user = settings();
-  const actions = () =>
-    modelsSettingsFrame("tim", user, [provider], "FrockBot").sections[1]!
-      .actions;
-  expect(actions()).toEqual([
-    { kind: "manage-provider", label: "Manage provider" },
-  ]);
-  user.connections = [];
-  expect(actions()).toEqual([
-    { kind: "manage-provider", label: "Connect account" },
-  ]);
 });
 
 test("a built-in model says it needs no key, so it never reads as one someone added", () => {

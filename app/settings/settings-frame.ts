@@ -5,9 +5,7 @@ import {
   ConfigurationDecodeError,
   ConfigurationConflictError,
   modelBindingFailureV1,
-  resolveEffectiveBotModelV1,
   userTimezoneV1,
-  modelRuntimeLabel,
   MAX_PACKAGE_SETTING_TEXT_V1,
   type ConnectionView,
   type UserConfigurationCommandV1,
@@ -394,158 +392,6 @@ export function modelSettingsOptions(
   });
 }
 
-export function modelsSettingsFrame(
-  userId: string,
-  settings: UserSettingsViewV1,
-  catalog: readonly AvailableUserPackage[],
-  productName: string,
-): SettingsFrame {
-  const modelProviders = catalog.filter(
-    (pkg) =>
-      !pkg.platformOwned &&
-      pkg.capabilities?.some((capability) => capability.kind === "model"),
-  );
-  // A provider earns its own section once a person has added it from the
-  // Marketplace. Catalog providers are seeded disabled for everyone, and a
-  // key left behind by a provider that was removed is not an addition, so
-  // neither shows here: the Marketplace is the catalog and the way back, and
-  // this page is only what is set up now.
-  const providers = modelProviders.filter((pkg) =>
-    settings.packages.some(
-      (installation) =>
-        installation.packageId === pkg.packageId &&
-        installation.state !== "disabled",
-    ),
-  );
-  const selected = settings.accountModel ? { ...settings.accountModel } : null;
-  const choices: SettingChoice[] = [];
-  for (const choice of modelChoices(settings, catalog)) {
-    if (
-      choice.value === null ||
-      JSON.stringify(choice.value) === JSON.stringify(selected)
-    )
-      choices.push(choice);
-  }
-  if (selected && choices.length === 1)
-    choices.push({
-      label: "Your saved model · currently unavailable",
-      value: selected,
-    });
-  const sections: SettingsFrame["sections"] = [
-    {
-      id: "model",
-      label: "Default model",
-      fields: [
-        {
-          id: "account-model",
-          label: "Model",
-          kind: "select",
-          value: selected,
-          editable: true,
-          choices,
-          choiceSource: "account-models",
-          hint: `Default for Bots without their own model choice. Automatic lets ${productName} choose; no setup needed.`,
-        },
-      ],
-    },
-  ];
-  for (const provider of providers) {
-    if (sections.length === 63) {
-      sections.push({
-        id: "provider-overflow",
-        label: "More providers",
-        fields: [],
-        failure:
-          "Additional provider setup is unavailable in this version. Your default model is still available.",
-      });
-      break;
-    }
-    const installed = settings.packages.find(
-      (pkg) => pkg.packageId === provider.packageId,
-    );
-    const connections = settings.connections.filter(
-      (connection) => connection.packageId === provider.packageId,
-    );
-    let providerFields: SettingField[] = [];
-    let fieldFailure: string | undefined;
-    if (
-      installed?.state === "installed" &&
-      installed.version === provider.version
-    ) {
-      try {
-        providerFields = (provider.settings ?? [])
-          .filter(
-            (setting) =>
-              setting.scopes.includes("user") && setting.role !== "model",
-          )
-          .map((setting) => field(setting, installed.values?.[setting.id]));
-        if (providerFields.length > 32) throw new Error("Provider field limit");
-      } catch {
-        providerFields = [];
-        fieldFailure =
-          "These provider settings need a newer app. Account setup is still available.";
-      }
-    }
-    const connected = connections.some(
-      (connection) => connection.state === "ready",
-    );
-    sections.push({
-      id: `provider.${provider.packageId}`,
-      label: provider.displayName ?? provider.packageId,
-      fields: providerFields,
-      ...(fieldFailure ? { failure: fieldFailure } : {}),
-      credentialStatus: connected ? "connected" : "missing",
-      ...(installed?.state === "failed"
-        ? { failure: "This provider needs recovery before it can be chosen." }
-        : {
-            actions: [
-              {
-                kind: "manage-provider",
-                label: connected ? "Manage provider" : "Connect account",
-              },
-            ],
-          }),
-    });
-  }
-  return decodeProtocol("SettingsFrame", {
-    schemaVersion: 1,
-    home: "models",
-    ownerId: userId,
-    revision: settings.revision,
-    sections,
-  });
-}
-
-export function modelsSettingsCommand(
-  input: unknown,
-): UserConfigurationCommandV1 {
-  const command = decodeProtocol("SettingsChangeCommand", input);
-  const meta = {
-    schemaVersion: 1,
-    commandId: command.commandId,
-    expectedRevision: command.expectedRevision,
-  };
-  if (
-    !command.unset?.length &&
-    command.sectionId === "model" &&
-    Object.keys(command.values).join() === "account-model"
-  )
-    return userCommand({
-      ...meta,
-      type: "user/set-account-model",
-      model: command.values["account-model"],
-    });
-  if (command.sectionId.startsWith("provider."))
-    return userCommand({
-      ...meta,
-      type: "user/set-package-settings",
-      packageId: command.sectionId.slice(9),
-      ...(Object.keys(command.values).length ? { values: command.values } : {}),
-      ...(command.unset ? { unset: command.unset } : {}),
-    });
-  throw new ConfigurationDecodeError("Unknown model section");
-}
-
 /** A Connection's state, in words rather than in the field name. */
 function connectionStateLineV1(connection: ConnectionView): string {
   const state =
@@ -571,52 +417,6 @@ function connectionStateLineV1(connection: ConnectionView): string {
           ? "refreshing its model list"
           : `model list ${catalog}`;
   return `${state} \u00b7 ${models}`;
-}
-
-/**
- * The line the Models surface prints as "Model in use", written where the
- * settings live rather than in a client. The account's own effective model is
- * the answer: Connectors is User-scoped and names no Bot.
- */
-function modelInUseLineV1(
-  settings: UserSettingsViewV1,
-  catalog: readonly AvailableUserPackage[],
-): string {
-  const effective = resolveEffectiveBotModelV1({
-    bot: { packageValues: {} },
-    user: settings,
-    packages: catalog.map((pkg) => ({
-      ...pkg,
-      settings: [...(pkg.settings ?? [])],
-      capabilities: [...(pkg.capabilities ?? [])],
-      connectionTypes: [...(pkg.connectionTypes ?? [])],
-    })),
-  });
-  const connection = effective.binding?.connection;
-  const model = connection?.modelCatalog?.models.find(
-    (candidate) =>
-      candidate.providerModelId === effective.model?.providerModelId,
-  );
-  const provider = catalog.find(
-    (pkg) => pkg.packageId === effective.binding?.packageId,
-  );
-  return modelRuntimeLabel({
-    source: effective.source,
-    ...(model?.displayName ? { modelDisplayName: model.displayName } : {}),
-    ...(effective.model?.providerModelId
-      ? { providerModelId: effective.model.providerModelId }
-      : {}),
-    ...(provider?.displayName
-      ? { packageDisplayName: provider.displayName }
-      : {}),
-    ...(connection?.displayName
-      ? { connectionDisplayName: connection.displayName }
-      : {}),
-    ...(effective.binding?.failure
-      ? { failure: effective.binding.failure }
-      : {}),
-    fallback: Boolean(effective.fallback),
-  }).slice(0, 300);
 }
 
 /** How one model provider is connected, in the words its card uses. */
@@ -901,7 +701,6 @@ export function connectionsFrame(
     revision: settings.revision,
     accounts,
     providers: providers.slice(0, CONNECTIONS_FRAME_PROVIDERS_MAX_V1),
-    modelInUse: modelInUseLineV1(settings, catalog),
     ...(nextCursor === undefined ? {} : { nextCursor }),
   });
 }

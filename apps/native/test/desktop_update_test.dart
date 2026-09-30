@@ -97,7 +97,7 @@ Widget sidebar(
     onSearch: () {},
     onProfile: onProfile ?? () {},
     onWhatsNew: () {},
-    onMarketplace: () {},
+    onSetup: () {},
     onToggleHidden: () {},
     onRetry: () async {},
   );

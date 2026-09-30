@@ -146,7 +146,7 @@ void main() {
               onProfile: () {},
               onWhatsNew: () {},
               whatsNewUnread: true,
-              onMarketplace: () {},
+              onSetup: () {},
               onToggleHidden: () {},
               onRetry: () async {},
             ),

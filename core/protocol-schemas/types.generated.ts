@@ -666,16 +666,14 @@ export type SettingField = {
 };
 export type SettingsFrame = {
   schemaVersion: 1;
-  home: "models" | "connections" | "application" | "bot";
+  home: "connections" | "application" | "bot";
   revision: number;
   ownerId: Identifier;
   sections: Array<{
     id: string;
     label: string;
     fields: Array<SettingField>;
-    credentialStatus?: "not-required" | "missing" | "connected" | "revoked";
     failure?: string;
-    actions?: Array<{ kind: "manage-provider"; label: string }>;
   }>;
 };
 export type ImmutableArtifact = {
@@ -905,7 +903,6 @@ export type ConnectionsFrame = {
     description?: string;
     icon?: Identifier;
   }>;
-  modelInUse?: string;
   nextCursor?: number;
 };
 export type NotificationDirectory = {

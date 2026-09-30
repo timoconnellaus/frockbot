@@ -72,9 +72,9 @@ test("a Bot's Plugins page is its own, and a switch it holds is the Bot's", asyn
   await settle(page);
 
   // The Profile holds no second set of switches: a built-in feature is
-  // switched per Bot, and a model provider is added in the Marketplace.
+  // switched per Bot, and a model provider is added in Setup.
   await openProfileMenu(page);
-  await expect(tap(page, "profile-models")).toBeVisible();
+  await expect(tap(page, "profile-setup")).toBeVisible();
   await expect(says(page, "Account features")).toHaveCount(0);
   await expect(tap(page, "profile-plugins")).toHaveCount(0);
   await testInfo.attach("profile-menu.png", {

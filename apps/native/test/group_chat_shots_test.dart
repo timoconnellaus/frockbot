@@ -181,7 +181,7 @@ void main() {
                     onSearch: () {},
                     onProfile: () {},
                     onWhatsNew: () {},
-                    onMarketplace: () {},
+                    onSetup: () {},
                     onToggleHidden: () {},
                     onRetry: () async {},
                   ),

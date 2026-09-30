@@ -39,9 +39,7 @@ class ViewRoutineList extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
-      children: [
-        for (final child in _children(node)) ..._draw(context, child),
-      ],
+      children: [for (final child in _children(node)) ..._draw(context, child)],
     );
   }
 
@@ -75,11 +73,7 @@ class ViewRoutineList extends StatelessWidget {
                 final scope = ViewScope.of(context);
                 final actionSchema = scope.actions[action?['actionId']];
                 if (action == null || actionSchema == null) return;
-                scope.controller.submit(
-                  action,
-                  actionSchema,
-                  persist: false,
-                );
+                scope.controller.submit(action, actionSchema, persist: false);
               },
             ),
           ),
@@ -123,8 +117,7 @@ class _RoutineBlock extends StatelessWidget {
     ];
     final scope = ViewScope.of(context);
     final schema = scope.actions[toggle?['actionId']];
-    final on =
-        toggle != null && (toggle['input'] as Map?)?['enabled'] == false;
+    final on = toggle != null && (toggle['input'] as Map?)?['enabled'] == false;
     final key = toggle == null
         ? null
         : viewPredictionKeyV1(toggle, without: 'enabled');
@@ -168,9 +161,8 @@ class _RoutineBlock extends StatelessWidget {
                   Icon(
                     Icons.chevron_right_rounded,
                     size: 18,
-                    color: Theme.of(
-                      context,
-                    ).colorScheme.onSurfaceVariant.withValues(alpha: 0.55),
+                    color: Theme.of(context).colorScheme.onSurfaceVariant
+                        .withValues(alpha: 0.55),
                   ),
                   if (toggle != null) ...[
                     const SizedBox(width: 8),
@@ -199,11 +191,7 @@ class _RoutineBlock extends StatelessWidget {
                   final action = _openRun(run);
                   final actionSchema = scope.actions[action?['actionId']];
                   if (action == null || actionSchema == null) return;
-                  scope.controller.submit(
-                    action,
-                    actionSchema,
-                    persist: false,
-                  );
+                  scope.controller.submit(action, actionSchema, persist: false);
                 },
               ),
             ),
@@ -252,7 +240,8 @@ Map<String, Object?>? _openRun(Map<String, Object?> node) {
 
 RoutineRunSummary _runOf(Map<String, Object?> node, String fallbackName) {
   final action = _openRun(node);
-  final input = ((action?['input'] as Map?) ?? const {}).cast<String, Object?>();
+  final input = ((action?['input'] as Map?) ?? const {})
+      .cast<String, Object?>();
   final stamp = [
     for (final raw in (node['children'] as List? ?? const []))
       if ((raw as Map)['type'] == 'text' && raw['style'] == 'status')

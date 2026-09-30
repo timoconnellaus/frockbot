@@ -516,7 +516,7 @@ export interface UserConfigurationBinding {
     secretId: string;
   }): Promise<{ schemaVersion: 1; removed: boolean }>;
   readSettingsFrame(
-    request: UserConfigurationReadRpcV1 & { home: "application" | "models" },
+    request: UserConfigurationReadRpcV1,
   ): Promise<SettingsFrame>;
   readSettingsOptions(
     request: UserConfigurationReadRpcV1 & {
@@ -525,7 +525,6 @@ export interface UserConfigurationBinding {
   ): Promise<import("@frockbot/core/protocol-schemas").SettingsOptionsPage>;
   changeSettings(
     request: UserConfigurationReadRpcV1 & {
-      home: "application" | "models";
       command: SettingsChangeCommand;
     },
   ): Promise<OperationReceiptV1>;

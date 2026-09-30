@@ -1,6 +1,7 @@
-import { useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useState } from "preact/hooks";
 import {
   addProvider,
+  connectApp,
   connectKey,
   replaceKey,
   setChatModel,
@@ -21,6 +22,7 @@ import {
   type Connection,
   type Job,
   type Provider,
+  type SettingField,
 } from "../model.ts";
 import {
   Dialog,
@@ -238,81 +240,95 @@ function ModelPicker(props: { provider: Provider; onClose: () => void }) {
 }
 
 /**
- * Connects a provider with a key: adds it to the account when it isn't
- * there yet, stores the key, and waits for the provider to list its models.
+ * Connects a provider with a key. A provider not yet on the account is added
+ * as the dialog opens, so its connection settings can be offered beside the
+ * key; the key is stored, and the dialog waits for the provider to list its
+ * models.
  */
 function ConnectProvider(props: {
-  provider: Provider;
+  packageId: string;
   onClose: () => void;
   onConnected: (provider: Provider) => void;
 }) {
   const { data, reload } = useSetup();
   const action = useAction();
+  const adding = useAction();
   const [key, setKey] = useState("");
   const [values, setValues] = useState<Record<string, string>>({});
-  const [needsFields, setNeedsFields] = useState(false);
-  const fields = (props.provider.keyType?.settings ?? []).filter(
-    (field) => field.kind !== "boolean",
+  const provider = providersOf(data.settings, data.modelCatalog).find(
+    (candidate) => candidate.packageId === props.packageId,
+  );
+  useEffect(() => {
+    if (!provider || provider.installed) return;
+    void adding.run(async () => {
+      await addProvider(data.settings.revision, provider.packageId);
+      await reload();
+    });
+    // Once, as the dialog opens.
+  }, []);
+  if (!provider) return null;
+  const fields = (provider.keyType?.settings ?? []).filter(
+    (field) => field.kind === "text" || field.kind === "number",
+  );
+  const signIn = provider.types.find((row) => row.authorization === "grant");
+  const required = fields.filter((field) => field.required);
+  const optional = fields.filter((field) => !field.required);
+  const field = (each: SettingField) => (
+    <Field
+      key={each.id}
+      label={each.required ? each.label : `${each.label} (optional)`}
+      value={values[each.id] ?? ""}
+      onInput={(value) => setValues({ ...values, [each.id]: value })}
+      {...(each.hint ? { hint: each.hint } : {})}
+    />
   );
   const connect = () =>
     action.run(async () => {
-      if (!key.trim()) throw new Error("Paste your key first.");
-      let revision = data.settings.revision;
-      let provider = props.provider;
-      if (!provider.installed) {
-        await addProvider(revision, provider.packageId);
-        const fresh = await loadSetup();
-        revision = fresh.settings.revision;
-        provider =
-          providersOf(fresh.settings, fresh.modelCatalog).find(
-            (candidate) => candidate.packageId === provider.packageId,
-          ) ?? provider;
-        const required = (provider.keyType?.settings ?? []).filter(
-          (field) => field.required && !values[field.id],
+      if (!provider.installed || !provider.keyType)
+        throw new Error(
+          `${provider.name} is still being added. Try again in a moment.`,
         );
-        if (required.length) {
-          setNeedsFields(true);
-          await reload();
-          throw new Error(
-            `${provider.name} also needs ${listWords(required.map((f) => f.label.toLowerCase()))}.`,
-          );
-        }
-      }
-      if (!provider.keyType)
-        throw new Error(`${provider.name} can’t be connected with a key yet.`);
-      await connectKey(provider.keyType, provider.name, key.trim(), values);
+      if (!key.trim()) throw new Error("Paste your key first.");
+      const missing = required.filter((each) => !values[each.id]?.trim());
+      if (missing.length)
+        throw new Error(
+          `${provider.name} also needs ${listWords(missing.map((each) => each.label.toLowerCase()))}.`,
+        );
+      const settings = Object.fromEntries(
+        Object.entries(values)
+          .map(([id, value]) => [id, value.trim()] as const)
+          .filter(([, value]) => value),
+      );
+      await connectKey(provider.keyType, provider.name, key.trim(), settings);
       setKey("");
       // The provider lists its models once the key is stored; wait briefly
       // so the next step can offer them.
       let latest: SetupData | undefined;
-      for (let attempt = 0; attempt < 10; attempt += 1) {
+      for (let attempt = 0; attempt < 20; attempt += 1) {
         latest = await loadSetup();
-        const connected = latest.settings.connections.find(
+        const settled = latest.settings.connections.find(
           (c) =>
             c.packageId === provider.packageId &&
-            c.state === "ready" &&
-            c.modelCatalog?.models.length,
+            (c.state === "failed" ||
+              (c.state === "ready" && c.modelCatalog?.models.length)),
         );
-        const refused = latest.settings.connections.find(
-          (c) => c.packageId === provider.packageId && c.state === "failed",
-        );
-        if (connected || refused) break;
+        if (settled) break;
         await new Promise((resolve) => setTimeout(resolve, 1_500));
       }
       await reload();
-      const settled = latest
+      const connected = latest
         ? providersOf(latest.settings, latest.modelCatalog).find(
             (candidate) => candidate.packageId === provider.packageId,
           )
         : undefined;
-      if (settled?.state === "refused")
+      if (connected?.state === "refused")
         throw new Error(
           `${provider.name} refused that key. Check it and try again.`,
         );
-      props.onConnected(settled ?? provider);
+      props.onConnected(connected ?? provider);
     });
   return (
-    <Dialog title={`Connect ${props.provider.name}`} onClose={props.onClose}>
+    <Dialog title={`Connect ${provider.name}`} onClose={props.onClose}>
       <form
         class="stack-16"
         onSubmit={(event) => {
@@ -321,11 +337,11 @@ function ConnectProvider(props: {
         }}
       >
         <p class="body muted">
-          Your bots use your own {props.provider.name} account, and{" "}
-          {props.provider.name} bills you for it. FrockBot never charges for it.
+          Your bots use your own {provider.name} account, and {provider.name}{" "}
+          bills you for it. FrockBot never charges for it.
         </p>
         <Field
-          label={`${props.provider.name} API key`}
+          label={`${provider.name} API key`}
           type="password"
           value={key}
           onInput={setKey}
@@ -333,22 +349,48 @@ function ConnectProvider(props: {
           autoFocus
           hint="Keys are encrypted on the server and never shown again."
         />
-        {(needsFields || props.provider.installed) &&
-          fields.map((field) => (
-            <Field
-              key={field.id}
-              label={field.required ? field.label : `${field.label} (optional)`}
-              value={values[field.id] ?? ""}
-              onInput={(value) => setValues({ ...values, [field.id]: value })}
-              {...(field.hint ? { hint: field.hint } : {})}
-            />
-          ))}
+        {required.map(field)}
+        {optional.length ? (
+          <details class="advanced">
+            <summary>Advanced</summary>
+            <div class="stack-12">{optional.map(field)}</div>
+          </details>
+        ) : null}
+        {signIn ? (
+          <div class="stack-8">
+            <span class="small">
+              Or sign in with your {provider.name} account instead of a key.
+            </span>
+            <button
+              type="button"
+              class="btn outline self-start"
+              disabled={action.busy || !provider.installed}
+              onClick={() =>
+                void action.run(async () => {
+                  await connectApp(signIn);
+                  await reload();
+                })
+              }
+            >
+              Sign in with {provider.name}
+            </button>
+          </div>
+        ) : null}
+        {!provider.installed ? (
+          <p class="small" role="status">
+            {adding.problem ?? `Adding ${provider.name} to your account…`}
+          </p>
+        ) : null}
         <Problem message={action.problem} />
         <div class="row-actions">
           <button type="button" class="btn outline" onClick={props.onClose}>
             Cancel
           </button>
-          <button type="submit" class="btn primary" disabled={action.busy}>
+          <button
+            type="submit"
+            class="btn primary"
+            disabled={action.busy || !provider.installed}
+          >
             {action.busy ? "Connecting…" : "Connect"}
           </button>
         </div>
@@ -717,7 +759,7 @@ export function AiPage() {
       ) : null}
       {connecting ? (
         <ConnectProvider
-          provider={connecting}
+          packageId={connecting.packageId}
           onClose={() => setConnecting(undefined)}
           onConnected={(provider) => {
             setConnecting(undefined);

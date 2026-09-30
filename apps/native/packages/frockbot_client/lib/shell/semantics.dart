@@ -15,7 +15,7 @@ abstract final class ShellIds {
   static const sidebarSearch = 'sidebar-search';
   static const sidebarCreateBot = 'sidebar-create-bot';
   static const sidebarProfile = 'sidebar-profile';
-  static const sidebarMarketplace = 'sidebar-marketplace';
+  static const sidebarSetup = 'sidebar-setup';
   static const sidebarWhatsNew = 'sidebar-whats-new';
   static const sidebarSettings = 'sidebar-settings';
   static const sidebarHiddenToggle = 'sidebar-hidden-toggle';
@@ -252,9 +252,6 @@ abstract final class LookIds {
 abstract final class SettingsIds {
   static const document = 'settings-document';
   static const refresh = 'settings-refresh';
-  static const modelsLink = 'settings-models';
-  static const connectorsLink = 'settings-connections';
-  static const modelField = 'settings-model-field';
   static const modelPicker = 'model-picker';
   static const modelPickerSearch = 'model-picker-search';
 
@@ -262,7 +259,6 @@ abstract final class SettingsIds {
   static const profileMenu = 'profile-menu';
   static const profileName = 'profile-name';
   static const profileSettings = 'profile-settings';
-  static const profileModels = 'profile-models';
   static const profileBilling = 'profile-billing';
 
   /// Deleting the Computer or the whole account.
@@ -330,23 +326,12 @@ abstract final class ComputerSettingsIds {
 /// and its connect button. A card is named by its provider's display name the
 /// way a titled group is, so a spec scopes to "Ollama Cloud" the same way
 /// whichever renderer draws it.
-abstract final class ConnectorIds {
-  static const document = 'connections-document';
-  static const refresh = 'connections-refresh';
-  static const marketplaceRefresh = 'marketplace-refresh';
-  static const marketplaceSearch = 'marketplace-search';
-  static const marketplaceFilter = 'marketplace-filter';
-  static const marketplaceFilterModels = 'marketplace-filter-models';
-  static const marketplaceFilterConnectors = 'marketplace-filter-connectors';
-  static const marketplaceCatalog = 'marketplace-catalog';
-  static const marketplaceInstalled = 'marketplace-installed';
+abstract final class SetupIds {
+  /// The Setup page, framed.
+  static const page = 'setup-page';
 
-  /// The Marketplace dialog a desktop opens from the foot of the sidebar; a
-  /// phone pushes the same page, and the page's own id is the marker on both.
-  static const marketplaceDialog = 'marketplace-dialog';
-
-  static String group(String title) => viewGroupIdentifierV1(title);
-  static String action(String actionId) => viewActionIdentifierV1(actionId);
+  /// The You row that opens it.
+  static const profileEntry = 'profile-setup';
 }
 
 /// A `field` node's identifier: the id the document gave it.

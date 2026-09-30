@@ -17,12 +17,6 @@ library;
 
 import 'dart:convert';
 
-const manageProviderKindV1 = 'manage-provider';
-
-/// The kind a section action names, when the action is one.
-String? viewActionKindV1(Map<String, Object?> command) =>
-    ((command['input'] as Map?)?['kind']) as String?;
-
 Map<String, Object?> settingsChangeCommandV1({
   required Map<String, Object?> command,
   required String userId,

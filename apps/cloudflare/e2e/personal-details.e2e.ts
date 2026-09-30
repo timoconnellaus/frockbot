@@ -1,12 +1,7 @@
 import type { Page } from "@playwright/test";
 import {
   answerInputs,
-  chooseDefaultModel,
-  chooseOllamaProvider,
   commitAndLoseTheAnswer,
-  connectOllama,
-  E2E_CONNECTION_LABEL,
-  E2E_MODEL_LABEL,
   expect,
   field,
   openApplication,
@@ -17,7 +12,6 @@ import {
   tap,
   test,
 } from "./fixtures.ts";
-import { E2E_OLLAMA_GOOD_API_KEY } from "./harness.ts";
 
 /** Something a person can press, by the words on it. */
 function pressable(page: Page, text: string) {
@@ -66,47 +60,10 @@ async function openProfileSurface(
   await settle(page);
 }
 
-/** Models: the account's default model, and the providers behind it. */
-async function openModels(page: Page): Promise<void> {
-  await openProfileSurface(page, "profile-models", "settings-model-field");
-}
-
-/** Account Settings, which is the only surface carrying the Models link. */
+/** Personal details: the account's name, email and time zone. */
 async function openSettings(page: Page): Promise<void> {
   await openProfileSurface(page, "profile-settings", "settings-document");
 }
-
-test("Models chooses the account default, and every Bot may still choose its own", async ({
-  page,
-  userId,
-  ollamaBaseUrl,
-}) => {
-  await openApplication(page, userId);
-  await chooseOllamaProvider(page);
-  await connectOllama(page, {
-    apiKey: E2E_OLLAMA_GOOD_API_KEY,
-    apiBaseUrl: ollamaBaseUrl,
-  });
-
-  const label = `${E2E_MODEL_LABEL} · ${E2E_CONNECTION_LABEL}`;
-  await chooseDefaultModel(page, label);
-
-  const settings = await (
-    await page.request.get("/api/settings?view=2")
-  ).json();
-  expect(settings.accountModel.providerModelId).toBe("gpt-oss:20b");
-  // Custom models — what lets one Bot differ from the account — is
-  // platform-owned: nobody has to find a switch before a Bot can choose.
-  expect(
-    settings.packages.find(
-      (p: { packageId: string }) => p.packageId === "custom-models",
-    ).state,
-  ).toBe("installed");
-
-  // And the surface says so on its own terms, read fresh.
-  await openModels(page);
-  await expect(sem(page, "settings-model-field")).toContainText(label);
-});
 
 test("an uncertain profile save survives reload and checks the original command", async ({
   page,

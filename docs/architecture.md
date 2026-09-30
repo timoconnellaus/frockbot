@@ -688,8 +688,8 @@ section past the 32-action cap renders read-only and says so.
 A field whose `choiceSource` names something the document cannot draw is drawn
 by the host, not by the document: `ViewScope.fields` maps a `choiceSource` to a
 host editor the way `ViewScope.frames` maps an `embed` name to a host region.
-The settings surface supplies the model picker for the paged catalog
-(`account-models`).
+A Bot's settings supply the model picker for the paged catalog
+(`account-models`), which is how a Bot chooses a chat model of its own.
 
 **A Bot's Plugins, the same way.** One more projection in that family:
 `app/plugins/page.ts` draws `BotPluginsFrameV1` (`GET /api/bots/:botId/plugins`,
@@ -704,55 +704,48 @@ read, so the Bot answers `applied`, `conflict` — the page re-reads — or
 (`lib/plugins/page.dart`). There is no account-wide Plugins list and no
 account-wide feature switchboard: the first-party features a Bot switches are
 platform-owned Packages, so the account always holds them and the Bot's switch
-is the only one, and a model provider is added and removed in the Marketplace.
+is the only one, and a model provider is added and removed in Setup.
 
-**Marketplace is one searchable catalog.** `apps/native/packages/frockbot_client/lib/connections/page.dart`
-draws `ConnectionsFrame` (`/api/settings/connections?catalog=1`) as a single
-page: one search box, Models and Connectors checkboxes under it, Catalog and
-Installed halves, and a builder list so cards mount as the person scrolls. The
-catalog includes every non-platform model provider and every connected app,
-whether or not the Package is installed — some 1,500 rows — so it is read a
-page at a time. The route takes the search as `q`, the checkboxes as `kinds`,
-the Installed half as `installed=1`, and a `cursor`; `connectionsFrame`
-matches them and answers fifty cards with every account and a `nextCursor`
-while more remain. A cursor counts cards, not rows, so a model provider's ways
-in never straddle a page. The client asks again once typing pauses and at
-once for a checkbox or a half, reads the next page when the list's last row
-comes into view, and settles a press by reading the cards it already drew
-(`limit`) rather than the catalog. A model row says whether its Package
-is `installed` — a key left behind by a provider that was removed does not
-count — and one that is not offers **Add** (`user/choose-model-provider`, which
-also reconciles a provider Plugin into the Composition), which opens the key
-form at once for a keyed provider; **Connect** is the same key or sign-in flow
-as before, and a connected model provider's card offers **Choose a model**,
-which opens Models. Cards are laid out in rows rather than a fixed-height grid
-so an opened card is never clipped. Installed lists added models and connected
-apps so they can be configured or removed (`user/uninstall-package`). Models
-settings lists only providers already added, with a link back to this catalog,
-and each built-in model in the picker says it needs no key. The ordinary
-`/api/settings/connections`
-read stays installed-only, so Manage provider does not grow a storefront.
-Each card carries a bundled icon (`assets/connectors/<icon>.png`, named by
-the Connection Type's `icon`) or a letter tile when no mark ships. Catalog
-model marks are host assets, the same way connected-app marks are — compiled
-providers are Packages, not Plugins, and a Plugin cannot ship an image.
-Refresh the catalog set with `python3 scripts/sync-connector-icons.py`
-(Lobe Icons, MIT). Radius has no mark in that pack and stays a letter tile. The frame
-carries what the surface needs and no credential: a provider row per
-Connection Type, the accounts with the line that says what their state
-means, and the "Model in use" line, written by `modelRuntimeLabel` where the
-settings live. A connector Package with several types is a grouping, so each
-of its rows is named by its type and is a card of its own. A model provider's
-types are ways into one provider — a key, a sign-in — so every row of it is
-named for the provider, and the client draws them as one card that offers
-each way and lists the accounts of all of them; commands and accounts stay per
-Connection Type. A model provider's accounts and a connector's are one frame
-because the surface a person opens to connect something is one surface;
-`packageConfigurationHomeV1` decides which page shows a row, and travels as
-the row's `kind`. The requests a press becomes live in
-`lib/connections/document.dart`: a Connection command goes to
-`/api/connections`, a revocation to the Package's own route, and a hosted grant
-is a `connection/start` whose answer is a URL the app opens after checking it.
+**Setup is the account's one place for configuration.** `/setup` is a small
+Preact app (`apps/cloudflare/setup/`) that `build-setup.ts` bundles into the
+Worker's static assets under `/_setup/`; the document that names it is served
+by `src/setup-page.ts` before authentication, since it names no account, under
+its own policy (`script-src 'self'`, `connect-src 'self'`, `frame-ancestors
+'self'`). Its pages are Overview, Plan and credit, Computer, AI, Web search,
+Connected apps and Your accounts, each its own address (`/setup/ai` and so
+on). It reads and writes through the account routes that already exist:
+`/api/settings?view=2` and `POST /api/settings` (the chat model is
+`user/set-account-model`, a provider is added by
+`user/choose-model-provider`, Images by the `image` Package's setting),
+`/api/settings/connections` (with `catalog=1&kinds=model` for every model
+provider the product supports, and `kinds=connector&q=` for the app search),
+`/api/connections` and the `connect` and `mcp` Packages' own routes for
+accounts, and `/api/billing` for the plan, credit and what used it. Keys are
+sent once, in the command that stores them, and never read back. A part whose
+backend is not built yet is drawn and marked Coming soon: choosing a provider
+per job other than chat, BYO, a Computer of the person's own, and search or
+Composio of their own.
+
+Opened in a tab, Setup reads with the browser's session. The app opens it in a
+`HostFrame` (`lib/setup/page.dart`), which carries no session: the web frame is
+`credentialless` and the phone's web view keeps a store of its own. So the app
+mints a reader credential for that one opening (`POST /api/setup/frame`,
+`src/setup-reader.ts`), an HMAC over the User and an expiry an hour out, in
+its own key domain. It travels in the address's fragment, so it is in no
+request line; the page moves it into session storage at once and sends it as
+`Authorization: Bearer frockbot-setup.<token>`. `identifyRequest` admits it as
+a cookie is admitted, and only on the account routes `setupReaderPathV1` names:
+nothing a Bot owns, no saved secret, no deletion, and not the mint, so a page
+cannot keep itself open. When it expires the page asks the app, which is signed
+in, for another. The page cannot open a browser or come back to the app, so it
+asks for those too over `postMessage` (`setup/src/bridge.ts`): an app's or an
+MCP server's sign-in (the app's own `openConnectionDoorV1`, so a phone comes
+back to itself), a payment page, and leaving. The app document's `frame-src`
+names `/setup` beside `/plugin-pages/`.
+
+A hosted grant — an app's sign-in, a model provider's, or an MCP server's — is
+a `connection/start` whose answer is a URL the app opens after checking it
+(`lib/connections/door.dart`, for Setup and for a Card's `ConnectApp` alike).
 That start names the app's own `returnClient` — `android`, `macos`, `ios`, or `macos-dev` and `ios-dev` from the FrockBot Dev builds, and
 nothing from a browser tab or any other platform — so the door sends the person
 back through the page that reopens the app: the verified App Link the manifest
@@ -1050,7 +1043,7 @@ The renderer is `apps/native/packages/frockbot_client/lib/cards/`: `client.dart`
 
 **Budgets**, checked by `admitCardV1` before a message reaches the renderer (`lib/cards/surface.dart`), mirroring `A2UI_LIMITS_V1`: 128 components, 32 actions, 16,000 bytes of data model, 131,072 bytes of record. A record past any of them, one naming a component this build has not compiled in, one carrying the seam's own `refusal`, one with no `root`, or one carrying a literal link — `url`, `imageUrl`, or one inside a row — that is not `https://` draws the host's unavailable region — the same `ViewRegion` a plugin's document gets — and never half a card. A validation error the renderer reports against the catalog schema draws it too.
 
-**A press** becomes one `POST /api/bots/:bot/cards` carrying the surface, the revision it was drawn at, the event, the data model as the renderer holds it when the surface was created with `sendDataModel`, and a `commandId` minted once per press so a retry is the same press. The card is held still until the receipt lands, and redrawn from the card the receipt carries. A 409 means the surface moved under the person: the card re-reads, redraws and says so. `ApprovalActions` is the one component that names its own action — `approval/<approvalId>`, built by the host from the id the kernel issued, never by the card. `ConnectApp` raises no action at all: its button is the host's door to the app's hosted sign-in (`connections/door.dart`, the same one Connect in the Marketplace opens), under the person's own session, and whether the account now holds a working Connection of that app is read from `/api/settings/connections` through `CardConnectionsScope` (`shell/connect_cards.dart`) — lazily, once a card draws one, and again when the app resumes or the hosted door closes into it — because the Card does not move when a Connection lands. `SecretField` raises no action either: it is a masked field and a Save button whose value goes to `POST /api/bots/:bot/secret-requests/:requestId` alone (`cards/secrets.dart`, `CardSecretsScope`), never into the renderer's data model; the draft is held by the card across renderer rebuilds, in memory only, and emptied once saved. The kernel binds it on the one draw allowed to carry it — the `credentials` Plugin's `request` card for a `secret-request` send (`bindCardSecretFieldsV1`) — and refuses a `SecretField` on any Bot-authored card, any other Plugin's draw and any handler's answer.
+**A press** becomes one `POST /api/bots/:bot/cards` carrying the surface, the revision it was drawn at, the event, the data model as the renderer holds it when the surface was created with `sendDataModel`, and a `commandId` minted once per press so a retry is the same press. The card is held still until the receipt lands, and redrawn from the card the receipt carries. A 409 means the surface moved under the person: the card re-reads, redraws and says so. `ApprovalActions` is the one component that names its own action — `approval/<approvalId>`, built by the host from the id the kernel issued, never by the card. `ConnectApp` raises no action at all: its button is the host's door to the app's hosted sign-in (`connections/door.dart`, the same one Connect in Setup opens), under the person's own session, and whether the account now holds a working Connection of that app is read from `/api/settings/connections` through `CardConnectionsScope` (`shell/connect_cards.dart`) — lazily, once a card draws one, and again when the app resumes or the hosted door closes into it — because the Card does not move when a Connection lands. `SecretField` raises no action either: it is a masked field and a Save button whose value goes to `POST /api/bots/:bot/secret-requests/:requestId` alone (`cards/secrets.dart`, `CardSecretsScope`), never into the renderer's data model; the draft is held by the card across renderer rebuilds, in memory only, and emptied once saved. The kernel binds it on the one draw allowed to carry it — the `credentials` Plugin's `request` card for a `secret-request` send (`bindCardSecretFieldsV1`) — and refuses a `SecretField` on any Bot-authored card, any other Plugin's draw and any handler's answer.
 
 **What the Bot is taught.** A Bot composes a card from the managed `a2ui` Skill (§5, "the managed set"), which is listed in `<agent_skills>` by name and description and loaded only when it decides to draw one. The Skill's references are generated from the same two catalog files this renderer registers, so the vocabulary the model writes in and the vocabulary the client draws are one file apart, not two opinions. One detail of the shipping renderer is taught rather than hidden: an action is written `{"action": {"event": {"name", "context"}}}`, v0.9's spelling, because that is what `genui` raises a press from — and `a2uiActionCountV1` at the seam counts both that and 1.0's bare `action.name`, so the seam and `admitCardV1` refuse exactly the same surfaces.
 
@@ -1097,7 +1090,7 @@ Web search is not a model provider either. `web_search` is the platform-owned `w
 
 `app/connect/` is the integration layer for the apps a User connects FrockBot to, and `app/mcp/` holds the remote MCP servers a person adds by address ([below](#mcp-servers--appmcp)). Both are first-party app code, not plugins: `AGENTS.md` reserves plugin machinery for untrusted code. The provider behind `app/connect/` is the deployment's, chosen at build time and named nowhere a person reads, and a Bot-authored plugin reaches a connected account later through the `http` grant, which that module will serve.
 
-**One Package, one Connection Type per app.** `connectDefinitionV1` (`app/connect/definition.ts`) is built from `catalog.ts`, declaring for each app a `connect-<app>` Connection Type (`authorization.kind: "grant"`, `allowMultiple`) and a `connect-<app>-tools` Capability bound to it. The list is every app — some 1,500 — the provider's hosted page can sign in with nothing of ours, generated into `apps.generated.ts` by `scripts/generate-connect-catalog.ts` from the provider's public app data, each with how it signs in (`ConnectAuthV1`): an OAuth app the provider runs (`managed`), dynamic client registration (`DCR_OAUTH`), a key, token or password the person types on the provider's page (`API_KEY`, `BEARER_TOKEN`, `BASIC`), the person's own developer app, whose client id and secret that page asks for with the steps to register one (`OAUTH2`, `OAUTH1`, `S2S_OAUTH2`, `SAML`), or nothing at all (`NO_AUTH`). AI model providers are left out; they are chosen in Models. The featured apps lead the list in our own words; the rest follow alphabetically in the provider's. The Connectors frame names a row by the type when a Package declares more than one (`settings-frame.ts`), so each app is its own row beside a model provider's accounts, with nothing above it; the Marketplace frame pages through every row — connectors first in the order the Package declares them, then model providers by name — and the ordinary connections read carries an app only once it has an account. Enablement is account-wide as every Connection is: connect once, every Bot holds it.
+**One Package, one Connection Type per app.** `connectDefinitionV1` (`app/connect/definition.ts`) is built from `catalog.ts`, declaring for each app a `connect-<app>` Connection Type (`authorization.kind: "grant"`, `allowMultiple`) and a `connect-<app>-tools` Capability bound to it. The list is every app — some 1,500 — the provider's hosted page can sign in with nothing of ours, generated into `apps.generated.ts` by `scripts/generate-connect-catalog.ts` from the provider's public app data, each with how it signs in (`ConnectAuthV1`): an OAuth app the provider runs (`managed`), dynamic client registration (`DCR_OAUTH`), a key, token or password the person types on the provider's page (`API_KEY`, `BEARER_TOKEN`, `BASIC`), the person's own developer app, whose client id and secret that page asks for with the steps to register one (`OAUTH2`, `OAUTH1`, `S2S_OAUTH2`, `SAML`), or nothing at all (`NO_AUTH`). AI model providers are left out; they are chosen on Setup's AI page. The featured apps lead the list in our own words; the rest follow alphabetically in the provider's. The Connectors frame names a row by the type when a Package declares more than one (`settings-frame.ts`), so each app is its own row beside a model provider's accounts, with nothing above it; the catalog read pages through every row — connectors first in the order the Package declares them, then model providers by name — and the ordinary connections read carries an app only once it has an account. Enablement is account-wide as every Connection is: connect once, every Bot holds it.
 
 **The hosted grant** (`user.ts`, `backend.ts`). Connect is the Connectors surface's existing `authorize` press: `POST /api/plugins/connect/connections` carries `connection/start`, which the gateway turns into a `connection/oauth` command (`action: "start"`, with the `connectionTypeId` that command grew for this) on the User Durable Object. There the Contribution finds or creates the app's auth config — the provider's own OAuth app, or a custom config for the app's scheme, which asks nothing of us: the person types any key on the provider's hosted page, so it never passes through this deployment — mints a sign-in link for this User with `/api/connect/callback` as its return — under the client's own segment (`android`, `macos`, `ios`, or `macos-dev` and `ios-dev` for the FrockBot Dev builds) when the start command named one in `returnClient`, so the Android app's verified App Link opens the app on the redirect and the Mac and iPhone pages hand over on that build's scheme (`frockbot`, or `frockbot-dev` for FrockBot Dev), as the sign-in return does — writes the Connection in `authorizing` with the connected-account id, namespace and app in its safe metadata, and answers the link, which the client opens in the system browser. An app with nothing to sign in to has no page: its account is created live, the Connection settles to `ready` in the same command, and the gateway answers `status: "ready"`, which the client takes without opening a browser. The return page is a `publicRoute` drawn by the shared `app/return-page.ts` template that says to come back and touches no object: an anonymous redirect must never address a Durable Object. The origin of the return is always the deployment's own; the command names only which page. Settling is a `registerConfigurationReadBootstrap`: before every settings read, each `authorizing` Connection is asked about at most every three seconds and moved to `ready` (with a fresh generation) or `failed` (with a line for the person); a sign-in nobody finishes fails after thirty minutes. Disconnect deletes the account upstream with `revoke_on_delete` and retires the Connection. Start and disconnect are keyed by their command id and replayed from the stored receipt.
 

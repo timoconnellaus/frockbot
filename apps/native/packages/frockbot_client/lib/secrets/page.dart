@@ -61,8 +61,7 @@ class SecretsController extends ViewSurfaceController {
     } on RequestFailure catch (failure) {
       _message = failure.message;
     } catch (_) {
-      _message =
-          'Couldn’t load your saved secrets. Check your connection and try again.';
+      _message = 'Couldn’t load your saved secrets. Check your connection and try again.';
     } finally {
       _busy = false;
       _changed();

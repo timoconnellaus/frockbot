@@ -42,7 +42,7 @@ Widget _sidebar({required bool phone}) => MaterialApp(
       onSearch: () {},
       onProfile: () {},
       onWhatsNew: () {},
-      onMarketplace: () {},
+      onSetup: () {},
       onToggleHidden: () {},
       onRetry: () async {},
     ),
@@ -127,13 +127,13 @@ void main() {
     await tester.pumpWidget(_sidebar(phone: true));
     await tester.pumpAndSettle();
 
-    // The row Tim's screenshot circled: you, the Marketplace, search and a
+    // The row Tim's screenshot circled: you, Setup, search and a
     // new Bot. Every one of them a target a thumb can hit.
     final you = tester.getSize(byIdentifier(ShellIds.sidebarProfile));
     expect(you.width, greaterThanOrEqualTo(40));
     expect(you.height, greaterThanOrEqualTo(40));
     for (final id in [
-      ShellIds.sidebarMarketplace,
+      ShellIds.sidebarSetup,
       ShellIds.sidebarSearch,
       ShellIds.sidebarCreateBot,
     ]) {
@@ -172,9 +172,7 @@ void main() {
     expect(create.center.dy, closeTo(profile.center.dy, 1));
   });
 
-  testWidgets('a desk names the Marketplace in the list\'s own weight', (
-    tester,
-  ) async {
+  testWidgets('a desk names Setup in the list\'s own weight', (tester) async {
     tester.view.physicalSize = const Size(1000, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -184,8 +182,8 @@ void main() {
 
     final label = tester.widget<Text>(
       find.descendant(
-        of: byIdentifier(ShellIds.sidebarMarketplace),
-        matching: find.text('Marketplace'),
+        of: byIdentifier(ShellIds.sidebarSetup),
+        matching: find.text('Setup'),
       ),
     );
     // A door, not a heading: the weight a Bot's name is written in.

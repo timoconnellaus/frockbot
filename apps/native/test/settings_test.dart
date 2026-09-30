@@ -9,7 +9,7 @@ import 'package:frockbot_client/client/transport.dart';
 import 'package:frockbot_client/settings/controller.dart';
 import 'package:frockbot_client/settings/document.dart';
 import 'package:frockbot_client/settings/model_picker.dart';
-import 'package:frockbot_client/settings/page.dart';
+import 'package:frockbot_client/settings/personal_details.dart';
 import 'package:frockbot_client/shell/desktop_layout.dart';
 import 'package:frockbot_client/protocol/client_wire.generated.dart' as wire;
 import 'package:frockbot_client/theme/frock_theme.dart';
@@ -20,7 +20,7 @@ import 'widget_test.dart' show MemoryStore;
 /// The shape `settingsDocumentV1` produces for the profile section, written by
 /// hand so the Flutter side is pinned to the projection's contract rather than
 /// to whatever the server happens to emit today.
-Map<String, Object?> document({int revision = 1, Object? model}) => {
+Map<String, Object?> document({int revision = 1}) => {
   'schemaVersion': 1,
   'surfaceId': 'settings-application',
   'revision': revision,
@@ -63,20 +63,6 @@ Map<String, Object?> document({int revision = 1, Object? model}) => {
             },
           },
           {
-            'type': 'field',
-            'field': {
-              'id': 'j0.account-model',
-              'label': 'Model',
-              'kind': 'select',
-              'value': model == null ? 'null' : '"$model"',
-              'editable': true,
-              'choiceSource': 'account-models',
-              'choices': [
-                {'label': 'Frock AI · Auto', 'value': 'null'},
-              ],
-            },
-          },
-          {
             'type': 'action',
             'actionId': 'save-0',
             'label': 'Save profile',
@@ -96,7 +82,6 @@ Map<String, Object?> document({int revision = 1, Object? model}) => {
           'sectionId': {'type': 'string', 'maxLength': 256},
           'f0.name': {'type': 'string', 'maxLength': 100},
           'j0.timezone': {'type': 'string', 'maxLength': 8000},
-          'j0.account-model': {'type': 'string', 'maxLength': 8000},
         },
         'required': ['sectionId', 'f0.name', 'j0.timezone'],
         'additionalProperties': false,
@@ -158,20 +143,6 @@ void main() {
       );
     });
 
-    test('a section action carries its kind and nothing else', () {
-      const command = {
-        'commandId': 'c3',
-        'revision': 4,
-        'actionId': 'section-2-0',
-        'input': {'sectionId': 'provider.ollama', 'kind': 'manage-provider'},
-      };
-      expect(viewActionKindV1(command), 'manage-provider');
-      expect(
-        settingsChangeCommandV1(userId: 'tim', command: command),
-        containsPair('values', <String, Object?>{}),
-      );
-    });
-
     test('an action naming no section is refused before dispatch', () {
       expect(
         () => settingsChangeCommandV1(
@@ -201,29 +172,6 @@ void main() {
     state.dispose();
   });
 
-  test('a model catalog page from another revision is refused', () async {
-    final store = MemoryStore();
-    final state = SettingsController(
-      SettingsApi(
-        store,
-        (_, body) async => body == null
-            ? document()
-            : {
-                'schemaVersion': 1,
-                'source': 'account-models',
-                'ownerId': 'tim',
-                'revision': 99,
-                'items': <Object?>[],
-              },
-      ),
-      'tim',
-      'application',
-    );
-    await state.load();
-    await expectLater(state.options('', null), throwsFormatException);
-    state.dispose();
-  });
-
   for (final brightness in Brightness.values) {
     testWidgets(
       'Settings renders the projected document and saves through it ($brightness)',
@@ -249,7 +197,7 @@ void main() {
         await tester.pumpWidget(
           MaterialApp(
             theme: FrockTheme.theme(brightness),
-            home: SettingsPage(api: api, store: store, userId: 'tim'),
+            home: PersonalDetailsPage(api: api, store: store, userId: 'tim'),
           ),
         );
         await tester.pumpAndSettle();
@@ -265,7 +213,6 @@ void main() {
         expect(commands.first['values'], {
           'name': 'Timothy',
           'timezone': 'Australia/Sydney',
-          'account-model': null,
         });
         expect(commands.first['expectedRevision'], 1);
         expect(find.text('Saved.'), findsOneWidget);
@@ -282,7 +229,7 @@ void main() {
           onPressed: () => Navigator.of(context).push(
             MaterialPageRoute<void>(
               builder: (_) =>
-                  SettingsPage(api: api, store: store, userId: 'tim'),
+                  PersonalDetailsPage(api: api, store: store, userId: 'tim'),
             ),
           ),
           child: const Text('open'),
@@ -338,59 +285,6 @@ void main() {
     });
   });
 
-  testWidgets('the model field is the host picker, and its choice travels', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(390, 1400);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    final store = MemoryStore();
-    final commands = <Map<String, Object?>>[];
-    final api = SettingsApi(store, (path, body) async {
-      if (path.contains('options')) {
-        return {
-          'schemaVersion': 1,
-          'source': 'account-models',
-          'ownerId': 'tim',
-          'revision': 1,
-          'items': [
-            {
-              'label': 'Llama 3 · Work',
-              'value': {'connectionId': 'work', 'providerModelId': 'llama3'},
-            },
-          ],
-        };
-      }
-      if (body == null) return document();
-      final command = Map<String, Object?>.from(body as Map);
-      commands.add(command);
-      return {
-        'schemaVersion': 1,
-        'commandId': command['commandId'],
-        'revision': 2,
-        'status': 'applied',
-      };
-    });
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: FrockTheme.theme(Brightness.dark),
-        home: SettingsPage(api: api, store: store, userId: 'tim'),
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Frock AI · Auto'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Llama 3'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Save profile'));
-    await tester.pumpAndSettle();
-    expect(commands.single['values'], {
-      'name': 'Tim',
-      'timezone': 'Australia/Sydney',
-      'account-model': {'connectionId': 'work', 'providerModelId': 'llama3'},
-    });
-  });
-
   testWidgets('the profile time zone is a dropdown and its choice travels', (
     tester,
   ) async {
@@ -413,7 +307,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: FrockTheme.theme(Brightness.dark),
-        home: SettingsPage(api: api, store: store, userId: 'tim'),
+        home: PersonalDetailsPage(api: api, store: store, userId: 'tim'),
       ),
     );
     await tester.pumpAndSettle();

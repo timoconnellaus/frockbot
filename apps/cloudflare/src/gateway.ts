@@ -947,29 +947,20 @@ export function createGateway(
       }
     }
 
-    if (
-      ["/api/settings/application", "/api/settings/models"].includes(
-        url.pathname,
-      )
-    ) {
-      const home = url.pathname.endsWith("/models") ? "models" : "application";
+    if (url.pathname === "/api/settings/application") {
       try {
         const owner = dependencies.userConfigurationFor(userId);
         if (request.method === "GET") {
           // Identity supplies only an unsaved profile suggestion. The User's
           // saved profile wins and only a save command persists edited fields.
-          const identity =
-            home !== "application"
-              ? null
-              : development.userId
-                ? { name: "Local developer" }
-                : await dependencies.auth.profile?.(userId).catch(() => null);
+          const identity = development.userId
+            ? { name: "Local developer" }
+            : await dependencies.auth.profile?.(userId).catch(() => null);
           const frame = decodeProtocol(
             "SettingsFrame",
             await owner.readSettingsFrame({
               schemaVersion: 1,
               userId,
-              home,
               ...(identity?.name?.trim()
                 ? { identityName: identity.name.trim().slice(0, 100) }
                 : {}),
@@ -990,18 +981,14 @@ export function createGateway(
           // wants a frame keeps getting one.
           return Response.json(
             url.searchParams.get("as") === "document"
-              ? settingsDocumentV1(
-                  home === "application"
-                    ? {
-                        ...frame,
-                        sections: frame.sections.filter(
-                          (section) =>
-                            section.id ===
-                            (url.searchParams.get("section") ?? "profile"),
-                        ),
-                      }
-                    : frame,
-                )
+              ? settingsDocumentV1({
+                  ...frame,
+                  sections: frame.sections.filter(
+                    (section) =>
+                      section.id ===
+                      (url.searchParams.get("section") ?? "profile"),
+                  ),
+                })
               : frame,
             { headers: { "cache-control": "no-store" } },
           );
@@ -1024,7 +1011,6 @@ export function createGateway(
             await owner.changeSettings({
               schemaVersion: 1,
               userId,
-              home,
               command,
             }),
           ),
