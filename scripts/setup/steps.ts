@@ -1,5 +1,5 @@
 /**
- * The eight things `bun run setup` does, in order (ADR 0028 step 4).
+ * The seven things `bun run setup` does, in order (ADR 0028 step 4).
  *
  * Each step prints what it did and is idempotent: a second run converges and
  * says "nothing to do", which is also how an upgrade works — check out the next
@@ -9,38 +9,43 @@
  */
 import { join } from "node:path";
 import {
-  generateProfileConfigsV1,
-  writeGeneratedConfigsV1,
-} from "../../apps/cloudflare/deployment-config/generate.ts";
+  bundleAssetNamesV1,
+  checkInstallNameV1,
+  installWorkersV1,
+} from "../../apps/cloudflare/deployment-config/bundle.ts";
+import {
+  createCloudflareApiV1,
+  deployBundleV1,
+} from "../../apps/cloudflare/deployment-config/deploy.ts";
 import {
   deploymentRegionV1,
   validateProfileV1,
   type DeploymentProfileV1,
 } from "../../apps/cloudflare/deployment-config/profile.ts";
+import { PROFILE_DIRECTORY_V1 } from "../deployment-config/repository.ts";
 import {
-  PROFILE_DIRECTORY_V1,
-  REPO_ROOT_V1,
-} from "../deployment-config/repository.ts";
+  cloudflareTokenV1,
+  latestReleaseVersionV1,
+  loadBundleV1,
+  releaseAssetUrlV1,
+  type LocalBundleV1,
+} from "../deploy-bundle/local.ts";
 import {
   accessApplicationsV1,
   accessDashboardStepsV1,
   accountChoiceV1,
   accountRefusalV1,
-  applicationArtifactKeyV1,
   chosenAccountV1,
   credentialKeyringV1,
   formatMintedSecretsV1,
   HUMAN_SECRETS_V1,
   imageTagV1,
-  MEMORY_INDEX_PRESET_V1,
   MINTED_SECRETS_FILE_V1,
   mintPlanV1,
   parseMintedSecretsV1,
   parseWhoamiAccountsV1,
   randomHexV1,
-  RELEASE_REPOSITORY_V1,
-  releaseAssetNamesV1,
-  deploymentResourcesV1,
+  setupInstallV1,
   simpleProfileV1,
   SIMPLE_PROFILE_NAME_V1,
   UNISSUED_ACCESS_AUD_V1,
@@ -72,35 +77,19 @@ export interface SetupContextV1 {
 /** What the installer leaves behind for the operator to finish by hand. */
 export interface SetupOutcomeV1 {
   readonly url: string;
+  /** The install name, which every Worker and resource is named from. */
+  readonly install: string;
   readonly byHand: readonly string[];
 }
-
-const WORKER_DIRECTORIES_V1 = {
-  app: "app",
-  computerHost: "computer-host",
-  appletBuild: "applet-build",
-} as const;
-
-type SetupWorkerV1 = keyof typeof WORKER_DIRECTORIES_V1;
 
 const PROFILE_PATH_V1 = join(
   PROFILE_DIRECTORY_V1,
   `${SIMPLE_PROFILE_NAME_V1}.json`,
 );
 
-function generatedConfigV1(context: SetupContextV1, worker: SetupWorkerV1) {
-  return join(
-    context.repoRoot,
-    ".deployment",
-    SIMPLE_PROFILE_NAME_V1,
-    WORKER_DIRECTORIES_V1[worker],
-    "wrangler.jsonc",
-  );
-}
-
 function stage(context: SetupContextV1, index: number, name: string): void {
   context.runner.say("");
-  context.runner.say(`▸ ${index}/8 · ${name}`);
+  context.runner.say(`▸ ${index}/7 · ${name}`);
 }
 
 /* ── 1. Account ─────────────────────────────────────────────────────────── */
@@ -207,7 +196,7 @@ export async function writeProfileV1(
   if (context.options.profile) {
     const reused = readProfileFileV1(context, context.options.profile);
     context.runner.say(`  reusing    ${context.options.profile}`);
-    return generateFromV1(context, reused);
+    return writtenV1(context, reused);
   }
 
   const tag = imageTagV1(await gitDescribeV1(context), repoVersionV1(context));
@@ -257,7 +246,7 @@ export async function writeProfileV1(
     region: deploymentRegionV1(region),
     imageTag: tag.tag,
   });
-  return generateFromV1(context, profile);
+  return writtenV1(context, profile);
 }
 
 function existingProfileV1(
@@ -280,8 +269,7 @@ function readProfileFileV1(
   if (!contents) throw new Error(`No deployment profile at ${path}`);
   const parsed = JSON.parse(contents) as DeploymentProfileV1;
   // The installer deploys one profile and knows it by name: a reused file is
-  // this deployment's profile whatever it was called on disk, and a different
-  // name would put the generated configs somewhere nothing below looks.
+  // this deployment's profile whatever it was called on disk.
   const named: DeploymentProfileV1 = {
     ...parsed,
     name: SIMPLE_PROFILE_NAME_V1,
@@ -290,38 +278,22 @@ function readProfileFileV1(
   return named;
 }
 
-/** Validate, write, and generate the wrangler configs the rest of the run reads. */
-function generateFromV1(
+/** Validate and write the profile: the record of this install's answers. */
+function writtenV1(
   context: SetupContextV1,
   profile: DeploymentProfileV1,
 ): DeploymentProfileV1 {
   validateProfileV1(profile, "the profile this installer wrote");
+  // The prefix names every Worker and resource of the install, and a bundle
+  // takes a narrower name than a profile does.
+  checkInstallNameV1(profile.prefix);
   context.runner.writeFile(
     PROFILE_PATH_V1,
-    `${JSON.stringify(profile, null, 2)}\n`,
+    `${JSON.stringify(profile, null, 2)}
+`,
   );
-  regenerateConfigsV1(context, profile);
   context.runner.say(`  profile    deployments/${SIMPLE_PROFILE_NAME_V1}.json`);
   return profile;
-}
-
-export function regenerateConfigsV1(
-  context: SetupContextV1,
-  profile: DeploymentProfileV1,
-  applicationHash?: string,
-): void {
-  const generated = generateProfileConfigsV1({
-    profile,
-    repoRoot: context.repoRoot,
-    ...(applicationHash === undefined ? {} : { applicationHash }),
-  });
-  // Written even in a dry run. These are derived output under git-ignored
-  // `.deployment/`, exactly what `bun run deployment:config` writes; nothing is
-  // deployed by their existing, and the commands printed below name them.
-  writeGeneratedConfigsV1(generated, profile.name);
-  context.runner.say(
-    `  configs    ${generated.map(({ worker }) => worker).join(", ")} → .deployment/${profile.name}/ (derived, git-ignored)`,
-  );
 }
 
 async function gitDescribeV1(
@@ -349,94 +321,7 @@ function repoVersionV1(context: SetupContextV1): string | undefined {
   }
 }
 
-/* ── 3. Resources ───────────────────────────────────────────────────────── */
-
-export async function createResourcesV1(
-  context: SetupContextV1,
-  profile: DeploymentProfileV1,
-): Promise<void> {
-  stage(context, 3, "Resources");
-  const names = deploymentResourcesV1(profile);
-  const config = generatedConfigV1(context, "app");
-  let created = 0;
-  for (const bucket of names.buckets) {
-    const present = await context.runner.run({
-      cmd: ["bunx", "wrangler", "r2", "bucket", "info", bucket, "-c", config],
-      cwd: context.repoRoot,
-    });
-    if (present.exitCode === 0) {
-      context.runner.say(`  bucket     ${bucket} already exists`);
-      continue;
-    }
-    await expectV1(
-      context,
-      {
-        cmd: [
-          "bunx",
-          "wrangler",
-          "r2",
-          "bucket",
-          "create",
-          bucket,
-          "-c",
-          config,
-          ...(profile.region ? ["--location", profile.region] : []),
-        ],
-        cwd: context.repoRoot,
-      },
-      `create the R2 bucket ${bucket}`,
-    );
-    context.runner.say(`  bucket     ${bucket} created`);
-    created += 1;
-  }
-
-  const index = await context.runner.run({
-    cmd: [
-      "bunx",
-      "wrangler",
-      "vectorize",
-      "get",
-      names.memoryIndex,
-      "-c",
-      config,
-    ],
-    cwd: context.repoRoot,
-  });
-  if (index.exitCode === 0) {
-    context.runner.say(`  index      ${names.memoryIndex} already exists`);
-  } else {
-    // The preset carries both the dimensions and the metric. An index with any
-    // other shape rejects every vector the memory Package writes.
-    await expectV1(
-      context,
-      {
-        cmd: [
-          "bunx",
-          "wrangler",
-          "vectorize",
-          "create",
-          names.memoryIndex,
-          "--preset",
-          MEMORY_INDEX_PRESET_V1,
-          "-c",
-          config,
-        ],
-        cwd: context.repoRoot,
-      },
-      `create the Vectorize index ${names.memoryIndex}`,
-    );
-    context.runner.say(
-      `  index      ${names.memoryIndex} created (${MEMORY_INDEX_PRESET_V1})`,
-    );
-    created += 1;
-  }
-  if (created === 0) context.runner.say("  nothing to do");
-  // The five Durable Object namespaces need no step: they are created with the
-  // Worker that declares them, and there is no D1 at all — the Access Package
-  // stores nothing.
-}
-
-/* ── 4 and 5. Secrets ───────────────────────────────────────────────────── */
+/* ── 3 and 4. Secrets ───────────────────────────────────────────────────── */
 
 export interface SecretValuesV1 {
   readonly values: Readonly<Record<string, string>>;
@@ -446,7 +331,7 @@ export interface SecretValuesV1 {
 export async function mintInternalSecretsV1(
   context: SetupContextV1,
 ): Promise<Record<string, string>> {
-  stage(context, 4, "Internal secrets");
+  stage(context, 3, "Internal secrets");
   const recordPath = join(context.repoRoot, MINTED_SECRETS_FILE_V1);
   const recorded = parseMintedSecretsV1(context.runner.readFile(recordPath));
   const plan = mintPlanV1(recorded);
@@ -487,7 +372,7 @@ export async function askHumanSecretsV1(
   context: SetupContextV1,
   profile: DeploymentProfileV1,
 ): Promise<SecretValuesV1> {
-  stage(context, 5, "Keys only you have");
+  stage(context, 4, "Keys only you have");
   const values: Record<string, string> = {
     FROCKBOT_ADMIN_EMAILS: (profile.adminEmails ?? []).join(","),
   };
@@ -542,72 +427,13 @@ async function askOneSecretV1(
   );
 }
 
-/**
- * Which secrets each Worker holds, as a file `wrangler deploy` takes.
- *
- * `--secrets-file` rather than `wrangler secret put`, for the reason the release
- * workflow uses it too: `secret put` addresses a Worker that already exists, and
- * on a first install none of these does yet. The deploy is what creates them, so
- * the secrets go in with it. JSON rather than dotenv because wrangler reads the
- * file as JSON first and a dotenv line keeps the backslash escapes inside a
- * quoted value — which would deliver the credential keyring mangled.
- */
-function secretsFilesV1(
-  context: SetupContextV1,
-  values: Readonly<Record<string, string>>,
-): Map<SetupWorkerV1, string> {
-  const byWorker = new Map<SetupWorkerV1, Record<string, string>>();
-  const addTo = (worker: SetupWorkerV1, name: string) => {
-    const held = byWorker.get(worker) ?? {};
-    held[name] = values[name]!;
-    byWorker.set(worker, held);
-  };
-  for (const secret of [...MINTED_WORKER_MAP_V1, ...HUMAN_SECRETS_V1]) {
-    if (values[secret.name] === undefined) continue;
-    for (const worker of secret.workers) addTo(worker, secret.name);
-  }
-  for (const name of ["FROCKBOT_ADMIN_EMAILS", "FROCKBOT_ADMIN_USER_IDS"]) {
-    if (values[name] !== undefined) addTo("app", name);
-  }
-
-  const files = new Map<SetupWorkerV1, string>();
-  for (const [worker, held] of byWorker) {
-    const file = join(
-      context.repoRoot,
-      ".deployment",
-      SIMPLE_PROFILE_NAME_V1,
-      "secrets",
-      `${WORKER_DIRECTORIES_V1[worker]}.json`,
-    );
-    context.runner.writeFile(file, JSON.stringify(held), 0o600);
-    files.set(worker, file);
-    context.runner.say(
-      `  ${WORKER_DIRECTORIES_V1[worker]}: ${Object.keys(held).sort().join(", ")}`,
-    );
-  }
-  return files;
-}
-
-/** The minted secrets' Worker placement, in the shape the secrets files read. */
-const MINTED_WORKER_MAP_V1: readonly {
-  name: string;
-  workers: readonly SetupWorkerV1[];
-}[] = [
-  { name: "CREDENTIAL_KEYRING", workers: ["app"] },
-  { name: "COMPUTER_HOST_TOKEN", workers: ["app", "computerHost"] },
-  { name: "APPLET_BUILD_TOKEN", workers: ["app", "appletBuild"] },
-  { name: "ROUTINE_HOOK_SECRET", workers: ["app"] },
-  { name: "MACHINE_TOKEN_SECRET", workers: ["app"] },
-  { name: "NATIVE_TOKEN_SECRET", workers: ["app"] },
-];
-
-/* ── 6. Access ──────────────────────────────────────────────────────────── */
+/* ── 5. Access ──────────────────────────────────────────────────────────── */
 
 export async function configureAccessV1(
   context: SetupContextV1,
   profile: DeploymentProfileV1,
 ): Promise<{ profile: DeploymentProfileV1; byHand: string[] }> {
-  stage(context, 6, "Cloudflare Access");
+  stage(context, 5, "Cloudflare Access");
   const appHostname = profile.workers?.app?.hostnames?.[0];
   if (!appHostname) throw new Error("The profile gives the app no hostname.");
   const applications = accessApplicationsV1(appHostname, profile.prefix);
@@ -705,7 +531,6 @@ function finishAccessV1(
     PROFILE_PATH_V1,
     `${JSON.stringify(next, null, 2)}\n`,
   );
-  regenerateConfigsV1(context, next);
   context.runner.say(`  audience   ${audience}`);
   return { profile: next, byHand };
 }
@@ -856,180 +681,71 @@ async function createAccessApplicationV1(
     : { ok: true, aud: result.aud };
 }
 
-/* ── 7. Client and artifact ─────────────────────────────────────────────── */
+/* ── 6. The release's deploy bundle ────────────────────────────────────── */
 
-export async function fetchReleaseV1(
+/**
+ * The deploy bundle for this checkout's release: every Worker prebuilt, the web
+ * client, the application artifact and the manifest that names them all
+ * (docs/deploy-bundles.md). Downloaded and held to its manifest's sha256;
+ * nothing is built here. Undefined in a dry run, which downloads nothing.
+ */
+export async function fetchBundleV1(
   context: SetupContextV1,
   profile: DeploymentProfileV1,
-): Promise<DeploymentProfileV1> {
-  stage(context, 7, "Client and application artifact");
+): Promise<LocalBundleV1 | undefined> {
+  stage(context, 6, "The release's deploy bundle");
   const tag =
     profile.images?.source === "registry" ? profile.images.tag : "latest";
-  const assets = releaseAssetNamesV1(tag);
-  const downloads = join(
-    context.repoRoot,
-    ".deployment",
-    SIMPLE_PROFILE_NAME_V1,
-    "release",
-  );
-  const webDirectory = join(
-    context.repoRoot,
-    "apps",
-    "cloudflare",
-    "dist",
-    "web",
-  );
-  const artifactFile = join(downloads, assets.applicationArtifact);
-
-  const gh = await context.runner.run({
-    cmd: ["gh", "--version"],
-    cwd: context.repoRoot,
-  });
-  await downloadAssetV1(
-    context,
-    tag,
-    assets.webClient,
-    downloads,
-    gh.exitCode === 0,
-  );
-  await downloadAssetV1(
-    context,
-    tag,
-    assets.applicationArtifact,
-    downloads,
-    gh.exitCode === 0,
-  );
-
-  await expectV1(
-    context,
-    {
-      cmd: [
-        "unzip",
-        "-oq",
-        join(downloads, assets.webClient),
-        "-d",
-        webDirectory,
-      ],
-      cwd: context.repoRoot,
-    },
-    `unpack ${assets.webClient} into apps/cloudflare/dist/web`,
-  );
-  context.runner.say(`  client     unpacked into apps/cloudflare/dist/web`);
-
-  const hash = await context.runner.sha256(artifactFile);
-  if (!/^[0-9a-f]{64}$/.test(hash)) {
-    throw new Error(
-      `Could not compute the application artifact's sha256 from ${artifactFile}.`,
-    );
+  if (context.runner.dryRun) {
+    const names = bundleAssetNamesV1(tag);
+    for (const asset of [names.manifest, names.archive]) {
+      context.runner.say(`  would fetch  ${releaseAssetUrlV1(tag, asset)}`);
+    }
+    return undefined;
   }
-  await expectV1(
-    context,
-    {
-      cmd: [
-        "bunx",
-        "wrangler",
-        "r2",
-        "object",
-        "put",
-        `${deploymentResourcesV1(profile).applicationArtifactsBucket}/${applicationArtifactKeyV1(hash)}`,
-        "--file",
-        artifactFile,
-        "-c",
-        generatedConfigV1(context, "app"),
-        "--remote",
-      ],
-      cwd: context.repoRoot,
-    },
-    "upload the application artifact to R2",
+  const version = tag === "latest" ? await latestReleaseVersionV1() : tag;
+  const bundle = await loadBundleV1(
+    version,
+    join(context.repoRoot, ".deployment", SIMPLE_PROFILE_NAME_V1, "bundles"),
   );
-  context.runner.say(`  artifact   ${applicationArtifactKeyV1(hash)}`);
-  // The var has to name the object that is actually there; the tracked
-  // placeholder `foundation-v1` is no object in anybody's bucket.
-  regenerateConfigsV1(context, profile, hash);
-  return profile;
+  context.runner.say(
+    `  bundle     ${bundle.manifest.version}, ${bundle.manifest.archive.sha256.slice(0, 12)}… as its manifest says`,
+  );
+  return bundle;
 }
 
-async function downloadAssetV1(
-  context: SetupContextV1,
-  tag: string,
-  asset: string,
-  into: string,
-  hasGh: boolean,
-): Promise<void> {
-  const command = hasGh
-    ? {
-        cmd: [
-          "gh",
-          "release",
-          "download",
-          tag,
-          "--repo",
-          RELEASE_REPOSITORY_V1,
-          "--pattern",
-          asset,
-          "--dir",
-          into,
-          "--clobber",
-        ],
-        cwd: context.repoRoot,
-      }
-    : {
-        // No `gh`, and none needed: a public release asset is a plain URL.
-        cmd: [
-          "curl",
-          "-fsSL",
-          "--create-dirs",
-          "-o",
-          join(into, asset),
-          `https://github.com/${RELEASE_REPOSITORY_V1}/releases/download/${tag}/${asset}`,
-        ],
-        cwd: context.repoRoot,
-      };
-  await expectV1(context, command, `download ${asset} from the ${tag} release`);
-  context.runner.say(`  fetched    ${asset}`);
-}
-
-/* ── 8. Deploy ──────────────────────────────────────────────────────────── */
+/* ── 7. Deploy ──────────────────────────────────────────────────────────── */
 
 export async function deployV1(
   context: SetupContextV1,
   profile: DeploymentProfileV1,
   secrets: Readonly<Record<string, string>>,
+  bundle: LocalBundleV1 | undefined,
 ): Promise<SetupOutcomeV1> {
-  stage(context, 8, "Deploy");
-  const files = secretsFilesV1(context, secrets);
-  try {
-    // In this order and no other: the app Worker's service bindings name the two
-    // container Workers, so a version of it cannot be created until they exist,
-    // and a stale host serving a current app is the failure ADR 0004 names.
-    for (const worker of ["computerHost", "appletBuild", "app"] as const) {
-      const file = files.get(worker);
-      await expectV1(
-        context,
-        {
-          cmd: [
-            "bunx",
-            "wrangler",
-            "deploy",
-            "-c",
-            generatedConfigV1(context, worker),
-            ...(file ? ["--secrets-file", file] : []),
-          ],
-          cwd: context.repoRoot,
-        },
-        `deploy the ${WORKER_DIRECTORIES_V1[worker]} Worker`,
-      );
-      context.runner.say(`  deployed   ${WORKER_DIRECTORIES_V1[worker]}`);
-    }
-  } finally {
-    // Even on a failed deploy: the file holds every secret this deployment has,
-    // and it has no reason to outlive the command that read it.
-    for (const file of files.values()) context.runner.removeFile(file);
+  stage(context, 7, "Deploy");
+  const install = setupInstallV1(profile, secrets);
+  if (bundle) {
+    // The deploy page's own path: the Cloudflare API, with nothing built here.
+    // Resources, the artifact, each Worker with its migrations and secrets, its
+    // container application and its domains, in dependency order.
+    await deployBundleV1({
+      api: createCloudflareApiV1({
+        token: await cloudflareTokenV1(context.env, context.repoRoot),
+      }),
+      manifest: bundle.manifest,
+      files: bundle.files,
+      install,
+      say: context.runner.say,
+    });
+  } else {
+    context.runner.say(
+      `  would deploy  ${installWorkersV1(install).join(", ")} for install "${install.name}" through the Cloudflare API, with ${Object.keys(secrets).sort().join(", ")}`,
+    );
   }
 
   const url = `https://${profile.workers!.app!.hostnames![0]}`;
   await checkLivenessV1(context, url, secrets.DEBUG_TOKEN);
-  return { url, byHand: [] };
+  return { url, install: install.name, byHand: [] };
 }
 
 /**
@@ -1084,25 +800,6 @@ async function checkLivenessV1(
   context.runner.say(`  live       ${target} answered ${status}`);
 }
 
-/* ── Shared ─────────────────────────────────────────────────────────────── */
-
-/** Run a command that must succeed, and say what failed in its own words. */
-async function expectV1(
-  context: SetupContextV1,
-  command: Parameters<SetupRunnerV1["run"]>[0],
-  what: string,
-): Promise<void> {
-  const result = await context.runner.run(command, {
-    exitCode: 0,
-    stdout: "",
-    stderr: "",
-  });
-  if (result.exitCode === 0) return;
-  throw new Error(
-    `Could not ${what}: ${result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`}`,
-  );
-}
-
 /** What the deployer does next, printed at the end of a successful run. */
 export function nextStepsV1(
   outcome: SetupOutcomeV1,
@@ -1115,7 +812,7 @@ export function nextStepsV1(
   ];
   if (skipped.length > 0) {
     lines.push(
-      `Skipped keys can be added later with \`bunx wrangler secret put <NAME> -c .deployment/simple/app/wrangler.jsonc\`: ${skipped.join(", ")}.`,
+      `Skipped keys can be added later with \`bunx wrangler secret put <NAME> --name ${outcome.install}\`, or by running this again: ${skipped.join(", ")}.`,
     );
   }
   lines.push(

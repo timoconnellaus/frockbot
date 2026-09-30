@@ -70,6 +70,10 @@ _Avoid_: Plugin, extension
 Who one deployment is, in a checked-in file the deployable configs are generated from: its Cloudflare account, Worker names, hostnames, resources, auth and payments Packages and identity vars. Two exist — `hosted`, which is frockbot.com, and `simple`, which an installer writes into a deployer's own account — and a profile is which auth Package is built in, which secrets exist and which workflows run, never a fork or a gated feature.
 _Avoid_: Environment, tier, edition, tenant
 
+**Deploy bundle**:
+One release's simple-profile Workers, prebuilt, with their assets, the application artifact and a manifest naming every binding, migration, secret and image, and `{install}` where an install's name goes. A deploy installs it through the Cloudflare API with nothing built locally, and an update is the next release's bundle over the same install name ([docs/deploy-bundles.md](docs/deploy-bundles.md)).
+_Avoid_: Build, package, image
+
 **Auth Package**:
 The sign-in Package, behind `AuthPackageV1`: resolve an identity from a request, serve the sign-in and sign-out routes, and hand the native authorize page its identity step. Two builds, better-auth with Google and Cloudflare Access, each named by one chooser file the profile selects; a build carries only its own.
 _Avoid_: Auth provider, identity provider, login backend

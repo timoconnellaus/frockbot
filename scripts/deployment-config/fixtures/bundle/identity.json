@@ -1,0 +1,36 @@
+{
+  "app": {
+    "name": "{install}",
+    "durableObjects": [
+      "BOT_STATES:BotState",
+      "USER_CONFIGURATIONS:UserConfiguration",
+      "DEPLOYMENT_POLICY:DeploymentPolicy",
+      "VOICE_ASSISTANTS:VoiceAssistant",
+      "GROUP_CHATS:GroupChat"
+    ],
+    "stores": [
+      "COMPUTER_HOST:{install}-computer-host",
+      "APPLET_BUILD:{install}-applet-build",
+      "APPLICATION_ARTIFACTS:{install}-application-artifacts",
+      "MEMORY_FILES:{install}-memory-files",
+      "MEMORY_INDEX:{install}-memory",
+      "ANALYTICS:{install}-events"
+    ],
+    "migrations": ["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9"],
+    "containers": []
+  },
+  "computerHost": {
+    "name": "{install}-computer-host",
+    "durableObjects": ["COMPUTER_HOST_CONTAINER:FlyHostContainer"],
+    "stores": [],
+    "migrations": ["v1", "v2", "v3", "v4", "v5"],
+    "containers": ["{install}-computer-host-flyhostcontainer"]
+  },
+  "appletBuild": {
+    "name": "{install}-applet-build",
+    "durableObjects": ["APPLET_BUILD_CONTAINER:AppletBuildContainer"],
+    "stores": [],
+    "migrations": ["v1"],
+    "containers": ["{install}-applet-build-appletbuildcontainer"]
+  }
+}

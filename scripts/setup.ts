@@ -3,10 +3,11 @@
  * `bun run setup` — install FrockBot into your own Cloudflare account.
  *
  * The simple deployment of ADR 0028: Cloudflare Access sign-in, no billing, the
- * Computer, and nothing to customise. It creates the resources,
- * mints the secrets, asks for the two or three keys only you have, sets up the
- * Access application and deploys the three Workers, pulling the container images
- * and the web client from the release for the tag you checked out.
+ * Computer, and nothing to customise. It mints the secrets, asks for the two or
+ * three keys only you have, sets up the Access application and installs the
+ * release's deploy bundle for the tag you checked out through the Cloudflare
+ * API: the same prebuilt Workers, and the same calls, the deploy page makes
+ * (docs/deploy-bundles.md). Nothing is built on your machine.
  *
  * Idempotent: a second run converges and says "nothing to do" per step, which is
  * also how an upgrade works — check out the next tag and run it again.
@@ -34,9 +35,8 @@ import {
   askHumanSecretsV1,
   chooseAccountV1,
   configureAccessV1,
-  createResourcesV1,
   deployV1,
-  fetchReleaseV1,
+  fetchBundleV1,
   mintInternalSecretsV1,
   nextStepsV1,
   writeProfileV1,
@@ -121,14 +121,13 @@ say(
 try {
   const chosen = await chooseAccountV1(context, hostedAccountIdV1());
   let written = await writeProfileV1(context, chosen);
-  await createResourcesV1(context, written);
   const minted = await mintInternalSecretsV1(context);
   const human = await askHumanSecretsV1(context, written);
   const secrets = { ...minted, ...human.values };
   const access = await configureAccessV1(context, written);
   written = access.profile;
-  written = await fetchReleaseV1(context, written);
-  const outcome = await deployV1(context, written, secrets);
+  const bundle = await fetchBundleV1(context, written);
+  const outcome = await deployV1(context, written, secrets, bundle);
 
   say("");
   say(dryRun ? "That is the whole of it. Nothing was run." : "Installed.");

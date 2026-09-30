@@ -174,11 +174,9 @@ jobs:
     # configured in the pulling account
     # (https://developers.cloudflare.com/containers/image-management/).
     #
-    # Skips loudly while the Docker Hub secrets are unset, and production does
-    # not wait on it: the hosted deployment still builds its images from the
-    # Dockerfiles, so a missing publish costs the simple profile a tag, not
-    # frockbot.com a release. Once the simple profile is announced, make this
-    # job required by adding it to `deploy-backend`'s `needs`.
+    # Required: `deploy-backend` waits on it, so a tag production runs is always
+    # a tag whose deploy bundle can pull its images. The hosted deployment still
+    # builds its own images from the Dockerfiles.
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -201,9 +199,8 @@ jobs:
           set -euo pipefail
           for name in DOCKERHUB_USERNAME DOCKERHUB_TOKEN; do
             if [[ -z "${!name}" ]]; then
-              printf '::warning::%s is unset: this tag publishes no container images, so an installer cannot pull it.\n' "$name"
-              echo "publish=false" >> "$GITHUB_OUTPUT"
-              exit 0
+              printf '::error::%s is unset: this tag would publish no container images, so no install could pull it.\n' "$name"
+              exit 1
             fi
           done
           printf '%s' "$DOCKERHUB_TOKEN" |
@@ -244,11 +241,15 @@ jobs:
         run: docker logout docker.io
 
   release-assets:
-    name: Build the installer's release assets
-    # The two things an installer cannot build for itself: the Flutter web client
-    # (the app Worker's `assets` payload) and the application artifact the Worker
-    # loads from R2. A deployer has neither Flutter nor this repository's build,
-    # so both are attached to the Release for the tag they were built from.
+    name: Build the deploy bundle
+    # What a deploy cannot build for itself: every Worker of the simple profile,
+    # prebuilt, with the Flutter web client as the app Worker's assets and the
+    # application artifact it loads from R2, and the manifest a deploy reads to
+    # install this tag through the Cloudflare API alone (docs/deploy-bundles.md).
+    # `bun run setup` and the deploy page both install from it; neither has
+    # Flutter or this repository's build. It is held to the previous release's
+    # manifest first, so an install of that one can take this one without a
+    # Worker, bucket or Durable Object namespace moving.
     #
     # There is no prebuilt APK in this bundle: a plain `flutter build apk` bakes
     # `FROCKBOT_ORIGIN` in, and a deployer's origin is not known here. The hosted
@@ -291,24 +292,51 @@ jobs:
           bun scripts/build-applets-assets.ts
           bun run --filter @frockbot/cloudflare artifact:build
 
-      - name: Package the release assets
+      - name: Build the deploy bundle
         env:
           VERSION: ${{ needs.verify.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
-          assets="$RUNNER_TEMP/release-assets"
-          mkdir -p "$assets"
+          # `wrangler deploy --dry-run` bundles each Worker; it needs no
+          # credentials and deploys nothing.
+          bun scripts/build-deploy-bundle.ts --version "$VERSION" --out "$RUNNER_TEMP/release-assets"
 
-          # Zipped from inside `dist/web` so it unpacks straight into the
-          # `assets.directory` a generated config points at: `_headers` and the
-          # content-addressed `_flutter/<buildHash>/` payload, nothing above them.
-          (cd apps/cloudflare/dist/web && zip -qr "$assets/frockbot-web-client-$VERSION.zip" .)
-
-          # Attached as the bytes themselves rather than an archive, because the
-          # R2 key the Worker loads it under is this file's own sha256.
-          cp apps/cloudflare/dist/artifacts/foundation-v1.mjs \
-            "$assets/frockbot-application-artifact-$VERSION.mjs"
+      - name: Hold the bundle to the previous release's
+        # The equivalence gate for installs: a Worker name, Durable Object class
+        # or migration tag that differs between two bundles is a namespace an
+        # install loses when it updates. The previous manifest is that of the
+        # newest Release older than this tag, so re-running an older tag is not
+        # held to a newer one. Only a Release that carries no manifest passes
+        # with nothing to compare; any other failure to read it fails the gate.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          previous="$RUNNER_TEMP/previous-bundle"
+          mkdir -p "$previous"
+          tags="$(gh release list --limit 100 --exclude-drafts --json tagName -q '.[].tagName')"
+          older="$(
+            { printf '%s\n' "$tags"; echo "v$VERSION"; } |
+              grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' | sort -uV |
+              awk -v current="v$VERSION" '$0 == current { print last; exit } { last = $0 }'
+          )"
+          previous_manifest=""
+          if [[ -n "$older" ]]; then
+            manifest="frockbot-deploy-${older#v}.json"
+            if gh release view "$older" --json assets -q '.assets[].name' | grep -qxF "$manifest"; then
+              gh release download "$older" --pattern "$manifest" --dir "$previous"
+              previous_manifest="$previous/$manifest"
+            else
+              echo "$older carries no deploy bundle."
+            fi
+          fi
+          bun scripts/check-deploy-bundle.ts \
+            "$RUNNER_TEMP/release-assets/frockbot-deploy-$VERSION.json" \
+            ${previous_manifest:+"$previous_manifest"}
 
       - name: Upload the release assets
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1249,7 +1277,7 @@ jobs:
           name: frockbot-macos-release
           path: .release-assets
 
-      - name: Download the installer's release assets
+      - name: Download the deploy bundle
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: frockbot-release-assets
@@ -1275,11 +1303,11 @@ jobs:
         # out — `publish-download` writes that to R2 — so nothing here depends on
         # which Release GitHub considers `latest`.
         #
-        # The other two are what an installer downloads for a tag, beside the
-        # container images `publish-images` pushed: the web client it unpacks as
-        # the app Worker's `assets` payload, and the application artifact it puts
-        # in its own R2 bucket under that file's sha256. Neither can be built
-        # without Flutter, which is the point of attaching them.
+        # The other two are what a deploy downloads for a tag, beside the
+        # container images `publish-images` pushed: the deploy bundle and its
+        # manifest, which `bun run setup` and the deploy page install from.
+        # Neither can be built without Flutter, which is the point of attaching
+        # them.
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -1287,13 +1315,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # The two an installer cannot proceed without are required. The disk
+          # The two a deploy cannot proceed without are required. The disk
           # image and the phone APK are attached when their jobs produced them.
           # A Release missing only a client download is worth far more than no
           # Release at all.
           assets=(
-            ".release-assets/frockbot-web-client-$VERSION.zip"
-            ".release-assets/frockbot-application-artifact-$VERSION.mjs"
+            ".release-assets/frockbot-deploy-$VERSION.json"
+            ".release-assets/frockbot-deploy-$VERSION.tar.gz"
           )
           for asset in "${assets[@]}"; do test -f "$asset"; done
           dmg=".release-assets/FrockBot-macos.dmg"
@@ -1728,12 +1756,10 @@ jobs:
 
   deploy-backend:
     name: Deploy FrockBot app
-    # Does not wait on `publish-images` yet: the hosted deploy builds its own
-    # images from the Dockerfiles, and a tag must keep shipping frockbot.com
-    # while the Docker Hub secrets are unset. Once the simple profile is
-    # announced, add `publish-images` here so a tag production runs is always a
-    # tag an installer can install (ADR 0028 step 5).
-    needs: verify
+    # Waits on `publish-images`, so a tag production runs is always a tag an
+    # install can pull (ADR 0028 step 5), though this deploy still builds its own
+    # images from the Dockerfiles.
+    needs: [verify, publish-images]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

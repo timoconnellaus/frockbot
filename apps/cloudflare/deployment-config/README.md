@@ -43,12 +43,22 @@ object in anybody's bucket.
 ## Simple deployment
 
 Nobody writes `deployments/simple.json` by hand. `bun run setup`
-(`scripts/setup.ts`) does: it picks the account, asks for the hostname, the admin
-emails and the Zero Trust team, writes the profile, runs this generator, creates
-the buckets and the index, mints the internal secrets, asks for the Fly token the
-Computer host needs, sets up the two Access applications — Allow on the app's
-hostname, Bypass on `/api` — downloads the client and the application
-artifact for the checked-out tag, and deploys the three Workers.
+(`scripts/setup.ts`) writes it, in this order:
+
+1. Picks the account.
+2. Asks for the hostname, the admin emails and the Zero Trust team, and writes
+   the profile.
+3. Mints the internal secrets.
+4. Asks for the Fly token the Computer host needs.
+5. Sets up the two Access applications: Allow on the app's hostname, Bypass on
+   `/api`.
+6. Downloads the checked-out tag's deploy bundle.
+7. Installs the bundle through the Cloudflare API: buckets, index, artifact,
+   the three Workers and their container applications. The profile's prefix is
+   the install name, and nothing is generated or built locally
+   ([`docs/deploy-bundles.md`](../../../docs/deploy-bundles.md)).
+
+The bundle itself is built by this generator, in the release.
 `bun run setup --dry-run` asks the same questions and then prints every command
 and every value it would write, running no wrangler command and reaching no
 network; add `--yes` to take the defaults instead of answering, which is how it
@@ -315,25 +325,27 @@ consequences worth knowing:
 Publishing needs the repository secrets `DOCKERHUB_USERNAME` and
 `DOCKERHUB_TOKEN` (a Docker Hub personal access token with write access to the
 `timoconnellaus` namespace, which is that account's username; no organisation
-is needed). While they are unset, `publish-images` skips with a warning and
-`deploy-backend` does not wait on it, so the hosted deployment keeps shipping.
-Once the simple profile is announced, `deploy-backend` gains `publish-images`
-in its `needs`, so a tag production is running is always a tag an installer can
-install.
+is needed). Both are set, `publish-images` fails without them, and
+`deploy-backend` waits on it, so a tag production is running is always a tag an
+installer can install.
 
-**The release assets**, by `release-assets` and attached by `github-release`:
+**The deploy bundle**, built by `release-assets` and attached by
+`github-release`: `frockbot-deploy-<version>.json`, the manifest, and
+`frockbot-deploy-<version>.tar.gz`. Together they hold the simple profile's three
+Workers prebuilt, the web client as the app's assets and the application
+artifact under its own sha256. The manifest names every Worker's modules,
+bindings, migrations, secrets and container images, with `{install}` where an
+install's name goes. `bun run setup` installs from it through the Cloudflare API,
+and so will the deploy page. Nothing is generated or built on the deployer's
+machine. The format, the gate that keeps an update on the same namespaces and
+the proof are in [`docs/deploy-bundles.md`](../../../docs/deploy-bundles.md).
 
-| Asset                                         | What it is                                                                                                               |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `frockbot-web-client-<version>.zip`           | `apps/cloudflare/dist/web` — unpack into it, and the generated config's `assets.directory` is the app Worker's payload   |
-| `frockbot-application-artifact-<version>.mjs` | `dist/artifacts/foundation-v1.mjs` — put in the `APPLICATION_ARTIFACTS` bucket under `applications/<its own sha256>.mjs` |
-
-The artifact's key is its own sha256, and a generated config carries the
-placeholder `"DEFAULT_APPLICATION_HASH": "foundation-v1"` from the tracked file
-unless `--application-hash` names the real one. `bun run setup` passes it once it
-has computed the digest of the artifact it downloaded; `deploy-backend` rewrites
-the written file in place instead, in its `Configure application artifact` step. A
-Worker whose var still says `foundation-v1` looks for an object that is not there.
+A generated config still carries the placeholder
+`"DEFAULT_APPLICATION_HASH": "foundation-v1"` from the tracked file unless
+`--application-hash` names the real one. `deploy-backend` rewrites the written
+file in place in its `Configure application artifact` step, and the bundle build
+passes the artifact's digest. A Worker whose var still says `foundation-v1` looks
+for an object that is not there.
 
 `frockbot.apk` is also attached, by `patch-android` when the tag cut a full release and by `android-apk` otherwise. It is the hosted phone app,
 not an installer asset: `bun run setup` does not download it, and a deployer
