@@ -157,7 +157,7 @@ export function createConnectFeature(
         ...(config.permitConnection || config.requirePlan
           ? {
               permit: async () =>
-                (await planRefusal(config)) === undefined &&
+                (await planRefusal(config)) ??
                 (!config.permitConnection || (await config.permitConnection())),
             }
           : {}),
