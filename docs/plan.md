@@ -125,7 +125,7 @@ A second deployment profile anyone installs into their own Cloudflare account wi
 
 ## Planned: enthusiast setup
 
-Choose where the Computer runs (FrockBot's, your own Sprites, your own server, or a VM on your Mac), choose how each model role is connected on one AI setup screen, and a setup chooser on the marketing site. Proposed, with open questions: [`enthusiast-setup-plan.md`](enthusiast-setup-plan.md).
+Every part of FrockBot can be FrockBot's or yours: the app (self-hosted with a Deploy button), the Computer (your Sprites, server or Mac), model providers per job, Jev on Workers AI, voice, search, image and connected apps. A US$5 BYO plan, a setup chooser on the marketing site, and FrockBot for Teams for organisations. Decided, with open questions: [`enthusiast-setup-plan.md`](enthusiast-setup-plan.md).
 
 ## Startup and Memory implementation handoff
 

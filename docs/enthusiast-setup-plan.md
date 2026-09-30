@@ -1,18 +1,53 @@
 # Enthusiast setup plan
 
-**Status:** proposed. Nothing here is built yet, and the open questions at the end need answers before the first cut starts.
+**Status:** proposed and discussed, not built. The decisions below were settled on 30 September 2026; the open questions at the end are what is left.
 
-**Why:** FrockBot's differentiator is being the most useful Bot for people who like to tinker. The zero-configuration default stays exactly as it is. Configuration that extends reach is what this plan adds, in three places:
-
-1. **Where the Computer runs.** Today every account gets FrockBot's own cloud Computer. A User may instead run it on their own Sprites account, their own VPS, or a virtual machine on the desktop the app runs on.
-2. **How each model is connected.** Today a User can choose one thing: the Bot's conversational model. Every other model use (summaries, specialists, Jev, voice, image) is fixed. A User should see every model FrockBot uses, and choose how each one is connected.
-3. **A setup chooser on the marketing site.** A visitor picks how they'd like FrockBot set up and sees what they get, what it costs and how to start.
-
-Parts 1 and 2 are independent and can be built in either order. Part 3 can ship first, as long as it marks what is not built yet.
+**Why:** FrockBot's differentiator is being the most useful Bot for people who like to tinker, and a product organisations can run themselves. The zero-configuration default stays exactly as it is. What this plan adds is the ability to replace any part of FrockBot with your own, and pay only for what you use of ours.
 
 ---
 
-## 1. Where your Computer runs
+## 1. The model
+
+**A FrockBot account is an identity and a credit wallet.** Every service a Bot uses is either **FrockBot's**, paid from credit, or **yours**: your key, your account or your machine. The person chooses per service.
+
+| Service                                  | FrockBot's             | Yours                                                                               |
+| ---------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------- |
+| **App** (conversation, memory, Routines) | frockbot.com           | Self-hosted in your Cloudflare account ([§6](#6-self-hosting))                      |
+| **Computer**                             | FrockBot's Computer    | Your Sprites, Your server, Your Mac ([§3](#3-where-your-computer-runs))             |
+| **Models**                               | Frock AI               | Any connected provider, Cloudflare, or a local model ([§4](#4-models-and-services)) |
+| **Jev**                                  | FrockBot's Jev         | Your Cloudflare account's Workers AI                                                |
+| **Voice calls**                          | Gemini Live on our key | Your Gemini or OpenAI key                                                           |
+| **Dictation**                            | Our transcription      | Your key, or on-device in the Mac app                                               |
+| **Web search**                           | Brave on our key       | Your search key                                                                     |
+| **Image generation**                     | Our image model        | Your image provider key                                                             |
+| **Connected apps**                       | Our Composio           | Your Composio key                                                                   |
+
+Rules that hold across every service:
+
+- **Never a silent fallback.** When your own provider, key or machine fails or runs out, the Bot says so and stops that piece of work. It never switches to FrockBot's service and spends credit the person did not choose to spend.
+- **Secrets stay server-side,** as today. Your keys are stored encrypted and attached to the one call that needs them.
+- **Self-hosted installs can still use FrockBot's services** by linking a FrockBot account ([§6](#6-self-hosting)), paying from credit alone.
+
+---
+
+## 2. Plans and billing
+
+| Plan         | Price         | Includes                                                                                                                | Trial                  |
+| ------------ | ------------- | ----------------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| **BYO**      | US$5 a month  | Hosting, FrockBot's Jev (fair use up to US$2 of Jev a month), and connected apps through our Composio. No usage credit. | None                   |
+| **Standard** | US$20 a month | As today: US$20 of usage credit a month                                                                                 | 7 days, US$3 of credit |
+| **Plus**     | US$50 a month | As today: US$60 of usage credit a month                                                                                 | 7 days, US$3 of credit |
+
+- **Anything else of ours is pay as you go.** A BYO account that uses FrockBot's Computer, Frock AI, voice or search pays from top-ups, at the same rates as today.
+- **Standard and Plus people can bring their own too.** Their included credit then simply goes further.
+- **The setup suggests a plan; the person picks.** The marketing chooser and the app recommend a plan from the setup (all yours → BYO; any of our Computer or models → Standard). Changing setup later suggests a change of plan but never makes one.
+- **Jev fair use on BYO.** Past US$2 of Jev in a month, Jev use draws from credit like any other service. With no credit, Turns that need Jev are refused with a message saying why, which follows from Jev having no permissive failure mode.
+- **A linked self-hosted install needs credit, not a plan.** Top-ups must become spendable without a subscription for these accounts. Today purchased credit needs a paid subscription (`docs/billing.md`).
+- **Payments stay in `PaymentsPackageV1`.** The BYO plan is one more entry in `STRIPE_PLAN_V1`'s `subscriptions`, with no trial and no included credit. Included Jev and Composio are overhead the plan covers, as memory embeddings are today.
+
+---
+
+## 3. Where your Computer runs
 
 ### Today
 
@@ -30,7 +65,7 @@ Parts 1 and 2 are independent and can be built in either order. Part 3 can ship 
 | **FrockBot's Computer** (default) | Today's hosted Computer: Sprites now, Incus later ([plan](incus-computer-host-plan.md)) | Yes                                           | FrockBot balance         |
 | **Your Sprites**                  | The same Fly host, but calling Sprites with the User's own Fly API token                | As Sprites is                                 | The User's Fly account   |
 | **Your server**                   | Any Linux VPS or home server the User controls                                          | While the server is up                        | The User                 |
-| **This computer**                 | A Linux VM the desktop app runs on the User's own Mac                                   | While the Mac is awake and the app is running | Nobody                   |
+| **Your Mac**                      | A Linux VM the desktop app runs on the User's own Mac                                   | While the Mac is awake and the app is running | Nobody                   |
 
 All four present the same Computer to the Bot: a shell, files, a browser, and (where the host has one) a desktop the User can watch and take over. The Bot does not know which one it has, apart from what the capabilities say.
 
@@ -43,7 +78,9 @@ Two host implementations cover all four choices, not four.
 **B. A tethered host, `computer/tether`.** A small agent program, `frockbot-computer`, is installed on the User's machine. It dials **out** to FrockBot over a WebSocket, so it works behind NAT and needs no open ports, DNS or TLS certificate. It serves the same primitives the on-Sprite runtime does today: exec, files, processes, browser, screenshot and, when installed with a desktop, the viewer and control. The cloud side is a `ComputerHostV1` whose session calls travel over that socket.
 
 - **Your server:** a one-line installer (`curl … | sh`) installs the agent and its packages (Chromium, and optionally Xvfb, a window manager and a VNC server for the desktop), then prints a pairing code. It runs as its own unprivileged user under systemd.
-- **This computer:** the Mac app creates a Linux VM with Apple's Virtualization framework, from an image FrockBot publishes, and runs the same agent inside it. Pairing is automatic because the app is already signed in. The Bot's commands run inside the VM, never on the Mac itself, so untrusted code still gets its own boundary.
+- **Your Mac:** the Mac app creates a Linux VM with Apple's Virtualization framework, from an image FrockBot publishes, and runs the same agent inside it. Pairing is automatic because the app is already signed in. The Bot's commands run inside the VM, never on the Mac itself, so untrusted code still gets its own boundary.
+
+The same socket carries local model calls ([§4](#local-models)): the agent on Your server, and the Mac app itself, can pass a model request to a local OpenAI-compatible endpoint.
 
 Pairing reuses `app/machine`'s pairing and socket transport, not its tool semantics. A tethered Computer is the Bot's machine; there is no approval per command, exactly as on FrockBot's own Computer.
 
@@ -56,7 +93,7 @@ The on-Sprite runtime (`computer/fly/runtime.ts`, about 2,500 lines of layout an
 - **Offline is a normal state.** When a tethered Computer is not connected, a Computer tool call fails fast with "Your computer is offline". The model sees that as the tool result; nothing waits. A Routine whose work needs the Computer reports the same thing in its run. The Computer settings page shows the connection state and when the machine was last seen.
 - **Switching host is a replace, not a migration.** Switching tears down the old assignment (with the existing "Delete my Computer" path where the old host supports it) and provisions the new one fresh. The settings page says clearly what is lost. Carrying files between hosts is a possible later step, not this plan.
 - **Connected accounts still never touch the machine.** The egress proxy that attaches connected-account credentials stays in the cloud. The tether agent routes proxied commands back through the socket, so a User's own VPS never holds a connected-app secret either.
-- **Billing.** Computer time on a User's own machine or own Sprites does not draw from the FrockBot balance. Pricing copy changes with it.
+- **Billing.** Computer time on a User's own machine or own Sprites does not draw from FrockBot credit. See [Plans and billing](#2-plans-and-billing).
 
 ### Settings UI
 
@@ -65,7 +102,7 @@ The Computer page (`computer/settings.dart`) gains a **Where it runs** section a
 - **FrockBot's Computer:** nothing to set up.
 - **Your Sprites:** paste a Fly token, test it, done.
 - **Your server:** shows the install command and waits for the pairing, then shows the machine's name, OS and whether it has a desktop.
-- **This computer:** desktop app only. It shows the disk and memory the VM will use, downloads the image, and starts it.
+- **Your Mac:** desktop app only. It shows the disk and memory the VM will use, downloads the image, and starts it.
 
 ### Cuts
 
@@ -76,111 +113,158 @@ Each cut leaves `main` shippable.
 3. **Shared Linux runtime.** `computer/fly/runtime.ts` moves to `computer/linux-runtime`, with no behaviour change, proven by the existing Fly tests.
 4. **Tether host and agent, headless.** `computer/tether`, the `frockbot-computer` agent and the installer, running exec, files, processes, browser and screenshot. It must pass `computer/host-contract.test.ts`. Offline handling ships here.
 5. **Tether desktop.** The viewer relay and control on a tethered host installed with a desktop.
-6. **This computer.** The Mac app's VM on the Virtualization framework, running the cut 4–5 agent.
+6. **Your Mac.** The Mac app's VM on the Virtualization framework, running the cut 4–5 agent.
 
 ---
 
-## 2. How each model is connected
+---
+
+## 4. Models and services
 
 ### Today
 
 - **Connections** are per account (`providers/model-connections/user.ts`): 28 catalog providers with an API key, OAuth sign-in for some, Ollama Cloud, Frock AI built in, and DeepSeek served by a Plugin.
-- **The conversational model** is the only choice a User makes. It resolves Bot override → account default (`user.accountModel`) → platform model, in `resolveEffectiveBotModelV1` (`core/configuration/index.ts`).
-- **Everything else is fixed:** compaction uses the first provider with a `summaryModel` (Frock AI's `@frock/structured`); the writing, coding, thinking and vision specialists are Frock AI gateway routes; Jev is a hosted client on a pinned model with a deployment key (`app/supervision/jev.ts`); voice, dictation and image are wired directly to their vendors.
-- **Setting up a model** is split across three screens: Marketplace (add a provider), Provider accounts (key or sign-in), and Models (one default-model select).
+- **The conversational model** is the only choice a User makes: Bot override → account default (`user.accountModel`) → platform model, in `resolveEffectiveBotModelV1` (`core/configuration/index.ts`).
+- **Everything else is fixed.** Compaction uses Frock AI's `@frock/structured`. The writing, coding, thinking and vision specialists are Frock AI gateway routes. Jev is TypeSafe's hosted API on a deployment key (`app/supervision/jev.ts`). Voice uses Gemini Live, dictation OpenAI's transcription, image Workers AI Flux, search Brave.
+- **Setting up a model** is split across three screens: Marketplace, Provider accounts and Models.
 
-### Model roles
+### Providers first, then jobs
 
-A **Model role** is one job FrockBot uses a model for. Each role has a default, a set of capabilities a model must have to fill it, and a binding the User may set.
+A person chooses **which providers they use**, and FrockBot chooses the model for each job from those providers. They can **pin a model for any job** when they care.
 
-| Role                    | Used for                                                         | Must support                                 | Selectable in this plan                      |
-| ----------------------- | ---------------------------------------------------------------- | -------------------------------------------- | -------------------------------------------- |
-| Chat                    | The Bot's own conversation                                       | Tools, streaming                             | Yes (as today, now one row among the others) |
-| Writing                 | The writing specialist                                           | Streaming                                    | Yes                                          |
-| Coding                  | The coding specialist                                            | Tools                                        | Yes                                          |
-| Thinking                | The thinking specialist                                          | Tools                                        | Yes                                          |
-| Vision                  | The vision specialist, and reading images                        | Image input                                  | Yes                                          |
-| Summary                 | Compaction and summaries                                         | Structured output                            | Yes                                          |
-| Jev                     | Supervision: reviewing responses and calls, choosing who replies | Structured output, and passing the Jev evals | Open question 1                              |
-| Voice, dictation, image | Their own vendor protocols                                       | —                                            | No. Shown read-only, with what serves them   |
+The choosing is Jev's. Jev already classifies a Turn's work; it picks the job (chat, writing, coding, thinking, vision, summary) and the model for it from the person's enabled providers. On an install whose Jev is its own Cloudflare account's, that choosing runs on the person's own Jev too.
 
-Roles are account-shaped: every Bot uses the account's roles. A Bot may still override its own Chat model, which is the one per-Bot exception that exists today.
+| Job         | Used for                         | Must support                |
+| ----------- | -------------------------------- | --------------------------- |
+| Chat        | The Bot's own conversation       | Tools, streaming            |
+| Writing     | Drafts, emails, long text        | Streaming                   |
+| Coding      | Scripts and code on the Computer | Tools                       |
+| Thinking    | Hard problems                    | Tools                       |
+| Vision      | Reading images                   | Image input                 |
+| Summaries   | Compaction and memory extraction | Structured output           |
+| Voice calls | Live spoken conversation         | A real-time speech protocol |
+| Dictation   | Speech to text in the composer   | Transcription               |
 
-### Shape
+Image generation and web search are services rather than jobs: one provider each, chosen on the same screen.
 
-- **One record.** `user.modelRoles: Partial<Record<ModelRoleId, ModelBindingV1>>` replaces `user.accountModel`; `accountModel` is deleted, not migrated, with a scoped cleanup of stored test data. An unset role uses the platform default for that role.
-- **One resolver.** `resolveModelRoleV1(role, bot)` generalises `resolveEffectiveBotModelV1`: Bot override (Chat only) → account role → platform default. A binding whose connection is gone, or whose model lacks the role's capabilities, falls back to the default and records `fallback.from`, exactly as Chat does today.
-- **The callers use it.** Compaction reads the Summary role instead of scanning for a `summaryModel`. A specialist Task reads its role instead of a fixed gateway route; Frock AI's routes become those roles' platform defaults.
-- **Capability checks use the catalog's existing flags** (`vision`, `structuredOutput`, tool support). The model picker filters by the role it is choosing for, and says why a model is missing rather than hiding it silently.
-- **A local model** (Ollama or LM Studio) running on a tethered Computer from part 1 can serve any role. The request travels over the tether socket to `localhost` on the User's machine. It is still a model call carrying a `requestId` idempotency key, and costs nothing. This is the one place parts 1 and 2 meet; it waits until the tether host exists.
+- **One record.** `user.modelProviders` (the enabled providers, in preference order) and `user.jobPins: Partial<Record<JobId, ModelBindingV1>>` replace `user.accountModel`, which is deleted with a scoped cleanup of test data. A Bot may still pin its own Chat model, the one per-Bot exception that exists today.
+- **One resolver.** `resolveJobModelV1(job, bot)`: Bot pin (Chat only) → account pin → Jev's pick among enabled providers that meet the job's needs. A pin whose connection is gone or whose model lacks the job's capabilities is reported to the person, never replaced by a Frock AI model unless Frock AI is one of their enabled providers.
+- **Capability checks use the catalog's existing flags** (`vision`, `structuredOutput`, tools). The picker says why a model cannot do a job rather than hiding it.
+
+### Cloudflare as a provider
+
+Jev is available on Workers AI as `typesafe/jev`, through an account's AI binding, with no API key, billed to that Cloudflare account.
+
+- **FrockBot's own deployment moves Jev to Workers AI.** `hostedJevClientV1` gains a Workers AI transport beside TypeSafe's API; the deployment's AI binding replaces `JEV_API_KEY`. A self-hosted install gets Jev from its own account with nothing to configure.
+- **A person on frockbot.com can Connect Cloudflare,** following Cloudflare OS's AI Gateway billing flow: sign in with Cloudflare over OAuth, choose the account, and FrockBot routes that person's Jev, Workers AI models and AI Gateway providers through their account's default AI Gateway. Usage bills their Cloudflare credits; FrockBot never holds that money. This is how "bring your own Jev" works on frockbot.com.
+
+### Local models
+
+A local model runs on the person's own hardware and is reached through something of theirs that already holds a socket to FrockBot:
+
+- **The Mac app** passes a model request to a local OpenAI-compatible endpoint on the Mac: Ollama, LM Studio or [mesh-llm](https://github.com/Mesh-LLM/mesh-llm)'s `localhost:9337`.
+- **Your server's agent** ([§3](#3-where-your-computer-runs)) does the same on the server.
+
+It is still a model call carrying a `requestId` idempotency key, and it costs nothing. While the Mac or server is offline, a job pinned to it is reported as unavailable. mesh-llm is what lets a person pool several of their own machines into one endpoint, the technique [Buzz](https://github.com/block/buzz) uses for community compute; FrockBot needs nothing extra for it beyond speaking to the endpoint.
+
+### Voice and dictation
+
+- **Voice calls** become a job with its own provider: Gemini Live today, OpenAI Realtime beside it, each on FrockBot's key or the person's.
+- **Dictation** gains an on-device option in the Mac app, following [OpenWhispr](https://github.com/OpenWhispr/openwhispr): a bundled whisper.cpp or Parakeet model, downloaded on first use, so speech never leaves the Mac. Cloud dictation stays for the phone and the web.
 
 ### Settings UI: AI setup
 
-One screen replaces the Models page. It is where a User answers "which model does what, and how is it connected".
+One screen replaces the Models page.
 
-- **At the top, three presets:** _FrockBot handles it_ (every role on Frock AI; the default), _Use my own keys_ (every role on the User's connected providers, with the best available model per role), and _Everything local_ (every role on a local model, once part 1 cut 4 exists). A preset fills the roles; the User can still change any row after.
-- **One row per role:** the role's name, what it is for in a few words, and what serves it now, for example "Writing — Claude Sonnet via your Anthropic key". A row that fell back says so, with the reason.
-- **Tapping a row** opens one sheet with two steps: _How it's connected_ (Frock AI, one of the User's connections, a new provider, or a local model), then _Which model_, filtered to models that can fill the role. Adding a provider from here runs the existing key or sign-in form inline, so a User never leaves the sheet to set up a connection.
-- **Below the roles,** the connected provider accounts, as the Provider accounts page lists them today.
+- **At the top, three presets:** _FrockBot handles it_ (every job on Frock AI; the default), _Use my own providers_, and _Everything local_ (once local models exist).
+- **Your providers:** the connected providers as a reorderable list, each with its state. Adding one runs the existing key or sign-in form inline; Cloudflare is one of them.
+- **Jobs:** one row per job, showing what serves it now ("Writing — chosen by Jev from your providers", or a pinned model). Tapping a row pins or unpins a model, filtered to models that can do the job.
+- **Services:** Jev, web search, image generation, voice, dictation and connected apps, each FrockBot's or yours.
 
-It stays a projection in the settings-document family: the `modelsSettingsFrame` in `app/settings/settings-frame.ts` grows a section per role, and `modelsSettingsCommand` accepts `role.<id>` keys alongside a `preset` command. The options query (`/api/settings/models/options`) takes a `role` to filter by.
+It stays a projection in the settings-document family: `modelsSettingsFrame` grows the provider list, the job rows and the service rows, and `/api/settings/models/options` takes a `job` to filter by.
 
 ### Cuts
 
-1. **Roles and resolver, Chat only.** `modelRoles` replaces `accountModel` (with its cleanup), `resolveModelRoleV1` replaces the Chat resolver, and the Models page shows the Chat row from the new frame. No visible behaviour change.
-2. **Summary and specialists.** The Summary, Writing, Coding, Thinking and Vision roles, their capability checks and their callers.
-3. **AI setup screen.** The role rows, the two-step sheet with inline provider setup, the read-only rows, and the presets that exist so far.
-4. **Jev,** if open question 1 says yes.
-5. **Local models,** after part 1 cut 4.
+1. **Providers and jobs, Chat only.** `modelProviders` and `jobPins` replace `accountModel` with its cleanup; `resolveJobModelV1` replaces the Chat resolver. No visible change.
+2. **Jev on Workers AI** for FrockBot's own deployment.
+3. **The remaining jobs,** their capability checks and their callers: summaries, the specialists, then voice and dictation.
+4. **AI setup screen,** with presets, providers, jobs and services.
+5. **Connect Cloudflare.**
+6. **Your own search, image and Composio keys.**
+7. **Local models** through the Mac app, then Your server.
+8. **On-device dictation** in the Mac app.
 
 `docs/architecture.md` §7 still describes the account model as a User-scoped Package setting; cut 1 corrects it.
 
 ---
 
-## 3. The setup chooser on the marketing site
+## 5. The setup chooser on the marketing site
 
-### What it is
+A `/setup` page, with a homepage section linking to it. The visitor answers four questions and the result updates as they go:
 
-An interactive section, _Set up FrockBot your way_, on the homepage, with a full version at `/setup`. The visitor answers four questions and a diagram and summary update as they go:
+1. **Where FrockBot runs:** frockbot.com, or your own Cloudflare account (coming soon until [§6](#6-self-hosting) ships).
+2. **Where your computer runs:** FrockBot's, Your Sprites, Your server, Your Mac.
+3. **Which model providers you use:** Frock AI, and any of the providers people connect most (Anthropic, OpenAI, OpenRouter, Google, Cloudflare, local), with a per-job view for anyone who opens it.
+4. **Your other services:** Jev, voice, dictation, web search, image generation and connected apps, each FrockBot's or yours.
 
-1. **Where FrockBot runs:** frockbot.com, or your own Cloudflare account ([ADR 0028](adr/0028-open-deployment.md)).
-2. **Where your Computer runs:** the four choices from part 1.
-3. **How your models are connected:** FrockBot handles it, your own keys, local models, or a mix, with a per-role view for anyone who opens it.
-4. **Which apps you'll use it from:** phone, desktop, web.
+The result shows a diagram of who runs what, **the suggested plan and its price**, what is paid elsewhere, what the person gains and gives up, and the steps to start. A coming-soon choice is labelled and its steps greyed, and the result suggests starting on FrockBot's service today.
 
-The result shows:
+The page is static HTML with one script under the site's CSP, rendered from `content/setup-options.json`, which carries each option's status (`available` or `coming-soon`). A test asserts a coming-soon option is never offered as a step to follow. Each cut that lands updates that file in the same pull request. The design is the Setup Chooser canvas.
 
-- **A diagram** of the chosen setup, drawn in the site's product style: the apps, FrockBot, the Computer and the models, with each part labelled by where it runs.
-- **What it costs:** the FrockBot plan, plus what the visitor pays elsewhere (their VPS, their Fly account, their model provider), in plain words rather than a calculator.
-- **What you give up or gain,** in a sentence each: for example "This computer" is free but only works while your Mac is awake.
-- **How to start:** the real steps for that setup, with the right call to action (download, sign up, or `bun run setup`).
+---
 
-### Constraints
+## 6. Self-hosting
 
-- **Plain static site.** `apps/marketing` is hand-written HTML, CSS and vanilla JS under a strict CSP (`script-src 'self'`, no inline script or style). The chooser is one `setup.js` and markup in the page, following `how-it-works/capabilities.js`.
-- **Driven by data, and honest.** The options, their costs and their **status** (`available`, `coming-soon`) live in `content/setup-options.json`, rendered into the page the way `content/capabilities.json` is, with a `--check` step in the build. A `coming-soon` option is shown and labelled, never offered as a step to follow. A test asserts that, following the store-badge rule. The chooser can therefore ship before parts 1 and 2 finish, and each cut that lands flips its option to `available`.
-- **Works without JavaScript:** the default setup is rendered in the HTML, and the questions are ordinary radio inputs.
-- **Pricing copy stays true.** The homepage pricing says every plan's Computer time draws from the balance. That copy, and its test, change in the same cut that lets a Computer run elsewhere.
+Modelled on how Cloudflare OS deploys ([repo](https://github.com/cloudflare/cloudflare-os), [starter](https://github.com/cloudflare/cloudflare-os-starter)).
+
+- **A Deploy button at frockbot.com/deploy.** A hosted flow signs in to Cloudflare, deploys a pinned FrockBot release into the person's account from prebuilt artifacts (nothing built locally), creates the Cloudflare Access application, sets the person as the first admin, and hands them the address. It runs on `workers.dev` by default.
+- **Sign-in is Cloudflare Access.** The Access policy decides who gets in, as the simple deployment already does ([ADR 0028](adr/0028-open-deployment.md)).
+- **Onboarding happens in the app.** The first visit walks through the same choices as the marketing chooser: link a FrockBot account (optional), then Computer, providers and services. Branding and admin settings are changed in the app without a redeploy.
+- **Jev comes from the account's own Workers AI.** Nothing to configure.
+- **Linking a FrockBot account** is an OAuth sign-in to frockbot.com from the self-hosted install. It grants that install use of FrockBot's services (Computer, Frock AI, voice, search, image, Composio), billed to that account's credit. No plan is needed.
+- **Updates** are offered by the deploy flow: "A new release is available", one click to deploy it over the same Workers.
+- **The repository stays the advanced path:** `bun run setup` for a custom domain, code changes or reusing existing resources, with a checklist for moving an install made by the Deploy button into it.
 
 ### Cuts
 
-1. The section on `/setup` with every choice from today's product available and every planned choice marked coming soon, plus a teaser on the homepage linking to it.
-2. Each part 1 and part 2 cut that lands updates `setup-options.json` in the same pull request.
+1. **Jev on Workers AI** (shared with §4 cut 2).
+2. **Prebuilt release artifacts** a deploy can use without a build.
+3. **frockbot.com/deploy** and its Access setup.
+4. **In-app onboarding** for a fresh install.
+5. **Linking a FrockBot account,** and credit spendable without a plan.
+6. **One-click updates.**
+
+---
+
+## 7. Enterprise
+
+The code stays MIT. Organisations pay for what surrounds it:
+
+1. **FrockBot for Teams, a commercially licensed add-on.** The features only organisations need live in a separately licensed package beside the MIT core: organisations and teams (today a tenant is one User, so this is new product), SSO and SCIM, organisation admin and policy, audit export and retention, and shared Bots and Group Chats across people.
+2. **Support and an SLA:** a named contact, response times, early security advisories and long-term-support releases to pin.
+3. **Managed deployment in their Cloudflare account:** FrockBot installs, upgrades and monitors it; they own the data.
+4. **A white-label and trademark licence** on request. MIT grants no right to the FrockBot name; [ADR 0038](adr/0038-white-label-deployments.md) already supports white-label deployments.
+5. **A managed custom installation:** a repository for that organisation, built on the white-label path, with its own characters and avatars, branding, extra bindings and custom Packages, which FrockBot maintains and deploys for them.
+
+Before dual licensing anything, contributions need a contributor licence agreement; that is easiest to add before outside contributions arrive.
 
 ---
 
 ## Suggested order
 
-1. **Part 3, cut 1:** the chooser, with coming-soon labels. It is small, self-contained, and puts the direction in front of people early.
-2. **Part 2, cuts 1–3:** model roles and the AI setup screen. Mostly app and settings code on existing machinery.
-3. **Part 1, cuts 1–2:** per-account host choice and Your Sprites. Small, because the Fly host exists.
-4. **Part 1, cuts 3–5:** the tether host, which is the largest piece of new work here.
-5. **Part 1, cut 6, and part 2, cut 5:** this computer and local models.
+1. **The marketing chooser,** with coming-soon labels ([§5](#5-the-setup-chooser-on-the-marketing-site)).
+2. **Jev on Workers AI** (§4 cut 2), which unblocks self-hosting and Connect Cloudflare.
+3. **Providers and jobs, and the AI setup screen** (§4 cuts 1, 3, 4).
+4. **The BYO plan** ([§2](#2-plans-and-billing)).
+5. **Per-account Computer choice and Your Sprites** (§3 cuts 1–2).
+6. **Self-hosting with the Deploy button** ([§6](#6-self-hosting)).
+7. **The tethered host, Your Mac and local models** (§3 cuts 3–6, §4 cuts 7–8).
+8. **FrockBot for Teams,** starting with organisations as a concept.
 
 ## Open questions
 
-1. **Can a User choose Jev's model?** Jev runs on a pinned, evaluated model through its own hosted client, and the supervision plan gives it no permissive failure mode. Letting a User swap it means routing Jev through the normal connection layer and gating a choice on passing the Jev evals. Recommendation: not in the first pass; show Jev as a read-only row.
-2. **What does BYO Computer do to pricing?** Is there a cheaper plan for someone who brings their own Computer and their own keys, or is the plan price unchanged and only the balance draw goes away?
-3. **Does "This computer" need Windows and Linux desktops at launch,** or is macOS (Virtualization framework) enough for the first release?
-4. **Must a server Computer have a desktop?** Recommendation: the installer offers both, and a headless Computer simply has no viewer, which the capabilities already express.
-5. **Should the chooser also cover self-hosting FrockBot itself,** or stay about the hosted product? Recommendation: include it, since the enthusiasts this is aimed at are the self-hosting audience.
+1. **Composio for self-hosters.** Does a linked self-hosted install get our Composio from credit, or does it need the BYO plan, as frockbot.com does?
+2. **What "your Composio key" means for the connected-apps catalog,** which today is curated against the deployment's key.
+3. **Voice on your own key:** Gemini Live only at first, or OpenAI Realtime too?
+4. **How Jev picks a model per job:** a new Jev judgment on each Turn, or one pick per job cached until providers change?
+5. **Teams pricing,** and whether support, managed deployment and custom installations are priced per seat, per deployment or per contract.
