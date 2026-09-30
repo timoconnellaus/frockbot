@@ -225,6 +225,14 @@ The page is static HTML with one script under the site's CSP, rendered from `con
 
 ---
 
+### Choices carry over
+
+- **Saved on the visitor's device.** The chooser keeps the visitor's choices in local storage (`frockbot-setup-v1`), so a return visit finds them as they were, with "Start over". Only choices are kept, never keys, and nothing is sent to FrockBot.
+- **Carried into setup in the link.** "Start with this setup" opens `bot.frockbot.com/setup` with the choices in the URL fragment, which browsers never send to a server. The app stores them before the sign-in redirect so they survive sign-in and checkout, and checkout starts on the suggested plan.
+- **Reviewed, never applied silently.** After sign-up, setup opens "Set up FrockBot the way you chose": each choice with what it still needs (nothing, a key, a sign-in, or "coming soon, Frock AI for now"), then Apply this setup or Start on Frock AI instead.
+- **Self-hosting reads it directly.** frockbot.com/deploy is on the same site as the chooser, so it reads the saved choices and passes them to the install's first run the same way.
+- **One shared, versioned format** is read by the chooser, the deploy page and the setup app. An unknown or retired value falls back to FrockBot's version of that part, with a note.
+
 ## 6. Self-hosting
 
 Modelled on how Cloudflare OS deploys ([repo](https://github.com/cloudflare/cloudflare-os), [starter](https://github.com/cloudflare/cloudflare-os-starter)).
