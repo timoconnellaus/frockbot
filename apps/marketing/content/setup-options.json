@@ -1,0 +1,664 @@
+{
+  "version": 1,
+  "host": [
+    {
+      "id": "cloud",
+      "name": "frockbot.com",
+      "description": "We run it for you. Sign in and go.",
+      "status": "available",
+      "ours": true
+    },
+    {
+      "id": "own",
+      "name": "Your Cloudflare account",
+      "description": "Press Deploy, sign in to Cloudflare, and it’s yours. Just you for now; teams are coming.",
+      "status": "coming-soon",
+      "account": "Cloudflare"
+    }
+  ],
+  "computer": [
+    {
+      "id": "frockbot",
+      "name": "FrockBot’s computer",
+      "description": "A cloud Linux desktop we run for you. Always on.",
+      "status": "available",
+      "ours": true
+    },
+    {
+      "id": "sprites",
+      "name": "Your Sprites",
+      "description": "The same computer, on your own Fly.io account.",
+      "status": "coming-soon",
+      "account": "Fly.io",
+      "connect": "key"
+    },
+    {
+      "id": "server",
+      "name": "Your server",
+      "description": "Any Linux VPS or home server. No open ports needed.",
+      "status": "coming-soon",
+      "account": "your server’s host"
+    },
+    {
+      "id": "mac",
+      "name": "Your Mac",
+      "description": "A Linux VM the Mac app runs for you, in the background.",
+      "status": "coming-soon",
+      "free": true
+    }
+  ],
+  "jobs": [
+    {
+      "id": "chat",
+      "name": "Chat",
+      "description": "Talking with you.",
+      "kind": "chat",
+      "status": "available",
+      "frockModel": "@frock/auto"
+    },
+    {
+      "id": "writing",
+      "name": "Writing",
+      "description": "Drafts, emails and long text.",
+      "kind": "chat",
+      "status": "coming-soon",
+      "frockModel": "@frock/writing",
+      "follows": true
+    },
+    {
+      "id": "coding",
+      "name": "Coding",
+      "description": "Scripts and code on the computer.",
+      "kind": "chat",
+      "status": "coming-soon",
+      "frockModel": "@frock/coding",
+      "follows": true
+    },
+    {
+      "id": "thinking",
+      "name": "Thinking",
+      "description": "Hard problems.",
+      "kind": "chat",
+      "status": "coming-soon",
+      "frockModel": "@frock/thinking",
+      "follows": true,
+      "needs": "reasoning"
+    },
+    {
+      "id": "vision",
+      "name": "Vision",
+      "description": "Reading images.",
+      "kind": "chat",
+      "status": "coming-soon",
+      "frockModel": "@frock/vision",
+      "follows": true,
+      "needs": "vision"
+    },
+    {
+      "id": "summaries",
+      "name": "Summaries",
+      "description": "Keeping long chats short.",
+      "kind": "chat",
+      "status": "coming-soon",
+      "frockModel": "@frock/structured",
+      "follows": true
+    },
+    {
+      "id": "jev",
+      "name": "Jev",
+      "description": "Checks every step your bots take.",
+      "kind": "jev",
+      "status": "coming-soon"
+    },
+    {
+      "id": "voice",
+      "name": "Voice calls",
+      "description": "Talking with a bot, live.",
+      "kind": "voice",
+      "status": "coming-soon"
+    },
+    {
+      "id": "dictation",
+      "name": "Dictation",
+      "description": "Speaking instead of typing.",
+      "kind": "dictation",
+      "status": "coming-soon"
+    },
+    {
+      "id": "image",
+      "name": "Images",
+      "description": "Pictures your bots make for you.",
+      "kind": "image",
+      "status": "coming-soon"
+    }
+  ],
+  "providers": {
+    "chat": [
+      {
+        "id": "frock",
+        "name": "Frock AI",
+        "group": "FrockBot",
+        "status": "available",
+        "ours": true,
+        "models": [
+          ["@frock/auto", "Auto: the right model for each job", true, true],
+          ["@frock/writing", "Frock writing", false, true],
+          ["@frock/coding", "Frock coding", false, true],
+          ["@frock/thinking", "Frock thinking", true, true],
+          ["@frock/vision", "Frock vision", true, true],
+          ["@frock/structured", "Frock structured", false, false]
+        ]
+      },
+      {
+        "id": "openai",
+        "group": "Popular",
+        "status": "available",
+        "catalog": true
+      },
+      {
+        "id": "anthropic",
+        "group": "Popular",
+        "status": "available",
+        "catalog": true
+      },
+      {
+        "id": "google",
+        "group": "Popular",
+        "status": "available",
+        "catalog": true
+      },
+      {
+        "id": "openrouter",
+        "group": "Popular",
+        "status": "available",
+        "catalog": true
+      },
+      {
+        "id": "cloudflare-workers-ai",
+        "group": "Popular",
+        "status": "available",
+        "catalog": true,
+        "includedWhenSelfHosted": true
+      },
+      {
+        "id": "amazon-bedrock",
+        "group": "All providers",
+        "status": "available",
+        "catalog": true
+      },
+      {
+        "id": "ant-ling",
+        "group": "All providers",
+        "status": "available",
+        "catalog": true
+      },
+      {
+        "id": "azure-openai-responses",
+        "group": "All providers",
+        "status": "available",
+        "catalog": true
+      },
+      {
+        "id": "baseten",
+        "group": "All providers",
+        "status": "available",
+        "catalog": true
+      },
+      {
+        "id": "cerebras",
+        "group": "All providers",
+        "status": "available",
+        "catalog": true
+      },
+      {
+        "id": "cloudflare-ai-gateway",
+        "group": "All providers",
+        "status": "available",
+        "catalog": true
+      },
+      {
+        "id": "deepseek",
+        "group": "All providers",
+        "status": "available",
+        "catalog": true
+      },
+      {
+        "id": "fireworks",
+        "group": "All providers",
+        "status": "available",
+        "catalog": true
+      },
+      {
+        "id": "google-vertex",
+        "group": "All providers",
+        "status": "available",
+        "catalog": true
+      },
+      {
+        "id": "groq",
+        "group": "All providers",
+        "status": "available",
+        "catalog": true
+      },
+      {
+        "id": "huggingface",
+        "group": "All providers",
+        "status": "available",
+        "catalog": true
+      },
+      {
+        "id": "minimax",
+        "group": "All providers",
+        "status": "available",
+        "catalog": true
+      },
+      {
+        "id": "minimax-cn",
+        "group": "All providers",
+        "status": "available",
+        "catalog": true
+      },
+      {
+        "id": "mistral",
+        "group": "All providers",
+        "status": "available",
+        "catalog": true
+      },
+      {
+        "id": "moonshotai",
+        "group": "All providers",
+        "status": "available",
+        "catalog": true
+      },
+      {
+        "id": "moonshotai-cn",
+        "group": "All providers",
+        "status": "available",
+        "catalog": true
+      },
+      {
+        "id": "nvidia",
+        "group": "All providers",
+        "status": "available",
+        "catalog": true
+      },
+      {
+        "id": "ollama-cloud",
+        "name": "Ollama Cloud",
+        "group": "All providers",
+        "status": "available",
+        "connect": "key"
+      },
+      {
+        "id": "opencode",
+        "group": "All providers",
+        "status": "available",
+        "catalog": true
+      },
+      {
+        "id": "radius",
+        "group": "All providers",
+        "status": "available",
+        "catalog": true
+      },
+      {
+        "id": "together",
+        "group": "All providers",
+        "status": "available",
+        "catalog": true
+      },
+      {
+        "id": "vercel-ai-gateway",
+        "group": "All providers",
+        "status": "available",
+        "catalog": true
+      },
+      {
+        "id": "xai",
+        "group": "All providers",
+        "status": "available",
+        "catalog": true
+      },
+      {
+        "id": "xiaomi",
+        "group": "All providers",
+        "status": "available",
+        "catalog": true
+      },
+      {
+        "id": "local",
+        "name": "Local models",
+        "group": "Your own",
+        "status": "coming-soon",
+        "free": true,
+        "models": [
+          ["ollama", "Ollama"],
+          ["lmstudio", "LM Studio"],
+          ["mesh-llm", "mesh-llm"]
+        ]
+      },
+      {
+        "id": "custom",
+        "name": "Custom endpoint",
+        "group": "Your own",
+        "status": "coming-soon",
+        "connect": "key",
+        "models": [["custom", "Any OpenAI-compatible model"]]
+      }
+    ],
+    "jev": [
+      {
+        "id": "frock",
+        "name": "Frock AI",
+        "group": "FrockBot",
+        "status": "available",
+        "ours": true,
+        "models": [["jev", "Jev"]]
+      },
+      {
+        "id": "cloudflare-workers-ai",
+        "name": "Cloudflare Workers AI",
+        "group": "Your accounts",
+        "status": "coming-soon",
+        "connect": "key",
+        "includedWhenSelfHosted": true,
+        "models": [["typesafe/jev", "typesafe/jev"]]
+      },
+      {
+        "id": "typesafe",
+        "name": "TypeSafe",
+        "group": "Your accounts",
+        "status": "coming-soon",
+        "connect": "key",
+        "models": [
+          ["jev-1.13", "Jev 1.13"],
+          ["jev-latest", "Jev Latest"]
+        ]
+      },
+      {
+        "id": "openrouter",
+        "name": "OpenRouter",
+        "group": "Your accounts",
+        "status": "coming-soon",
+        "connect": "sign-in",
+        "models": [
+          ["typesafe/jev-router", "Jev Router"],
+          ["typesafe/jev-1.13", "Jev 1.13"],
+          ["typesafe/jev-latest", "Jev Latest"]
+        ]
+      },
+      {
+        "id": "custom",
+        "name": "Custom",
+        "group": "Your own",
+        "status": "coming-soon",
+        "connect": "key",
+        "models": [["system-one", "Your model, through the System One adapter"]]
+      }
+    ],
+    "voice": [
+      {
+        "id": "frock",
+        "name": "Frock AI",
+        "group": "FrockBot",
+        "status": "available",
+        "ours": true,
+        "models": [["live", "Gemini Live"]]
+      },
+      {
+        "id": "google",
+        "name": "Google",
+        "group": "Your accounts",
+        "status": "coming-soon",
+        "connect": "key",
+        "models": [
+          ["gemini-3.8-live", "Gemini 3.8 Live"],
+          ["gemini-3.1-flash-live-preview", "Gemini 3.1 Flash Live Preview"]
+        ]
+      },
+      {
+        "id": "openai",
+        "name": "OpenAI",
+        "group": "Your accounts",
+        "status": "coming-soon",
+        "connect": "key",
+        "models": [["gpt-realtime-2.1", "GPT-Realtime-2.1"]]
+      }
+    ],
+    "dictation": [
+      {
+        "id": "frock",
+        "name": "Frock AI",
+        "group": "FrockBot",
+        "status": "available",
+        "ours": true,
+        "models": [["auto", "Auto"]]
+      },
+      {
+        "id": "device",
+        "name": "On your device",
+        "group": "Your own",
+        "status": "coming-soon",
+        "free": true,
+        "models": [
+          ["parakeet", "Parakeet (Mac)"],
+          ["whisper-cpp", "Whisper, via whisper.cpp (Mac)"],
+          ["apple", "Apple speech (iPhone)"]
+        ]
+      },
+      {
+        "id": "cloudflare-workers-ai",
+        "name": "Cloudflare Workers AI",
+        "group": "Your accounts",
+        "status": "coming-soon",
+        "connect": "key",
+        "includedWhenSelfHosted": true,
+        "models": [
+          ["@cf/openai/whisper-large-v3-turbo", "Whisper large v3 turbo"]
+        ]
+      },
+      {
+        "id": "openai",
+        "name": "OpenAI",
+        "group": "Your accounts",
+        "status": "coming-soon",
+        "connect": "key",
+        "models": [["gpt-live-transcribe", "gpt-live-transcribe"]]
+      },
+      {
+        "id": "groq",
+        "name": "Groq",
+        "group": "Your accounts",
+        "status": "coming-soon",
+        "connect": "key",
+        "models": [["whisper-large-v3-turbo", "Whisper large v3 turbo"]]
+      },
+      {
+        "id": "deepgram",
+        "name": "Deepgram",
+        "group": "Your accounts",
+        "status": "coming-soon",
+        "connect": "key",
+        "models": [["nova", "Nova"]]
+      },
+      {
+        "id": "elevenlabs",
+        "name": "ElevenLabs",
+        "group": "Your accounts",
+        "status": "coming-soon",
+        "connect": "key",
+        "models": [["scribe", "Scribe"]]
+      }
+    ],
+    "image": [
+      {
+        "id": "frock",
+        "name": "Frock AI",
+        "group": "FrockBot",
+        "status": "available",
+        "ours": true,
+        "models": [["flux", "Flux"]]
+      },
+      {
+        "id": "cloudflare-workers-ai",
+        "name": "Cloudflare Workers AI",
+        "group": "Your accounts",
+        "status": "coming-soon",
+        "connect": "key",
+        "includedWhenSelfHosted": true,
+        "models": [["flux", "Flux"]]
+      },
+      {
+        "id": "openai",
+        "name": "OpenAI",
+        "group": "Your accounts",
+        "status": "coming-soon",
+        "connect": "key",
+        "models": [["gpt-image", "GPT Image"]]
+      },
+      {
+        "id": "google",
+        "name": "Google",
+        "group": "Your accounts",
+        "status": "coming-soon",
+        "connect": "key",
+        "models": [
+          ["gemini-3.1-flash-lite-image", "Nano Banana 2 Lite"],
+          ["imagen", "Imagen"]
+        ]
+      },
+      {
+        "id": "openrouter",
+        "name": "OpenRouter",
+        "group": "Your accounts",
+        "status": "coming-soon",
+        "connect": "sign-in",
+        "models": [["google/gemini-3-pro-image", "Gemini 3 Pro Image"]]
+      },
+      {
+        "id": "local",
+        "name": "Local",
+        "group": "Your own",
+        "status": "coming-soon",
+        "free": true,
+        "models": [
+          ["draw-things", "Draw Things"],
+          ["comfyui", "ComfyUI"]
+        ]
+      }
+    ]
+  },
+  "search": [
+    {
+      "id": "frock",
+      "name": "FrockBot’s search",
+      "description": "Brave, on our account. Ready to use.",
+      "status": "available",
+      "ours": true
+    },
+    {
+      "id": "brave",
+      "name": "Brave",
+      "description": "Your Brave Search key.",
+      "status": "coming-soon",
+      "account": "Brave",
+      "connect": "key"
+    },
+    {
+      "id": "exa",
+      "name": "Exa",
+      "description": "Search built for AI, on your key.",
+      "status": "coming-soon",
+      "account": "Exa",
+      "connect": "key"
+    },
+    {
+      "id": "tavily",
+      "name": "Tavily",
+      "description": "Search and page extraction, on your key.",
+      "status": "coming-soon",
+      "account": "Tavily",
+      "connect": "key"
+    },
+    {
+      "id": "searxng",
+      "name": "SearXNG",
+      "description": "Your own metasearch server. Free.",
+      "status": "coming-soon",
+      "free": true
+    }
+  ],
+  "apps": [
+    {
+      "id": "frock",
+      "name": "FrockBot’s connected apps",
+      "description": "Gmail, Calendar, Notion and 200 more. Needs at least the BYO plan.",
+      "status": "available",
+      "ours": true
+    },
+    {
+      "id": "composio",
+      "name": "Composio",
+      "description": "The same apps, on your own Composio account.",
+      "status": "coming-soon",
+      "account": "Composio",
+      "connect": "key"
+    }
+  ],
+  "presets": [
+    {
+      "id": "just-works",
+      "name": "Just works",
+      "host": "cloud",
+      "computer": "frockbot",
+      "search": "frock",
+      "apps": "frock"
+    },
+    {
+      "id": "bring-my-keys",
+      "name": "Bring my keys",
+      "host": "cloud",
+      "computer": "frockbot",
+      "search": "frock",
+      "apps": "frock",
+      "jobs": {
+        "chat": ["openai", "gpt-5.5"],
+        "coding": ["openrouter"],
+        "voice": ["google"],
+        "dictation": ["openai"],
+        "image": ["openai"]
+      }
+    },
+    {
+      "id": "all-mine",
+      "name": "All mine",
+      "host": "cloud",
+      "computer": "server",
+      "search": "brave",
+      "apps": "composio",
+      "jobs": {
+        "chat": ["openrouter"],
+        "coding": ["local", "ollama"],
+        "jev": ["openrouter"],
+        "voice": ["google"],
+        "dictation": ["device"],
+        "image": ["local"]
+      }
+    },
+    {
+      "id": "self-hosted",
+      "name": "Self-hosted",
+      "host": "own",
+      "computer": "sprites",
+      "search": "brave",
+      "apps": "composio",
+      "jobs": {
+        "chat": ["cloudflare-workers-ai", "@cf/moonshotai/kimi-k2.6"],
+        "jev": ["cloudflare-workers-ai"],
+        "voice": ["google"],
+        "dictation": ["cloudflare-workers-ai"],
+        "image": ["cloudflare-workers-ai"]
+      }
+    }
+  ]
+}
