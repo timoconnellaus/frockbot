@@ -99,7 +99,9 @@ test("the app opens Setup signed in, without handing the page its session", asyn
     frame.getByRole("list", { name: "Who runs what" }),
   ).toBeVisible();
   await frame.getByRole("link", { name: "AI", exact: true }).click();
-  await expect(frame.getByRole("heading", { name: "AI" })).toBeVisible();
+  await expect(
+    frame.getByRole("heading", { name: "AI", exact: true }),
+  ).toBeVisible();
 
   // Back to the Bots is the page's own way out, answered by the app.
   await frame.getByRole("button", { name: "Back to your bots" }).click();

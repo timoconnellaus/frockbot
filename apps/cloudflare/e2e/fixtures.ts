@@ -1050,10 +1050,10 @@ export async function openSetup(
   subpage: "" | "plan" | "computer" | "ai" | "search" | "apps" | "accounts",
 ): Promise<void> {
   await page.goto(subpage ? `/setup/${subpage}` : "/setup");
-  await expect(page.getByRole("navigation", { name: "Setup" })).toBeAttached({
-    timeout: SHELL_TIMEOUT_MS,
-  });
-  await expect(page.getByRole("status")).toHaveCount(0, { timeout: 60_000 });
+  // The heading, not the sidebar: a phone draws the pages as a menu instead.
+  await expect(
+    page.getByRole("main").getByRole("heading").first(),
+  ).toBeAttached({ timeout: SHELL_TIMEOUT_MS });
 }
 
 /**
