@@ -57,7 +57,19 @@ export const PROVISION_TASK_REFRESH_SECONDS = 60;
  */
 export const PLAYWRIGHT_PLATFORM = "ubuntu24.04-x64";
 
-const spriteRuntime = linuxRuntimeDocumentV1({
+export const {
+  REFERENCE_DOCS,
+  boxDoctorScript,
+  COMPUTER_RUNTIME_FILES,
+  INSTALL_MANIFEST_PATHS,
+  PROVISION_PHASES,
+  UPDATE_PHASES,
+  provisionScript,
+  RUNTIME_DOCUMENT_FILES,
+  runtimeDocumentDigestV1,
+  provisionLaunchScript,
+  updateLaunchScript,
+} = linuxRuntimeDocumentV1({
   dnsProbeName: "api.fly.io",
   provisionHold: `sprite_task() {
   curl -sS --max-time 10 --unix-socket ${SPRITE_API_SOCKET} "$@" >/dev/null 2>&1 || true
@@ -104,22 +116,6 @@ fi
   # names that build rather than leaving the phase to fail.
 `,
 });
-
-export const {
-  REFERENCE_DOCS,
-  REFERENCE_RUNTIME_FILES,
-  referenceInstallScript,
-  boxDoctorScript,
-  COMPUTER_RUNTIME_FILES,
-  INSTALL_MANIFEST_PATHS,
-  PROVISION_PHASES,
-  UPDATE_PHASES,
-  provisionScript,
-  RUNTIME_DOCUMENT_FILES,
-  runtimeDocumentDigestV1,
-  provisionLaunchScript,
-  updateLaunchScript,
-} = spriteRuntime;
 
 /** The Sprite name pattern a Computer may take: 3-63 lowercase DNS characters. */
 export const COMPUTER_SPRITE_NAME = /^[a-z][a-z0-9-]{2,62}$/;

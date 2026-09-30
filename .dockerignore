@@ -1,7 +1,8 @@
 # Both container images are built with the repository root as their context,
 # because each needs a workspace module alongside its own app directory:
 # `apps/computer-host` needs `computer/host-protocol`, the Bot path-key leaf
-# and `computer/fly`, and `apps/applet-build` needs `applets/sdk` and the
+# and the Computer runtime (`computer/fly/runtime.ts` and
+# `computer/linux-runtime`), and `apps/applet-build` needs `applets/sdk` and the
 # build contract. Both images also use the shared core crypto primitives,
 # and `computer/egress.ts` needs core's canonical JSON leaf.
 # Everything else stays out of the context.
@@ -12,9 +13,10 @@
 !computer/host-protocol
 !computer/core/bot-path.ts
 !computer/fly/runtime.ts
-!computer/fly/shell.ts
-!computer/fly/demonstration.ts
-!computer/fly/egress.ts
+!computer/linux-runtime/runtime.ts
+!computer/linux-runtime/shell.ts
+!computer/linux-runtime/demonstration.ts
+!computer/linux-runtime/egress.ts
 !computer/egress.ts
 !applets/package.json
 !applets/build-contract.ts

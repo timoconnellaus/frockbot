@@ -27,8 +27,7 @@ import { dirname, relative, resolve } from "node:path";
 // 4. `computer/fake/**` imports `computer/core` only. A second host that
 //    reached into the first would be that host's double, not a substitution.
 // 5. `computer/linux-runtime/**` is what every host runs, so Fly imports it and
-//    it never imports Fly, and it names no Fly at all: not a Sprite, not Fly
-//    itself.
+//    it imports only itself, the egress route table and Node.
 
 const repoRoot = resolve(import.meta.dirname, "..");
 const forbiddenPackage = "@fly/sprites";
@@ -140,12 +139,7 @@ for (const path of scan(
 // host is the model. `SPRITES_TOKEN` is admitted exactly: it is the production
 // secret name, and renaming it would rotate a live deployment's credential for
 // a word.
-const spriteVocabulary = /sprite|sprites\.app/i;
-const desktopVocabulary = /novnc|x11vnc|xvfb|fluxbox|websockify/i;
-const flyVocabulary = new RegExp(
-  `${spriteVocabulary.source}|${desktopVocabulary.source}`,
-  "i",
-);
+const flyVocabulary = /sprite|novnc|x11vnc|xvfb|fluxbox|websockify/i;
 const SECRET_NAME = "SPRITES_TOKEN";
 const linuxRuntimeRoot = "computer/linux-runtime/";
 const vocabularyOwners = [
@@ -161,10 +155,7 @@ const vocabularyOwners = [
 ];
 
 // The Linux runtime's own words may name the desktop stack but never its host.
-const linuxRuntimeVocabulary = new RegExp(
-  `${spriteVocabulary.source}|\\bfly\\b`,
-  "i",
-);
+const linuxRuntimeVocabulary = /sprite|fly/i;
 
 function ownsVocabulary(path: string): boolean {
   return vocabularyOwners.some((allowed) =>
@@ -179,9 +170,8 @@ for (const path of scan(
   if (ownsVocabulary(path)) continue;
   vocabularyChecked += 1;
   // The Linux runtime owns the desktop stack, and must not name Fly at all.
-  const vocabulary = path.startsWith(linuxRuntimeRoot)
-    ? linuxRuntimeVocabulary
-    : flyVocabulary;
+  const inLinuxRuntime = path.startsWith(linuxRuntimeRoot);
+  const vocabulary = inLinuxRuntime ? linuxRuntimeVocabulary : flyVocabulary;
   const source = readFileSync(resolve(repoRoot, path), "utf8");
   if (!vocabulary.test(source)) continue;
   source.split("\n").forEach((line, index) => {
@@ -191,25 +181,35 @@ for (const path of scan(
     if (!vocabulary.test(remainder)) return;
     const word = vocabulary.exec(remainder)?.[0] ?? "";
     failures.push(
-      path.startsWith(linuxRuntimeRoot)
+      inLinuxRuntime
         ? `${path}:${index + 1}: names Fly ("${word}"); ${linuxRuntimeRoot}** is what every host runs, so a host's own part belongs in that host's directory and reaches the runtime through LinuxRuntimeHostV1`
         : `${path}:${index + 1}: names a Fly Sprite or the Computer's desktop stack ("${word}"); that vocabulary lives only in computer/fly/**, apps/computer-host/** and, for the desktop stack, ${linuxRuntimeRoot}** — say "Computer" or "host" instead (${SECRET_NAME} is the one exception)`,
     );
   });
 }
 
-// Rule 5: the Linux runtime never imports a host. A relative path is resolved
-// against the importing file, so `../fly/...` is caught as surely as the
-// package specifier.
+// Rule 5: the Linux runtime imports itself and the egress route table, and
+// nothing else of the repository — the files a host's container copies beside
+// it. That rules out a host as surely as it rules out a module the container
+// lacks. Only a relative path or a scoped package is judged: the rendered
+// scripts carry their own `import`s (`node:`, `playwright-core`), which run on
+// the machine, not here.
+const linuxRuntimeAdmits = (target: string) =>
+  target.startsWith(linuxRuntimeRoot) ||
+  target === "computer/egress.js" ||
+  target === "computer/egress.ts";
+
 for (const path of scan(`${linuxRuntimeRoot}**/*.{ts,tsx,mts,cts}`)) {
+  if (path.endsWith(".test.ts")) continue;
   const source = readFileSync(resolve(repoRoot, path), "utf8");
   for (const { specifier, line } of specifiersOf(source)) {
+    if (!specifier.startsWith(".") && !specifier.startsWith("@")) continue;
     const target = specifier.startsWith(".")
       ? relative(repoRoot, resolve(repoRoot, dirname(path), specifier))
       : specifier;
-    if (!isFlyModule(target) && !target.startsWith("computer/fly/")) continue;
+    if (linuxRuntimeAdmits(target)) continue;
     failures.push(
-      `${path}:${line}: imports "${specifier}"; Fly imports ${linuxRuntimeRoot}**, never the other way round`,
+      `${path}:${line}: imports "${specifier}"; ${linuxRuntimeRoot}** imports only itself and computer/egress.ts — it is what every host's container runs, and Fly imports it, never the other way round`,
     );
   }
 }

@@ -29,9 +29,9 @@ import { shellQuote } from "./shell.js";
 export const DESKTOP_SERVICE = "frockbot-viewer-gateway";
 /**
  * The durable-root sync's on-machine half, declared as a service so
- * the host brings it back after a cold pause: "Only
- * Computer-provider-declared services may be reattached; other processes are
- * assumed dead after a cold pause." It holds no credential and makes no
+ * the host brings it back after a cold pause: a host reattaches only the
+ * services the Computer declares, and takes every other process for dead. It
+ * holds no credential and makes no
  * network call — it watches the durable roots and bumps a change signal, and
  * the sync agent that reads object storage runs in the backend.
  */
@@ -253,8 +253,8 @@ export const BROWSER_SERVICE = "frockbot-browser";
  * session is per Bot: the token the gateway resolves addresses this port, and
  * this port shows this slot and nothing else. The prefix is declared because
  * two call sites need the same answer — the host starts these, and the
- * `service` op reattaches them after a cold pause, which it may only do for a
- * Computer-provider-declared name.
+ * `service` op reattaches them after a cold pause, which a host does only for
+ * a name the Computer declares.
  */
 export const VIEW_TENANT_SERVICE_PREFIX = "frockbot-view-";
 
@@ -743,7 +743,7 @@ export const TARGET_ID_FILE = "target-id";
  * Not its environment and not its argv: both are readable in `/proc/<pid>` by
  * anything else running on the Computer for as long as the helper runs, and an
  * environment is inherited by every child. The exec document hands the helper
- * the stdin bash has not read yet (`FlyComputer.browserForAgent`), so the value
+ * the stdin bash has not read yet (the host's browser exec), so the value
  * is only ever in a pipe and in this one process's memory.
  */
 export const BROWSER_SECRET_STDIN_READER_V1 = `async function readSecretFromStdin() {
@@ -2881,8 +2881,6 @@ cat ${PROVISION_STATE} 2>/dev/null || true
 
   return {
     REFERENCE_DOCS,
-    REFERENCE_RUNTIME_FILES,
-    referenceInstallScript,
     boxDoctorScript,
     COMPUTER_RUNTIME_FILES,
     INSTALL_MANIFEST_PATHS,
