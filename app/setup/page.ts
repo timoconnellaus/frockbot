@@ -1,11 +1,12 @@
 /**
- * `/setup` on the app's own origin: where "Start with this setup" on
+ * `/setup/apply` on the app's own origin: where "Start with this setup" on
  * frockbot.com lands. It keeps the chosen setup before anything can redirect
  * (sign-in and checkout both drop a URL fragment), then shows it for review
  * once the person is signed in. Nothing is applied until they say so.
  *
- * The setup web app takes over `/setup` when it lands; this screen becomes
- * one of its steps.
+ * It is a page under Setup's own paths that the setup web app does not
+ * claim, so either can ship first; that app takes it over by adding the
+ * page and deleting this one.
  */
 
 function escaped(text: string): string {
@@ -18,7 +19,7 @@ function escaped(text: string): string {
 export function setupPageV1(options: { productName: string }): string {
   const product = escaped(options.productName);
   return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>Set up ${product}</title><link rel="stylesheet" href="/setup.css"><script src="/setup.js" defer></script></head>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>Set up ${product}</title><link rel="stylesheet" href="/setup/apply.css"><script src="/setup/apply.js" defer></script></head>
 <body><main>
 <header class="brand"><span class="wordmark">${product}</span><span class="small">Setup</span></header>
 <div class="intro"><span class="small">From the setup you chose on frockbot.com</span><h1>Set up ${product} the way you chose</h1><p id="lede">Here’s everything you picked and what each part still needs. Nothing changes until you apply it.</p></div>
@@ -276,7 +277,7 @@ el('apply').onclick = () => guarded(el('apply'), async () => {
 });
 el('frock').onclick = () => { store.clear(); location.assign('/'); };
 el('google').onclick = () => guarded(el('google'), async () => {
-  const back = location.origin + '/setup';
+  const back = location.origin + '/setup/apply';
   const { url } = await api('/api/auth/sign-in/social', {
     provider: 'google', callbackURL: back, newUserCallbackURL: back, errorCallbackURL: back,
   });

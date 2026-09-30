@@ -145,7 +145,11 @@ describe("the /setup routes", () => {
   const url = (path: string) => new URL(`https://bot.frockbot.com${path}`);
 
   test("the page, its script and its styles are public and locked down", async () => {
-    for (const path of ["/setup", "/setup.js", "/setup.css"]) {
+    for (const path of [
+      "/setup/apply",
+      "/setup/apply.js",
+      "/setup/apply.css",
+    ]) {
       const response = await routes.publicRoute(
         new Request(url(path)),
         url(path),
@@ -156,8 +160,8 @@ describe("the /setup routes", () => {
       );
     }
     const page = await (await routes.publicRoute(
-      new Request(url("/setup")),
-      url("/setup"),
+      new Request(url("/setup/apply")),
+      url("/setup/apply"),
     ))!.text();
     expect(page).toContain("Set up FrockBot the way you chose");
     expect(page).toContain("Apply this setup");

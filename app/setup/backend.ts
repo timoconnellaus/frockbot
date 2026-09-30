@@ -37,11 +37,11 @@ export function setupCarryOverRoutesV1(options: { productName: string }) {
     async publicRoute(request: Request, url: URL) {
       if (request.method !== "GET") return undefined;
       const body =
-        url.pathname === "/setup"
+        url.pathname === "/setup/apply"
           ? { text: setupPageV1(options), type: "text/html" }
-          : url.pathname === "/setup.js"
+          : url.pathname === "/setup/apply.js"
             ? { text: setupScriptV1, type: "text/javascript" }
-            : url.pathname === "/setup.css"
+            : url.pathname === "/setup/apply.css"
               ? { text: setupStylesV1, type: "text/css" }
               : undefined;
       if (!body) return undefined;

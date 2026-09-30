@@ -7,7 +7,7 @@ import {
   suggestSetupPlanV1,
 } from "./choices.generated.js";
 
-export const APP_SETUP_URL = "https://bot.frockbot.com/setup";
+export const APP_SETUP_URL = "https://bot.frockbot.com/setup/apply";
 const SOURCE_URL = "https://github.com/timoconnellaus/frockbot";
 
 export const PLANS = {
