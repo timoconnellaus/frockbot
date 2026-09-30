@@ -1,17 +1,16 @@
 // The User backend Contribution: the machine registry's authority.
 //
 // It is mounted in the User Durable Object beside Settings,
-// Credentials, Flock and the rest, and it owns four things and no more — the
-// registry rows, the pairing offers, the command queue with its leases, and
-// the results. "The User's Durable Object is the authority for everything
+// Credentials, Flock and the rest, and it owns three things and no more — the
+// registry rows, the command queue with its leases, and the results. "The User's Durable Object is the authority for everything
 // User-scoped", and a machine is a User asset: a Bot reaches one only through
 // an enabled Capability, and (from R3) a per-call human approval.
 //
 // Three seams it does not own:
 //
 //  * **The secret.** `MACHINE_TOKEN_SECRET` is read from the host, never
-//    stored, and used only to mint. The token is handed back exactly once, on
-//    the enrollment response; what stays here is `SHA-256(token)`.
+//    stored, and used only to mint. The token is handed back on the enrollment
+//    response and nowhere else; what stays here is `SHA-256(token)`.
 //  * **The clock.** Injected, so lease expiry is testable without waiting two
 //    minutes.
 //  * **The transport.** Nothing here is an HTTP response or a socket. The
@@ -22,7 +21,6 @@
 //    commands it would have been sent before the drop.
 
 import {
-  MACHINE_LIMITS_V1,
   MACHINE_SOCKET_REVOKED_CODE_V1,
   MachineTokenError,
   decodeMachineEnrollmentV1,
@@ -34,19 +32,12 @@ import {
   type MachineCommandResultV1,
   type MachineEnrollmentReceiptV1,
   type MachineListViewV1,
-  type MachinePairingOfferV1,
   type MachineCommandV1,
   type MachineRecordV1,
   type MachineResultReceiptV1,
   type MachineSocketFrameV1,
   type MachineTokenClaimsV1,
 } from "@frockbot/core/machine-protocol";
-import {
-  machinePairingCodeDigestV1,
-  machinePairingNonceV1,
-  mintMachinePairingCodeV1,
-  type MachinePairingClaimsV1,
-} from "./pairing.js";
 import {
   decodeMachineResultDeliveryV1,
   machineResultDeliveryV1,
@@ -71,7 +62,6 @@ import {
   revokeMachineV1,
   sweepMachineLeasesV1,
   touchMachineV1,
-  writeMachinePairingV1,
   MachineRegistryError,
   type MachineDispatchOutcomeV1,
   type MachineStorageV1,
@@ -96,9 +86,9 @@ export interface MachineUserBackendHost {
   /** The User Durable Object's own storage. */
   storage: MachineStorageV1;
   /**
-   * The deployment secret every machine token and pairing code is signed with.
-   * Absent closes the door: a pairing is refused rather than offered under a
-   * signature nothing could verify.
+   * The deployment secret every machine token is signed with. Absent closes
+   * the door: an enrollment is refused rather than answered with a token
+   * nothing could verify.
    */
   readSecret(name: "MACHINE_TOKEN_SECRET"): string | undefined;
   sockets: MachineSocketsV1;
@@ -155,64 +145,31 @@ export class MachineUserBackendContribution {
   }
 
   /**
-   * A pairing offer, for the signed-in app to hand to its own agent.
+   * Enrollment, on behalf of a signed-in session: the row is written, and the
+   * token is answered for the session to hand its own agent. The session
+   * never presents it; the agent never holds the session.
    *
-   * The session is handed the code and the machine id it names; the backend
-   * keeps only the digest. Five minutes, one use.
-   */
-  async createPairing(userId: string): Promise<MachinePairingOfferV1> {
-    const secret = this.secret();
-    const now = this.now();
-    const registered = await listMachineRecordsV1(this.host.storage);
-    if (
-      registered.filter((record) => record.revokedAt === undefined).length >=
-      MACHINE_LIMITS_V1.maxMachinesPerUser
-    ) {
-      throw new MachineRegistryError(
-        429,
-        `Refused: this account holds ${MACHINE_LIMITS_V1.maxMachinesPerUser} registered machines, which is the quota.`,
-      );
-    }
-    const machineId = crypto.randomUUID();
-    const code = await mintMachinePairingCodeV1(secret, {
-      userId,
-      machineId,
-      nonce: machinePairingNonceV1(),
-    });
-    const record = await writeMachinePairingV1(this.host.storage, {
-      userId,
-      machineId,
-      codeDigest: await machinePairingCodeDigestV1(code),
-      now,
-    });
-    return {
-      schemaVersion: 1,
-      code,
-      machineId,
-      expiresAt: record.expiresAt,
-    };
-  }
-
-  /**
-   * Enrollment. The offer is spent, the row is written, and the token exists
-   * outside this object exactly once — in the response.
+   * This is the one door a machine is registered through. A headless machine
+   * with no signed-in app to enroll it — a server whose install command prints
+   * a code the person enters in Settings — would reach here too, from the
+   * session that entered the code.
    */
   async enroll(
-    claims: MachinePairingClaimsV1,
+    userId: string,
     input: unknown,
   ): Promise<MachineEnrollmentReceiptV1> {
     const secret = this.secret();
     const enrollment = decodeMachineEnrollmentV1(input);
+    // Deterministic in its claims, so a replayed enrollment re-mints the very
+    // token the first one answered and the stored digest still matches it.
     const token = await mintMachineTokenV1(secret, {
-      u: claims.userId,
-      m: claims.machineId,
+      u: userId,
+      m: enrollment.machineId,
       v: 1,
     });
     const record = await enrollMachineV1(this.host.storage, {
-      userId: claims.userId,
-      machineId: claims.machineId,
+      userId,
       enrollment,
-      codeDigest: await machinePairingCodeDigestV1(enrollment.code),
       tokenDigest: await machineTokenDigestV1(token),
       now: this.now(),
     });

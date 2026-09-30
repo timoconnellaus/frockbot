@@ -977,9 +977,9 @@ is signed once, stored only as a digest and answered on a receipt; a document
 can be read twice, so it cannot be in one. `ViewSurfacePage` gained one seam
 for exactly this — a `banner` the host draws above the document — and the
 surface holds the key there for as long as the person is looking at it and
-nowhere else. (A machine pairing code is minted the same way, but only the
-desktop app's own session asks for one and hands it straight to its agent; no
-person sees it.) It is the same reasoning
+nowhere else. (A machine token is answered the same way, but only to the
+desktop app's own session, which enrolls its Mac and hands the token straight
+to its agent; no person sees it.) It is the same reasoning
 `SettingField.secret` already carried, from the other direction.
 
 Creating a Bot and its danger zone are host chrome rather than projections, and

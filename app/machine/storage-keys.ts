@@ -17,8 +17,6 @@ export const MACHINE_PREFIX = "machine:";
 export const MACHINE_QUEUE_PREFIX = "machine-queue:";
 /** One `MachineCommandResultV1`, keyed by the command it answers. */
 export const MACHINE_RESULT_PREFIX = "machine-result:";
-/** One unspent `MachinePairingRecordV1`. */
-export const MACHINE_PAIRING_PREFIX = "machine-pair:";
 /**
  * How many times one command's lease has expired.
  *
@@ -37,10 +35,6 @@ export const MACHINE_USAGE_PREFIX = "machine-usage:";
 
 export function machineKeyV1(machineId: string): string {
   return `${MACHINE_PREFIX}${machineId}`;
-}
-
-export function machinePairingKeyV1(machineId: string): string {
-  return `${MACHINE_PAIRING_PREFIX}${machineId}`;
 }
 
 export function machineResultKeyV1(commandId: string): string {

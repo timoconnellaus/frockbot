@@ -16,7 +16,6 @@ import {
   revokeMachineV1,
   sweepMachineLeasesV1,
   touchMachineV1,
-  writeMachinePairingV1,
   MachineRegistryError,
 } from "./store.ts";
 import { createMemoryMachineStorageV1 } from "./testing.ts";
@@ -47,24 +46,16 @@ async function register(
   } = {},
 ) {
   const now = options.now ?? T0;
-  await writeMachinePairingV1(storage, {
-    userId: USER,
-    machineId,
-    codeDigest: digestFor(`code-${machineId}`),
-    now,
-  });
   return enrollMachineV1(storage, {
     userId: USER,
-    machineId,
     enrollment: {
       schemaVersion: 1,
-      code: `code-${machineId}`,
+      machineId,
       label: `${machineId}.local`,
       platform: "macos",
       agentVersion: "0.0.1",
       capabilities: options.capabilities ?? ["exec", "files"],
     },
-    codeDigest: digestFor(`code-${machineId}`),
     tokenDigest: digestFor(`token-${machineId}`),
     now,
   });
@@ -96,71 +87,41 @@ function command(
 }
 
 describe("the registry", () => {
-  test("enrollment spends the pairing offer exactly once", async () => {
+  test("enrollment is idempotent on the machine id", async () => {
     const machineId = "m-1";
     const record = await register(machineId);
     expect(record).toMatchObject({ machineId, userId: USER, keyVersion: 1 });
-    // The offer is gone, so the same code cannot register a second machine.
-    await expect(
+    // A retry whose first answer was lost is the same machine, not a second.
+    await expect(register(machineId, { now: T0 + 60_000 })).resolves.toEqual(
+      record,
+    );
+    expect(await listMachineRecordsV1(storage)).toHaveLength(1);
+  });
+
+  test("a revoked machine, another User's, and another key are refused", async () => {
+    await register("m-taken");
+    const attempt = (input: { userId?: string; tokenDigest?: string }) =>
       enrollMachineV1(storage, {
-        userId: USER,
-        machineId,
+        userId: input.userId ?? USER,
         enrollment: {
           schemaVersion: 1,
-          code: `code-${machineId}`,
+          machineId: "m-taken",
           label: "again.local",
           platform: "macos",
           agentVersion: "0.0.1",
           capabilities: ["exec"],
         },
-        codeDigest: digestFor(`code-${machineId}`),
-        tokenDigest: digestFor("token-again"),
+        tokenDigest: input.tokenDigest ?? digestFor("token-m-taken"),
         now: T0,
-      }),
-    ).rejects.toThrow(/invalid or has expired/);
-  });
-
-  test("an expired offer, another User's, and a different code are all refused", async () => {
-    await writeMachinePairingV1(storage, {
-      userId: USER,
-      machineId: "m-expired",
-      codeDigest: digestFor("digest"),
-      now: T0,
-    });
-    const enrollment = {
-      schemaVersion: 1 as const,
-      code: "code",
-      label: "late.local",
-      platform: "macos" as const,
-      agentVersion: "0.0.1",
-      capabilities: ["exec" as const],
-    };
-    const attempt = (input: {
-      userId?: string;
-      codeDigest?: string;
-      now?: number;
-    }) =>
-      enrollMachineV1(storage, {
-        userId: input.userId ?? USER,
-        machineId: "m-expired",
-        enrollment,
-        codeDigest: input.codeDigest ?? digestFor("digest"),
-        tokenDigest: digestFor("token"),
-        now: input.now ?? T0,
       });
-    await expect(
-      attempt({ now: T0 + MACHINE_LIMITS_V1.pairingTtlMs + 1 }),
-    ).rejects.toThrow(MachineRegistryError);
     await expect(attempt({ userId: "someone-else" })).rejects.toThrow(
       MachineRegistryError,
     );
-    await expect(attempt({ codeDigest: digestFor("another") })).rejects.toThrow(
-      MachineRegistryError,
-    );
-    // …and the untouched offer still works, so none of the refusals spent it.
-    await expect(attempt({})).resolves.toMatchObject({
-      machineId: "m-expired",
-    });
+    await expect(
+      attempt({ tokenDigest: digestFor("another") }),
+    ).rejects.toThrow(MachineRegistryError);
+    await revokeMachineV1(storage, "m-taken", T0);
+    await expect(attempt({})).rejects.toThrow(/cannot be enrolled again/);
   });
 
   test("the machine quota refuses the ninth registration", async () => {

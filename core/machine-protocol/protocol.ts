@@ -36,13 +36,6 @@ export const MACHINE_LIMITS_V1 = {
   label: 200,
   /** Reported agent version, e.g. `0.4.1`. */
   agentVersion: 64,
-  /**
-   * A pairing code as it is presented on enrollment. It is a *signed token*
-   * carrying the User it was minted for — enrollment runs before gateway
-   * authentication, so the code is the only thing that can name a Durable
-   * Object — which is why the bound is a token's and not a passphrase's.
-   */
-  pairingCode: 512,
   /** Capabilities one agent may report. */
   capabilities: 8,
   /** A path on the machine. Not a Computer path: no absolute-form rule. */
@@ -71,8 +64,6 @@ export const MACHINE_LIMITS_V1 = {
   maxMachinesPerUser: 8,
   /** Commands one User may dispatch across all machines in a day. */
   commandsPerDay: 500,
-  /** How long a pairing offer stands before it is spent or expires. */
-  pairingTtlMs: 5 * 60_000,
   /** How long a claim holds a command before the lease may be reclaimed. */
   leaseMs: 120_000,
   /** Device modules one frame may list: every member's, at four each. */
@@ -451,59 +442,19 @@ export function decodeMachineOpV1(
 }
 
 // ---------------------------------------------------------------------------
-// Pairing and enrollment
+// Enrollment
 // ---------------------------------------------------------------------------
 
 /**
- * What the signed-in app asks for: nothing. The enrolling agent names its own
- * machine, so the request carries no field and refuses any.
- */
-export type MachinePairingRequestV1 = Record<string, never>;
-
-export function decodeMachinePairingRequestV1(
-  input: unknown,
-  label = "machine pairing request",
-): MachinePairingRequestV1 {
-  exactly(object(input, label), [], label);
-  return {};
-}
-
-/**
- * The one-time offer the signed-in app receives and hands to its own agent.
+ * What a signed-in session posts to register a machine on its agent's behalf.
  *
- * The code is the only secret the app's session ever holds for a machine, and
- * it is spent on first use and dead in five minutes; the long-lived machine
- * token is minted on the far side of enrollment and never reaches the session.
+ * `machineId` is chosen by the caller and is the idempotency key: a retried
+ * enrollment names the same machine and is answered with the same token,
+ * never a second machine.
  */
-export interface MachinePairingOfferV1 {
-  schemaVersion: 1;
-  code: string;
-  machineId: string;
-  expiresAt: string;
-}
-
-export function decodeMachinePairingOfferV1(
-  input: unknown,
-  label = "machine pairing offer",
-): MachinePairingOfferV1 {
-  const value = object(input, label);
-  exactly(value, ["schemaVersion", "code", "machineId", "expiresAt"], label);
-  return {
-    schemaVersion: schemaVersion(value, label),
-    code: boundedString(
-      value.code,
-      MACHINE_LIMITS_V1.pairingCode,
-      `${label} code`,
-    ),
-    machineId: decodeMachineIdV1(value.machineId, `${label} machineId`),
-    expiresAt: timestamp(value.expiresAt, `${label} expiresAt`),
-  };
-}
-
-/** What the machine presents to enroll, bearing the pairing code. */
 export interface MachineEnrollmentV1 {
   schemaVersion: 1;
-  code: string;
+  machineId: string;
   label: string;
   platform: MachinePlatformV1;
   agentVersion: string;
@@ -540,7 +491,7 @@ export function decodeMachineEnrollmentV1(
     value,
     [
       "schemaVersion",
-      "code",
+      "machineId",
       "label",
       "platform",
       "agentVersion",
@@ -555,11 +506,7 @@ export function decodeMachineEnrollmentV1(
   );
   return {
     schemaVersion: schemaVersion(value, label),
-    code: boundedString(
-      value.code,
-      MACHINE_LIMITS_V1.pairingCode,
-      `${label} code`,
-    ),
+    machineId: decodeMachineIdV1(value.machineId, `${label} machineId`),
     label: boundedString(
       value.label,
       MACHINE_LIMITS_V1.label,
@@ -576,9 +523,9 @@ export function decodeMachineEnrollmentV1(
 }
 
 /**
- * The one moment a machine token exists outside the machine. The backend keeps
- * only `SHA-256(token)`; this response is the sole delivery, and a machine
- * that loses it pairs again rather than asking for it back.
+ * The machine token, handed to the enrolling session to pass to its agent
+ * locally. The backend keeps only `SHA-256(token)`; a replay of the same
+ * enrollment answers the same token, and a revoked machine is never answered.
  */
 export interface MachineEnrollmentReceiptV1 {
   schemaVersion: 1;

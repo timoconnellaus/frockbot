@@ -219,17 +219,17 @@ describe("machine device agent backoff", () => {
 });
 
 describe("machine device agent enrollment", () => {
-  test("pairing stores exactly the enrollment state and nothing else", async () => {
+  test("adopting stores exactly the enrollment state and nothing else", async () => {
     const secrets = createMemoryMachineSecretStoreV1();
-    const backend = server(() => ({ json: ENROLLED }));
+    const backend = server(() => ({}));
     const device = agent({ fetch: backend.fetch, secrets });
 
-    const status = await device.pair("  pairing-code  ");
+    const status = await device.adopt(ENROLLED);
 
     expect(status.enrolled).toBe(true);
     expect(status.machineId).toBe("m-1");
-    expect(backend.calls[0]?.path).toBe("/api/machines/enroll");
-    expect(backend.calls[0]?.authorization).toBe("Bearer pairing-code");
+    // The app enrolled this machine; the agent presents nothing to do so.
+    expect(backend.calls).toHaveLength(0);
     const held = decodeMachineEnrollmentStateV1(
       JSON.parse((await secrets.read()) ?? "{}"),
     );
@@ -244,6 +244,16 @@ describe("machine device agent enrollment", () => {
     // The status a renderer may read carries no token.
     expect(Object.values(status)).not.toContain("machine-token");
     expect(() => decodeMachineDeviceAgentStatusV1(status)).not.toThrow();
+  });
+
+  test("the agent describes itself; the session names the machine", async () => {
+    const device = agent({ fetch: server(() => ({})).fetch });
+    expect(device.enrollmentRequest("m-2")).toMatchObject({
+      schemaVersion: 1,
+      machineId: "m-2",
+      label: "Tims-M5-MacBook-Pro.local",
+    });
+    await expect(device.adopt({ ...ENROLLED, token: 7 })).rejects.toThrow();
   });
 
   test("a token minted by another deployment is forgotten, not presented", async () => {

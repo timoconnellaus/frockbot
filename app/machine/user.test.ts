@@ -55,26 +55,24 @@ async function nextFrame(socket: MachineSocketV1): Promise<string[]> {
   return frame.commands.map((command) => command.commandId);
 }
 
-/** Pair, enroll, and hand back what a machine needs to speak. */
+/** Enroll as a session does, and hand back what a machine needs to speak. */
 async function enrolled(
   authority: MachineUserBackendContribution,
   userId: string,
+  machineId: string = crypto.randomUUID(),
 ) {
-  const offer = await authority.createPairing(userId);
-  const receipt = await authority.enroll(
-    { userId, machineId: offer.machineId, nonce: "n" },
-    {
-      schemaVersion: 1,
-      code: offer.code,
-      label: "held.local",
-      platform: "macos",
-      agentVersion: "0.0.1",
-      capabilities: ["exec"],
-    },
-  );
+  const receipt = await authority.enroll(userId, {
+    schemaVersion: 1,
+    machineId,
+    label: "held.local",
+    platform: "macos",
+    agentVersion: "0.0.1",
+    capabilities: ["exec"],
+  });
   return {
-    machineId: offer.machineId,
-    claims: { u: userId, m: offer.machineId, v: receipt.keyVersion },
+    machineId,
+    token: receipt.token,
+    claims: { u: userId, m: machineId, v: receipt.keyVersion },
     digest: await machineTokenDigestV1(receipt.token),
   };
 }
@@ -182,10 +180,22 @@ describe("the User Contribution", () => {
     await authority.disconnected("mac-nobody");
   });
 
-  test("without a secret nothing can be paired", async () => {
-    await expect(contribution(undefined).createPairing("u")).rejects.toThrow(
+  test("without a secret nothing can be enrolled", async () => {
+    await expect(enrolled(contribution(undefined), "u")).rejects.toThrow(
       /not configured/,
     );
+  });
+
+  test("a replayed enrollment answers the same token, and a revoked one none", async () => {
+    const authority = contribution(SECRET);
+    const first = await enrolled(authority, "replay-user", "mac-replay");
+    const again = await enrolled(authority, "replay-user", "mac-replay");
+    expect(again.token).toBe(first.token);
+    expect((await authority.list()).machines).toHaveLength(1);
+    await authority.revoke("mac-replay");
+    await expect(
+      enrolled(authority, "replay-user", "mac-replay"),
+    ).rejects.toThrow(/cannot be enrolled again/);
   });
 
   test("one read answers the five questions a control tool has to ask", async () => {

@@ -8,6 +8,7 @@ import {
   decodeMachineModuleCallResultV1,
   machineRoutePathV1,
   mintMachineTokenV1,
+  verifyMachineTokenV1,
 } from "@frockbot/core/machine-protocol";
 import {
   createMachineBackendContribution,
@@ -15,12 +16,12 @@ import {
 } from "./backend.ts";
 import { MachineUserBackendContribution } from "./user.ts";
 import { MachineModuleCallsV1 } from "./module-calls.ts";
-import { verifyMachinePairingCodeV1 } from "./pairing.ts";
 import {
   createMemoryMachineSocketsV1,
   createMemoryMachineStorageV1,
   MachineAgentDriverV1,
   MachineAgentError,
+  readMachineEnrollmentReceiptV1,
   type MemoryMachineSocketsV1,
 } from "./testing.ts";
 import type { MachineSocketV1 } from "./device.ts";
@@ -138,12 +139,7 @@ beforeEach(() => {
   contribution = createMachineBackendContribution({
     brand: { productName: "FrockBot" },
     machineTokenSecret: SECRET,
-    createMachinePairing: (userId) => authority.createPairing(userId),
-    enrollMachine: async (userId, input) =>
-      authority.enroll(
-        { userId, machineId: input.machineId, nonce: "n" },
-        input.enrollment,
-      ),
+    enrollMachine: (userId, enrollment) => authority.enroll(userId, enrollment),
     openMachineSocket: async (_userId, callInput) => {
       const opened = await authority.connect(
         callInput.claims,
@@ -231,31 +227,69 @@ beforeEach(() => {
   });
 });
 
-async function pair(): Promise<{ code: string; machineId: string }> {
-  const response = await call("POST", machineRoutePathV1("pair"), {
+/** Enroll `driver` as the signed-in app does, and hand it the token. */
+async function enroll(
+  driver: MachineAgentDriverV1,
+  machineId?: string,
+): Promise<string> {
+  const response = await call("POST", machineRoutePathV1("enroll"), {
     userId: USER,
-    body: {},
+    body: driver.enrollment(machineId),
   });
   expect(response.status).toBe(200);
-  const offer = (await response.json()) as { code: string; machineId: string };
-  return offer;
+  return driver.adopt(await readMachineEnrollmentReceiptV1(response));
 }
 
 describe("the browser door", () => {
-  test("pairing mints a one-time code that names its User and machine", async () => {
-    const offer = await pair();
-    expect(await verifyMachinePairingCodeV1(SECRET, offer.code)).toMatchObject({
-      userId: USER,
-      machineId: offer.machineId,
-    });
+  test("a session enrolls a machine and is answered its token", async () => {
+    const driver = agent();
+    const token = await enroll(driver, "mac-enrolled");
+    const claims = await verifyMachineTokenV1(SECRET, token);
+    expect(claims).toEqual({ u: USER, m: "mac-enrolled", v: 1 });
   });
 
-  test("pairing takes no name: the enrolling agent names its own machine", async () => {
-    const response = await call("POST", machineRoutePathV1("pair"), {
+  test("a retried enrollment is the same machine and the same token", async () => {
+    const first = await enroll(agent(), "mac-retried");
+    const second = await enroll(agent(), "mac-retried");
+    expect(second).toBe(first);
+    expect((await authority.list()).machines).toHaveLength(1);
+  });
+
+  test("a revoked machine is never enrolled again", async () => {
+    const driver = agent();
+    await enroll(driver, "mac-gone");
+    await authority.revoke("mac-gone");
+    const response = await call("POST", machineRoutePathV1("enroll"), {
       userId: USER,
-      body: { label: "Studio laptop" },
+      body: driver.enrollment("mac-gone"),
     });
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(409);
+  });
+
+  test("enrollment is the session's: no session, no machine", async () => {
+    const response = await call("POST", machineRoutePathV1("enroll"), {
+      token: "anything",
+      body: agent().enrollment(),
+    });
+    expect(response.status).toBe(404);
+    expect((await authority.list()).machines).toHaveLength(0);
+  });
+
+  test("an enrollment carrying a code, or no machine id, is refused", async () => {
+    const body = agent().enrollment();
+    for (const refused of [
+      { ...body, code: "pairing-code" },
+      { ...body, machineId: undefined },
+    ]) {
+      expect(
+        (
+          await call("POST", machineRoutePathV1("enroll"), {
+            userId: USER,
+            body: refused,
+          })
+        ).status,
+      ).toBe(400);
+    }
   });
 
   test("an unauthenticated browser route is not this Contribution's", async () => {
@@ -266,7 +300,8 @@ describe("the browser door", () => {
 
   test("the wrong method and a stray query parameter are refused", async () => {
     expect(
-      (await call("GET", machineRoutePathV1("pair"), { userId: USER })).status,
+      (await call("GET", machineRoutePathV1("enroll"), { userId: USER }))
+        .status,
     ).toBe(405);
     expect(
       (await call("POST", machineRoutePathV1("list"), { userId: USER })).status,
@@ -278,9 +313,8 @@ describe("the browser door", () => {
   });
 
   test("the registry reports connected while the machine's socket is open", async () => {
-    const offer = await pair();
     const driver = agent();
-    await driver.enroll(offer.code);
+    await enroll(driver);
     const list = async () =>
       (await (
         await call("GET", machineRoutePathV1("list"), { userId: USER })
@@ -296,53 +330,9 @@ describe("the browser door", () => {
 });
 
 describe("the machine door", () => {
-  test("enrollment answers a token, and the code is spent", async () => {
-    const offer = await pair();
-    const driver = agent();
-    const token = await driver.enroll(offer.code);
-    expect(token.length).toBeGreaterThan(0);
-    // A second enrollment with the same code is refused: the offer is gone.
-    expect(
-      await agent().attempt(machineRoutePathV1("enroll"), {
-        method: "POST",
-        token: offer.code,
-        body: JSON.stringify({
-          schemaVersion: 1,
-          code: offer.code,
-          label: "second.local",
-          platform: "macos",
-          agentVersion: "0.0.1",
-          capabilities: ["exec"],
-        }),
-        headers: { "content-type": "application/json" },
-      }),
-    ).toBe(401);
-  });
-
-  test("a code presented in the header but not the body is refused", async () => {
-    const offer = await pair();
-    const other = await pair();
-    expect(
-      await agent().attempt(machineRoutePathV1("enroll"), {
-        method: "POST",
-        token: offer.code,
-        body: JSON.stringify({
-          schemaVersion: 1,
-          code: other.code,
-          label: "mismatched.local",
-          platform: "macos",
-          agentVersion: "0.0.1",
-          capabilities: ["exec"],
-        }),
-        headers: { "content-type": "application/json" },
-      }),
-    ).toBe(401);
-  });
-
   test("the socket refuses a missing, forged or foreign token", async () => {
-    const offer = await pair();
     const driver = agent();
-    await driver.enroll(offer.code);
+    await enroll(driver);
     const machineId = driver.machineId!;
     const socket = machineRoutePathV1("socket", { machineId });
     const upgrade = { headers: { upgrade: "websocket" } };
@@ -372,9 +362,8 @@ describe("the machine door", () => {
   });
 
   test("a live token without an upgrade is told to upgrade", async () => {
-    const offer = await pair();
     const driver = agent();
-    const token = await driver.enroll(offer.code);
+    const token = await enroll(driver);
     expect(
       await driver.attempt(
         machineRoutePathV1("socket", { machineId: driver.machineId! }),
@@ -384,9 +373,8 @@ describe("the machine door", () => {
   });
 
   test("the wrong method and an unknown query parameter are refused", async () => {
-    const offer = await pair();
     const driver = agent();
-    const token = await driver.enroll(offer.code);
+    const token = await enroll(driver);
     const machineId = driver.machineId!;
     expect(
       await driver.attempt(machineRoutePathV1("socket", { machineId }), {
@@ -402,15 +390,11 @@ describe("the machine door", () => {
         },
       ),
     ).toBe(400);
-    expect(
-      await driver.attempt(machineRoutePathV1("enroll"), { method: "GET" }),
-    ).toBe(405);
   });
 
   test("a pushed command, a claim, a result and a replay, end to end", async () => {
-    const offer = await pair();
     const driver = agent();
-    await driver.enroll(offer.code);
+    await enroll(driver);
     const machineId = driver.machineId!;
     await authority.dispatch({
       schemaVersion: 1,
@@ -446,7 +430,7 @@ describe("the machine door", () => {
 
   test("a module's bytes are served only for a hash the account carries, and only as those bytes", async () => {
     const driver = agent();
-    await driver.enroll((await pair()).code);
+    await enroll(driver);
     const code = "export default {};\n";
     const hash = await sha256HexTextV1(code);
     modules.set(hash, code);
@@ -483,7 +467,7 @@ describe("the machine door", () => {
 
   test("module reports are decoded at the door and handed on", async () => {
     const driver = agent();
-    await driver.enroll((await pair()).code);
+    await enroll(driver);
     const report = {
       pluginId: "beeper",
       moduleId: "bridge",
@@ -514,7 +498,7 @@ describe("the machine door", () => {
 
   test("a module call is claimed and answered through its two routes", async () => {
     const driver = agent();
-    await driver.enroll((await pair()).code);
+    await enroll(driver);
     await driver.next();
     const answered = moduleCalls.call({
       callId: "mc-1",
@@ -553,7 +537,7 @@ describe("the machine door", () => {
 
   test("module events are decoded at the door and handed on", async () => {
     const driver = agent();
-    await driver.enroll((await pair()).code);
+    await enroll(driver);
     const event = {
       pluginId: "beeper",
       moduleId: "bridge",
@@ -583,9 +567,8 @@ describe("the machine door", () => {
   });
 
   test("a revoked machine's token fails every machine route", async () => {
-    const offer = await pair();
     const driver = agent();
-    const token = await driver.enroll(offer.code);
+    const token = await enroll(driver);
     const machineId = driver.machineId!;
     expect(
       (
@@ -619,9 +602,6 @@ describe("the machine door", () => {
   test("without the deployment secret the machine door answers 503", async () => {
     contribution = createMachineBackendContribution({
       brand: { productName: "FrockBot" },
-      createMachinePairing: () => {
-        throw new Error("unreachable");
-      },
       enrollMachine: () => {
         throw new Error("unreachable");
       },
@@ -657,8 +637,13 @@ describe("the machine door", () => {
       },
     });
     expect(
-      (await call("POST", machineRoutePathV1("enroll"), { token: "code" }))
-        .status,
+      (
+        await call(
+          "GET",
+          machineRoutePathV1("socket", { machineId: "mac-anything" }),
+          { token: "token" },
+        )
+      ).status,
     ).toBe(503);
   });
 });

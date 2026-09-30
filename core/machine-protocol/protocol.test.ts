@@ -19,8 +19,6 @@ import {
   decodeMachineModuleReportsV1,
   decodeMachineModuleV1,
   decodeMachineOpV1,
-  decodeMachinePairingOfferV1,
-  decodeMachinePairingRequestV1,
   decodeMachinePathV1,
   decodeMachineRecordV1,
   decodeMachineResultReceiptV1,
@@ -102,26 +100,11 @@ const DTOS: {
   valid: Record<string, unknown>;
 }[] = [
   {
-    name: "pairing request",
-    decode: decodeMachinePairingRequestV1,
-    valid: {},
-  },
-  {
-    name: "pairing offer",
-    decode: decodeMachinePairingOfferV1,
-    valid: {
-      schemaVersion: 1,
-      code: "AB12-CD34-EF56",
-      machineId: MACHINE_ID,
-      expiresAt: NOW,
-    },
-  },
-  {
     name: "enrollment",
     decode: decodeMachineEnrollmentV1,
     valid: {
       schemaVersion: 1,
-      code: "AB12-CD34-EF56",
+      machineId: MACHINE_ID,
       label: "Tims-M5-MacBook-Pro.local",
       platform: "macos",
       agentVersion: "0.1.0",
@@ -259,7 +242,6 @@ describe("machine protocol decoders", () => {
     const decoded = decodeMachineCommandV1({ ...command });
     expect(Object.hasOwn(decoded, "claimedAt")).toBe(false);
     expect(Object.hasOwn(decoded, "leaseExpiresAt")).toBe(false);
-    expect(decodeMachinePairingRequestV1({})).toEqual({});
   });
 
   test("an unsupported schemaVersion is refused, not upgraded", () => {

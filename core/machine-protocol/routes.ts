@@ -19,7 +19,6 @@ import { MACHINE_LIMITS_V1, MachineDecodeError } from "./protocol.js";
 export const MACHINE_ROUTE_PREFIX_V1 = "/api/machines";
 
 export type MachineRouteNameV1 =
-  | "pair"
   | "enroll"
   | "socket"
   | "claim"
@@ -45,17 +44,11 @@ export interface MachineRouteV1 {
 export const MACHINE_ROUTES_V1: Readonly<
   Record<MachineRouteNameV1, MachineRouteV1>
 > = {
-  pair: {
-    method: "POST",
-    template: `${MACHINE_ROUTE_PREFIX_V1}/pair`,
-    audience: "browser",
-    publicRoute: false,
-  },
   enroll: {
     method: "POST",
     template: `${MACHINE_ROUTE_PREFIX_V1}/enroll`,
-    audience: "machine",
-    publicRoute: true,
+    audience: "browser",
+    publicRoute: false,
   },
   socket: {
     method: "GET",

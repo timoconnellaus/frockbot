@@ -15,7 +15,6 @@ describe("machine route table", () => {
       (name) => MACHINE_ROUTES_V1[name].publicRoute,
     );
     expect(publicRoutes).toEqual([
-      "enroll",
       "socket",
       "claim",
       "result",
@@ -38,7 +37,6 @@ describe("machine route table", () => {
   });
 
   test("builds each concrete path", () => {
-    expect(machineRoutePathV1("pair")).toBe("/api/machines/pair");
     expect(machineRoutePathV1("enroll")).toBe("/api/machines/enroll");
     expect(machineRoutePathV1("list")).toBe("/api/machines");
     expect(machineRoutePathV1("socket", { machineId: MACHINE_ID })).toBe(

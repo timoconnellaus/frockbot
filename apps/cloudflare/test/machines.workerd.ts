@@ -23,7 +23,6 @@ import {
   type MachineCommandV1,
   type MachineEnrollmentReceiptV1,
   type MachineListViewV1,
-  type MachinePairingOfferV1,
 } from "@frockbot/core/machine-protocol";
 import {
   nextMachineFrame as nextFrame,
@@ -33,7 +32,6 @@ import {
 } from "./machine-socket.ts";
 
 interface MachineRpc {
-  createMachinePairing(input: unknown): Promise<MachinePairingOfferV1>;
   enrollMachine(input: unknown): Promise<MachineEnrollmentReceiptV1>;
   claimMachineCommand(input: unknown): Promise<{
     status: string;
@@ -70,17 +68,16 @@ async function refusal(call: () => Promise<unknown>): Promise<string> {
   throw new Error("expected this call to be refused");
 }
 
-/** One enrolled machine, through the same two RPCs the routes call. */
+/** One enrolled machine, through the same RPC the route calls. */
 async function enrolled(userId: string, label = "Workerd-Mac.local") {
   const rpc = machines(userId);
-  const offer = await rpc.createMachinePairing({ schemaVersion: 1, userId });
+  const machineId = crypto.randomUUID();
   const receipt = await rpc.enrollMachine({
     schemaVersion: 1,
     userId,
-    machineId: offer.machineId,
     enrollment: {
       schemaVersion: 1,
-      code: offer.code,
+      machineId,
       label,
       platform: "macos",
       agentVersion: "0.0.1",
@@ -89,9 +86,9 @@ async function enrolled(userId: string, label = "Workerd-Mac.local") {
   });
   return {
     rpc,
-    machineId: offer.machineId,
+    machineId,
     token: receipt.token,
-    claims: { u: userId, m: offer.machineId, v: receipt.keyVersion },
+    claims: { u: userId, m: machineId, v: receipt.keyVersion },
     digest: await machineTokenDigestV1(receipt.token),
   };
 }
@@ -328,34 +325,46 @@ describe("registered machines in Workerd", () => {
     expect(await connected(userId)).toBe(false);
   });
 
-  test("a machine cannot be enrolled twice with one pairing code", async () => {
+  test("a replayed enrollment is one machine, and a revoked one is refused", async () => {
     const userId = `machines-once-${crypto.randomUUID()}`;
     const rpc = machines(userId);
-    const offer = await rpc.createMachinePairing({ schemaVersion: 1, userId });
     const enrollment = {
       schemaVersion: 1,
-      code: offer.code,
+      machineId: crypto.randomUUID(),
       label: "Once.local",
       platform: "macos",
       agentVersion: "0.0.1",
       capabilities: ["exec"],
     };
-    await rpc.enrollMachine({
+    const first = await rpc.enrollMachine({
       schemaVersion: 1,
       userId,
-      machineId: offer.machineId,
       enrollment,
     });
     await evictDurableObject(env.USER_CONFIGURATIONS.getByName(userId));
+    const replayed = await machines(userId).enrollMachine({
+      schemaVersion: 1,
+      userId,
+      enrollment,
+    });
+    expect(replayed.token).toBe(first.token);
+    expect(
+      (await machines(userId).listMachines({ schemaVersion: 1, userId }))
+        .machines,
+    ).toHaveLength(1);
+    await machines(userId).revokeMachine({
+      schemaVersion: 1,
+      userId,
+      machineId: enrollment.machineId,
+    });
     expect(
       await refusal(() =>
         machines(userId).enrollMachine({
           schemaVersion: 1,
           userId,
-          machineId: offer.machineId,
           enrollment,
         }),
       ),
-    ).toMatch(/invalid or has expired/);
+    ).toMatch(/cannot be enrolled again/);
   });
 });

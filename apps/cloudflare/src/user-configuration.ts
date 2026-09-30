@@ -212,6 +212,7 @@ import { cleanUserAppletsV1 } from "./plugin-panels-cleanup.js";
 import { cleanDefaultPackagesMarkerV1 } from "./default-packages-marker-cleanup.js";
 import { cleanRetiredOllamaWebSearchV1 } from "./ollama-web-search-cleanup.js";
 import { cleanUserMachineMessagesV1 } from "./machine-messages-cleanup.js";
+import { cleanRetiredMachinePairingsV1 } from "./machine-pairing-cleanup.js";
 import { ComputerLoginsLedgerV1 } from "@frockbot/app/shell/computer-logins";
 import {
   MACHINE_SOCKET_INTERNAL_PATH_V1,
@@ -395,9 +396,8 @@ interface UserConfigurationEnv
   /** The Connected apps provider key. Absent, nothing can be connected. */
   COMPOSIO_API_KEY?: string;
   /**
-   * Signs every machine token and pairing code. Absent closes the door: a
-   * pairing is refused rather than offered under a signature nothing could
-   * verify.
+   * Signs every machine token. Absent closes the door: an enrollment is
+   * refused rather than answered with a token nothing could verify.
    */
   MACHINE_TOKEN_SECRET?: string;
   /** Bot authority: archive and restore are carried to the Bot Durable Object. */
@@ -468,6 +468,7 @@ export class UserConfiguration
       await cleanRetiredOllamaWebSearchV1(this.ctx.storage);
       // Before anything decodes a machine record or a queued command.
       await cleanUserMachineMessagesV1(this.ctx.storage);
+      await cleanRetiredMachinePairingsV1(this.ctx.storage);
       await cleanRetiredBotTemplatesV1(
         this.ctx.storage,
         this.env.APPLICATION_ARTIFACTS,
@@ -3954,39 +3955,25 @@ export class UserConfiguration
   /**
    * The registered-machine RPCs (parity register rows 48, 49, 57g).
    *
-   * The four a machine reaches — its socket, claim, result, and the
-   * enrollment that precedes them — arrive from the gateway's pre-session
-   * `publicRoute`, so this object is the first place a *session* was never
-   * involved. That is exactly why each carries the token's own claims and its
+   * Enrollment arrives from the signed-in session. The ones a machine
+   * reaches — its socket, claim and result — arrive from the gateway's
+   * pre-session `publicRoute`, so this object is the first place a *session*
+   * was never involved. That is exactly why each carries the token's own claims and its
    * digest rather than a caller's assertion: the claims were verified against
    * the deployment secret at the edge, and the digest is checked here against
    * the machine record, which is the authority. `assertUserIdentity` still
    * runs, so a token naming another User cannot reach this object's state even
    * if the gateway addressed it wrongly.
    */
-  async createMachinePairing(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
-    const userId = await this.assertUserIdentity(request.userId as string);
-    return (await this.machineContribution()).createPairing(userId);
-  }
-
   async enrollMachine(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
-      machineId: rpcIdentifier,
       enrollment: rpcDecodedValue,
     });
     const userId = await this.assertUserIdentity(request.userId as string);
     const receipt = await (
       await this.machineContribution()
-    ).enroll(
-      {
-        userId,
-        machineId: request.machineId as string,
-        nonce: "",
-      },
-      request.enrollment,
-    );
+    ).enroll(userId, request.enrollment);
     const platform = (request.enrollment as { platform?: unknown } | null)
       ?.platform;
     this.emit({

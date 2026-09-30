@@ -2,19 +2,22 @@
 // session.
 //
 // The two halves of the product are both real here. The **app's** half is the
-// three session routes the Flutter client calls — `POST /api/machines/pair`,
+// three session routes the Flutter client calls — `POST /api/machines/enroll`,
 // `GET /api/machines`, `POST /api/machines/:id/revoke` — driven through
 // `SELF.fetch` under a session. The **agent** is the shipped
 // `MachineDeviceAgentV1`, with only `child_process` faked.
 //
-// So "run modules on this Mac" here does what it does on a laptop: the app asks
-// the backend for a one-time code with the user's session, hands it to its own
-// agent, and the agent enrols with no session at all. Nothing in
-// this file constructs a token, and nothing reads one.
+// So "run modules on this Mac" here does what it does on a laptop: the app
+// enrolls the Mac with the user's session and hands the machine token to its
+// own agent, which from then on speaks with no session at all. Nothing in this
+// file constructs a token.
 
 import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { MACHINE_LIMITS_V1 } from "@frockbot/core/machine-protocol";
+import {
+  decodeMachineEnrollmentReceiptV1,
+  type MachineEnrollmentReceiptV1,
+} from "@frockbot/core/machine-protocol";
 import {
   MachineDeviceAgentV1,
   createMemoryMachineSecretStoreV1,
@@ -71,6 +74,21 @@ function deviceAgent(): { agent: MachineDeviceAgentV1; ran: string[] } {
   return { agent, ran };
 }
 
+/** The desktop app's enrollment, through its session. */
+async function enroll(
+  userId: string,
+  agent: MachineDeviceAgentV1,
+  machineId: string = crypto.randomUUID(),
+): Promise<MachineEnrollmentReceiptV1> {
+  const response = await postAsUser(
+    userId,
+    "/api/machines/enroll",
+    agent.enrollmentRequest(machineId),
+  );
+  expect(response.status).toBe(200);
+  return decodeMachineEnrollmentReceiptV1(await response.json());
+}
+
 interface MachineRowV1 {
   machineId: string;
   label: string;
@@ -97,25 +115,15 @@ async function eventually(userId: string, connected: boolean): Promise<void> {
 }
 
 describe("the Machines surface", () => {
-  it("mints a code, reads the machine connected, and revokes it", async () => {
+  it("enrolls under the session, reads the machine connected, and revokes it", async () => {
     const userId = freshUserId("machines-settings");
     expect(await listMachines(userId)).toEqual([]);
 
-    // The code is minted under the session and spent by the agent, which holds
-    // no session of its own.
-    const offerResponse = await postAsUser(userId, "/api/machines/pair", {});
-    expect(offerResponse.status).toBe(200);
-    const offer = (await offerResponse.json()) as {
-      code: string;
-      machineId: string;
-      expiresAt: string;
-    };
-    expect(Date.parse(offer.expiresAt) - Date.now()).toBeLessThanOrEqual(
-      MACHINE_LIMITS_V1.pairingTtlMs,
-    );
-
+    // The machine is enrolled under the session, and the agent, which holds no
+    // session of its own, is handed its token.
     const device = deviceAgent();
-    await device.agent.pair(offer.code);
+    const offer = await enroll(userId, device.agent);
+    await device.agent.adopt(offer);
     expect(device.agent.status().enrolled).toBe(true);
 
     expect(await listMachines(userId)).toMatchObject([
@@ -153,13 +161,12 @@ describe("the Machines surface", () => {
     expect(device.ran).toEqual([]);
   });
 
-  it("refuses a code that was already spent", async () => {
+  it("answers a retried enrollment with the same machine", async () => {
     const userId = freshUserId("machines-replay");
-    const offerResponse = await postAsUser(userId, "/api/machines/pair", {});
-    const offer = (await offerResponse.json()) as { code: string };
-
-    await deviceAgent().agent.pair(offer.code);
-    await expect(deviceAgent().agent.pair(offer.code)).rejects.toThrow();
+    const agent = deviceAgent().agent;
+    const first = await enroll(userId, agent, "mac-replayed");
+    const second = await enroll(userId, agent, "mac-replayed");
+    expect(second.token).toBe(first.token);
     expect(await listMachines(userId)).toHaveLength(1);
   });
 });

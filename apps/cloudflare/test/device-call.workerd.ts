@@ -21,7 +21,7 @@ import {
   compositionGenerationIdV1,
   type CompositionMemberV1,
 } from "@frockbot/core/durable";
-import type { MachinePairingOfferV1 } from "@frockbot/core/machine-protocol";
+import type { MachineEnrollmentReceiptV1 } from "@frockbot/core/machine-protocol";
 import { fetchUpgradeMachineWebSocketV1 } from "@frockbot/app/machine/device";
 import { MachineAgentDriverV1 } from "@frockbot/app/machine/testing";
 import { dynamicToolInputV1 } from "./dynamic-tools.ts";
@@ -59,7 +59,7 @@ interface UserRpc {
   ): Promise<{ current: { generationId: string } }>;
   proposeComposition(input: unknown): Promise<void>;
   setFeatures(input: unknown): Promise<unknown>;
-  createMachinePairing(input: unknown): Promise<MachinePairingOfferV1>;
+  enrollMachine(input: unknown): Promise<MachineEnrollmentReceiptV1>;
 }
 
 function user(userId: string): UserRpc {
@@ -325,10 +325,11 @@ describe("a Plugin tool's device call", () => {
       label: "Beeper-Mac.local",
       platform: "macos",
     });
-    await desktop.enroll(
-      await user(identity.userId).createMachinePairing({
+    desktop.adopt(
+      await user(identity.userId).enrollMachine({
         schemaVersion: 1,
         userId: identity.userId,
+        enrollment: desktop.enrollment(),
       }),
     );
     expect(

@@ -11,7 +11,6 @@ import {
   admissionRefusalCopyV1,
   type AccountAccessStateV1,
 } from "@frockbot/app/admin/shared";
-import type { MachinePairingOfferV1 } from "@frockbot/core/machine-protocol";
 import worker from "../src/index.ts";
 import { ACCOUNT_ADMISSION_UNAVAILABLE_MESSAGE } from "../src/account-admission.ts";
 import { DEPLOYMENT_POLICY_SINGLETON_NAME } from "../src/deployment-policy.ts";
@@ -72,13 +71,6 @@ async function fixture() {
       trigger: { kind: "webhook" },
     },
   });
-  const machine = env.USER_CONFIGURATIONS.getByName(userId) as unknown as {
-    createMachinePairing(input: unknown): Promise<MachinePairingOfferV1>;
-  };
-  const offer = await machine.createMachinePairing({
-    schemaVersion: 1,
-    userId,
-  });
   const hook = (token = receipt.hook.token) =>
     new Request(
       `https://bot.frockbot.com/api/bots/${botId}/routines/brief/hook`,
@@ -88,22 +80,6 @@ async function fixture() {
         body: "{}",
       },
     );
-  const enroll = (code = offer.code) =>
-    new Request("https://bot.frockbot.com/api/machines/enroll", {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${code}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        schemaVersion: 1,
-        code,
-        label: "Test machine",
-        platform: "macos",
-        agentVersion: "0.0.1",
-        capabilities: ["exec", "files"],
-      }),
-    });
   const firings = () =>
     runInDurableObject(bot, async (_instance, state) =>
       [
@@ -129,7 +105,7 @@ async function fixture() {
         routineId: "brief",
       },
     });
-  return { userId, hook, enroll, firings, rotate };
+  return { userId, hook, firings, rotate };
 }
 
 function gateway(
@@ -164,7 +140,7 @@ function gateway(
 }
 
 for (const state of ["paused", "ended", "blocked"] as const) {
-  test(`${state} accounts cannot use existing webhook or pairing keys`, async () => {
+  test(`${state} accounts cannot use existing webhook keys`, async () => {
     const setup = await fixture();
     const app = gateway();
     expect((await app.fetch(setup.hook())).status).toBe(202);
@@ -172,7 +148,7 @@ for (const state of ["paused", "ended", "blocked"] as const) {
     expect(admittedFirings.length).toBeGreaterThan(0);
     await setAccess(setup.userId, state);
     app.accessed.length = 0;
-    for (const request of [setup.hook(), setup.enroll()]) {
+    for (const request of [setup.hook()]) {
       const response = await app.fetch(request);
       expect(response.status).toBe(403);
       expect(await response.json()).toEqual({
@@ -184,14 +160,13 @@ for (const state of ["paused", "ended", "blocked"] as const) {
     expect(await setup.firings()).toEqual(admittedFirings);
     await setAccess(setup.userId, "active");
     expect((await app.fetch(setup.hook())).status).toBe(202);
-    expect((await app.fetch(setup.enroll())).status).toBe(200);
   });
 }
 
 test("authority failure refuses new public work before User or Bot access", async () => {
   const setup = await fixture();
   const app = gateway({ outage: true });
-  for (const request of [setup.hook(), setup.enroll()]) {
+  for (const request of [setup.hook()]) {
     const response = await app.fetch(request);
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
@@ -205,7 +180,7 @@ test("authority failure refuses new public work before User or Bot access", asyn
 test("forged public credentials never query account authority", async () => {
   const setup = await fixture();
   const app = gateway({ outage: true });
-  for (const request of [setup.hook("forged"), setup.enroll("forged")]) {
+  for (const request of [setup.hook("forged")]) {
     expect((await app.fetch(request)).status).toBe(401);
   }
   expect(app.authorityReads()).toBe(0);
@@ -217,7 +192,6 @@ test("an administrator remains admitted while blocked and authority is unavailab
   await setAccess(setup.userId, "blocked");
   const app = gateway({ admin: `${setup.userId}@native.test`, outage: true });
   expect((await app.fetch(setup.hook())).status).toBe(202);
-  expect((await app.fetch(setup.enroll())).status).toBe(200);
   expect(app.authorityReads()).toBe(0);
 });
 
@@ -229,12 +203,10 @@ test("development keys work without stored identities only with development auth
   for (const development of [undefined, "false"]) {
     const app = gateway({ development });
     expect((await app.fetch(setup.hook())).status).toBe(401);
-    expect((await app.fetch(setup.enroll())).status).toBe(401);
     expect(app.accessed).toEqual([]);
   }
   const app = gateway({ development: "true", outage: true });
   expect((await app.fetch(setup.hook())).status).toBe(202);
-  expect((await app.fetch(setup.enroll())).status).toBe(200);
   expect(app.authorityReads()).toBe(0);
 });
 

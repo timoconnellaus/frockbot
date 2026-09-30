@@ -24,7 +24,6 @@ import { nextMachineFrame, openMachineSocket } from "./machine-socket.ts";
 import type {
   MachineCommandV1,
   MachineEnrollmentReceiptV1,
-  MachinePairingOfferV1,
 } from "@frockbot/core/machine-protocol";
 import type { MachineIntentRecordV1 } from "@frockbot/app/machine/intent";
 import { machineIntentKeyV1 } from "@frockbot/app/machine/intent";
@@ -57,7 +56,6 @@ interface BotRpc {
 }
 
 interface UserRpc {
-  createMachinePairing(input: unknown): Promise<MachinePairingOfferV1>;
   enrollMachine(input: unknown): Promise<MachineEnrollmentReceiptV1>;
   listMachines(
     input: unknown,
@@ -86,14 +84,13 @@ function userRpc(userId: string): UserRpc {
  */
 async function enrolled(userId: string) {
   const rpc = userRpc(userId);
-  const offer = await rpc.createMachinePairing({ schemaVersion: 1, userId });
+  const machineId = crypto.randomUUID();
   const receipt = await rpc.enrollMachine({
     schemaVersion: 1,
     userId,
-    machineId: offer.machineId,
     enrollment: {
       schemaVersion: 1,
-      code: offer.code,
+      machineId,
       label: "Approval-Mac.local",
       platform: "macos",
       agentVersion: "0.0.1",
@@ -101,8 +98,8 @@ async function enrolled(userId: string) {
     },
   });
   const machine = {
-    machineId: offer.machineId,
-    claims: { u: userId, m: offer.machineId, v: receipt.keyVersion },
+    machineId,
+    claims: { u: userId, m: machineId, v: receipt.keyVersion },
     digest: await machineTokenDigestV1(receipt.token),
   };
   const socket = await openMachineSocket(userId, machine);

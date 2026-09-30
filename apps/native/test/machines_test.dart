@@ -91,7 +91,7 @@ void main() {
     secondApi.close();
   });
 
-  testWidgets('the page offers no way to mint a code, only to revoke', (
+  testWidgets('the page offers no way to enroll, only to revoke', (
     tester,
   ) async {
     final store = MemoryStore();
@@ -110,7 +110,7 @@ void main() {
     expect(find.text('Studio laptop'), findsOneWidget);
     expect(find.textContaining('pairing code'), findsNothing);
     expect(
-      paths.where((path) => path.startsWith('/api/machines/pair')),
+      paths.where((path) => path.startsWith('/api/machines/enroll')),
       isEmpty,
     );
     // The desktop app pairs its own Mac; the page no longer knows the command.

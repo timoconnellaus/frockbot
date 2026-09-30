@@ -3,8 +3,9 @@ import CryptoKit
 import FlutterMacOS
 import Security
 
-/// The module host: `device-host.js` under the bundled Deno, which pairs this
-/// Mac and runs the account's device modules while the app is open (ADR 0037).
+/// The module host: `device-host.js` under the bundled Deno, which holds the
+/// machine token Flutter enrolled this Mac for and runs the account's device
+/// modules while the app is open (ADR 0037).
 ///
 /// The host speaks one JSON object per line over stdin and stdout. It holds no
 /// secret of its own: the machine token rests in this app's Keychain, read and
@@ -58,12 +59,20 @@ final class DeviceHostBridge {
     set { UserDefaults.standard.set(newValue, forKey: "deviceHostDeclined:" + account) }
   }
 
+  /// How this Mac describes itself when Flutter enrolls it.
+  private var label: String {
+    String((Host.current().localizedName ?? ProcessInfo.processInfo.hostName).prefix(64))
+  }
+  private var version: String {
+    Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+  }
+
   private var snapshot: [String: Any] {
     [
       "userId": userId, "origin": origin, "available": available,
       "running": process != nil, "ready": ready, "enrolled": enrolled,
       "connected": connected, "declined": !userId.isEmpty && declined,
-      "modules": modules, "error": error,
+      "modules": modules, "error": error, "label": label, "version": version,
     ]
   }
 
@@ -101,10 +110,10 @@ final class DeviceHostBridge {
         self.origin = origin
         self.userId = user
         self.start()
-      case "pair":
+      case "adopt":
         self.declined = false
         self.error = ""
-        self.send(["type": "pair", "code": args["code"] as? String ?? ""])
+        self.send(["type": "adopt", "receipt": args["receipt"] ?? NSNull()])
       case "forget":
         self.declined = true
         self.error = ""
@@ -210,8 +219,7 @@ final class DeviceHostBridge {
         "supportDir": support.path, "deno": deno.path, "runtime": runtime.path,
         "appleEventsHelper": appleEventsHelper,
         "home": NSHomeDirectory(),
-        "label": String((Host.current().localizedName ?? ProcessInfo.processInfo.hostName).prefix(64)),
-        "version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0",
+        "label": label, "version": version,
       ])
     } catch {
       stop()

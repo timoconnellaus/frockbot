@@ -1,8 +1,9 @@
 // The desktop's module host: the process the Mac app starts under its bundled
 // Deno (ADR 0037).
 //
-// It is the device agent with nothing to execute: it pairs, holds the machine
-// socket, and runs the account's device modules. The app speaks to it in one
+// It is the device agent with nothing to execute: it holds the machine token
+// the signed-in app enrolled it for, holds the machine socket, and runs the
+// account's device modules. The app speaks to it in one
 // JSON object per line over stdin and stdout, and holds what the host must not:
 // the machine token rests in the app's Keychain, read and written through
 // `native` requests. A module's Apple Events are sent from here, each script in
@@ -12,7 +13,7 @@
 // It also relays the account's local model requests to model servers on this
 // Mac's loopback (`relay.ts`), and nowhere else.
 //
-//   app → host   start, pair, unpair, reply
+//   app → host   start, adopt, unpair, reply
 //   host → app   native, status, error
 
 import { createInterface } from "node:readline";
@@ -215,10 +216,10 @@ async function command(input: Record<string, unknown>): Promise<void> {
     return;
   }
   if (!agent) throw new Error("the module host is not started");
-  if (input.type === "pair") {
+  if (input.type === "adopt") {
     await agent.stop();
     try {
-      await agent.pair(text(input.code, "code"));
+      await agent.adopt(input.receipt);
     } finally {
       agent.start();
     }
