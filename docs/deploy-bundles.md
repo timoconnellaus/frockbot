@@ -194,8 +194,8 @@ bun scripts/deploy-bundle.ts prove \
 `--from` and `--to` also take a local manifest path, for a bundle built with
 `scripts/build-deploy-bundle.ts`.
 
-The secrets file must hold `JEV_API_KEY`, and `SPRITES_TOKEN` unless you pass
-`--no-computer-host`. The deployer mints the rest into the same file.
+The secrets file must hold `SPRITES_TOKEN` unless you pass `--no-computer-host`.
+The deployer mints the rest into the same file.
 
 A conversation needs a person. An Access deployment stores no identities, so the
 debug surface cannot speak for anyone. The script therefore talks as whoever's

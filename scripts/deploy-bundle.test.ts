@@ -166,7 +166,6 @@ function install(overrides: Partial<InstallV1> = {}): InstallV1 {
       MACHINE_TOKEN_SECRET: "t",
       NATIVE_TOKEN_SECRET: "t",
       SPRITES_TOKEN: "t",
-      JEV_API_KEY: "t",
     },
     ...overrides,
   };
@@ -463,7 +462,7 @@ describe("one Worker's upload", () => {
       name: "ACCESS_AUD",
       text: "d".repeat(64),
     });
-    expect(byName.get("JEV_API_KEY")!.type).toBe("secret_text");
+    expect(byName.get("SPRITES_TOKEN")!.type).toBe("secret_text");
     expect(byName.has("OPENAI_API_KEY")).toBe(false);
     expect(metadata.keep_bindings).toEqual(["secret_text", "secret_key"]);
     expect(metadata.assets.jwt).toBe("jwt");
