@@ -54,6 +54,7 @@ import {
   voiceProviderDailyAudioSecondsV1,
   type VoiceFunctionCallV1,
   type VoiceProviderEndpointV1,
+  type VoiceProviderKeyNameV1,
   type VoiceProviderV1,
   type VoiceSessionCodecV1,
   type VoiceSessionEventV1,
@@ -328,19 +329,16 @@ export interface VoiceAssistantEnv {
   FLOCK_AI_GATEWAY_TOKEN?: string;
 }
 
+type VoiceProviderEnvV1 = Pick<
+  VoiceAssistantEnv,
+  VoiceProviderKeyNameV1 | "VOICE_PROVIDER"
+>;
+
 /** The provider this deployment's calls run on, and the key that opens it. */
-export function voiceAssistantProviderV1(env: {
-  GEMINI_API_KEY?: string;
-  OPENAI_API_KEY?: string;
-  VOICE_PROVIDER?: string;
-}): VoiceProviderChoiceV1 {
-  return chooseVoiceProviderV1({
-    deployment: env.VOICE_PROVIDER,
-    keys: {
-      GEMINI_API_KEY: env.GEMINI_API_KEY,
-      OPENAI_API_KEY: env.OPENAI_API_KEY,
-    },
-  });
+export function voiceAssistantProviderV1(
+  env: VoiceProviderEnvV1,
+): VoiceProviderChoiceV1 {
+  return chooseVoiceProviderV1({ deployment: env.VOICE_PROVIDER, keys: env });
 }
 
 /**
@@ -351,12 +349,9 @@ export function voiceAssistantProviderV1(env: {
  * update, but a deployment without it can hold a conversation, so it does not
  * gate the control.
  */
-export function voiceAssistantConfiguredV1(env: {
-  GEMINI_API_KEY?: string;
-  OPENAI_API_KEY?: string;
-  VOICE_PROVIDER?: string;
-  VOICE_ASSISTANT_UPSTREAM_URL?: string;
-}): boolean {
+export function voiceAssistantConfiguredV1(
+  env: VoiceProviderEnvV1 & { VOICE_ASSISTANT_UPSTREAM_URL?: string },
+): boolean {
   return Boolean(
     voiceAssistantProviderV1(env).key ||
     env.VOICE_ASSISTANT_UPSTREAM_URL?.trim(),
@@ -422,6 +417,8 @@ interface LiveCall {
   resumable: boolean;
   /** Semantic setup identity this handle was issued for. */
   setupFingerprint?: string;
+  /** The provider the newest session was opened on. */
+  provider?: VoiceProviderV1;
   /** The opening attempt currently bound to inbound and outbound PCM. */
   attemptId?: string;
   inboundSequence?: number;
@@ -1076,10 +1073,10 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     return new VoiceLedgerV1(
       this.voiceStorage(),
       this.name,
-      voiceProviderDailyAudioSecondsV1(this.voiceProvider().rates, {
-        audioInSeconds: VOICE_METER_CAPS_V1.audioInSeconds,
-        audioOutSeconds: VOICE_METER_CAPS_V1.audioOutSeconds,
-      }),
+      voiceProviderDailyAudioSecondsV1(
+        this.voiceProvider().rates,
+        VOICE_METER_CAPS_V1,
+      ),
     );
   }
 
@@ -2534,6 +2531,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     call.inboundSequence = undefined;
     call.outboundSequence = 0;
     const timing = this.timingSink(connection);
+    call.provider = provider;
     const session = new VoiceSessionV1({
       provider,
       endpoint,
@@ -2713,7 +2711,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       now: this.now(),
       ...(handover.length > 0 ? { handover } : {}),
       ...(runningTasks.length > 0 ? { runningTasks } : {}),
-      ...(provider.webSearch ? {} : { webSearch: false }),
+      webSearch: provider.webSearch,
     });
     return {
       instruction,
@@ -2762,12 +2760,13 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   }
 
   private async persistResumption(call: LiveCall): Promise<void> {
-    if (!call.setupFingerprint) return;
+    const provider = call.provider;
+    if (!call.setupFingerprint || !provider) return;
     const record: VoiceResumptionRecordV1 = {
       schemaVersion: 1,
       callId: call.callId,
       botId: call.botId,
-      model: this.voiceProvider().model,
+      model: provider.model,
       fingerprint: call.setupFingerprint,
       ...(call.resumptionHandle ? { handle: call.resumptionHandle } : {}),
       resumable: call.resumable === true,
@@ -3208,7 +3207,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       return;
     }
     if (
-      code === this.voiceProvider().unknownHandleCloseCode &&
+      code === call.provider?.unknownHandleCloseCode &&
       call.resumptionHandle
     ) {
       call.resumptionHandle = undefined;

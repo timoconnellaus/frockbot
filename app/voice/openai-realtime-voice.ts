@@ -30,11 +30,11 @@
 //   that is read as Gemini's `goAway`, so the object reopens rather than
 //   telling the person the line dropped.
 
+import { decodeGeminiBase64V1 } from "./gemini-live.js";
 import {
-  decodeGeminiBase64V1,
-  encodeGeminiBase64V1,
-  GEMINI_LIVE_OUTPUT_SAMPLE_RATE_V1,
-} from "./gemini-live.js";
+  voiceRealtimeAppendV1,
+  VOICE_REALTIME_PCM_RATE_V1,
+} from "./openai-realtime.js";
 import type {
   VoiceFunctionCallV1,
   VoiceFunctionDeclarationV1,
@@ -45,6 +45,10 @@ import type {
   VoiceSessionSetupV1,
   VoiceToolAnswerV1,
 } from "./provider.js";
+import {
+  VOICE_ASSISTANT_INPUT_SAMPLE_RATE_V1,
+  VOICE_ASSISTANT_OUTPUT_BYTES_PER_SECOND_V1,
+} from "./shared.js";
 
 export const OPENAI_REALTIME_VOICE_MODEL_V1 = "gpt-realtime-2.1";
 
@@ -58,11 +62,11 @@ export const OPENAI_REALTIME_VOICE_ENDPOINT_V1 =
  */
 export const OPENAI_REALTIME_VOICE_TRANSCRIPTION_MODEL_V1 = "gpt-4o-transcribe";
 
-/** The only rate the socket takes, both ways. */
-export const OPENAI_REALTIME_VOICE_SAMPLE_RATE_V1 = 24_000;
-/** What the client sends. */
-const CLIENT_INPUT_SAMPLE_RATE = 16_000;
-const OUTPUT_BYTES_PER_MS = (OPENAI_REALTIME_VOICE_SAMPLE_RATE_V1 * 2) / 1000;
+const OUTPUT_BYTES_PER_MS = VOICE_ASSISTANT_OUTPUT_BYTES_PER_SECOND_V1 / 1000;
+const OUTPUT_MIME = `audio/pcm;rate=${VOICE_REALTIME_PCM_RATE_V1}`;
+/** The upsampler's step, in thirds of an input sample: 2 for 16 kHz to 24 kHz. */
+const UPSAMPLE_STEP =
+  (VOICE_ASSISTANT_INPUT_SAMPLE_RATE_V1 * 3) / VOICE_REALTIME_PCM_RATE_V1;
 
 /** The voice a Bot gets when its own has no counterpart here. */
 export const DEFAULT_OPENAI_REALTIME_VOICE_V1 = "marin";
@@ -141,17 +145,13 @@ export function openAiToolSchemaV1(value: unknown): unknown {
 
 export function buildOpenAiRealtimeSessionV1(
   options: VoiceSessionSetupV1,
-  model: string = OPENAI_REALTIME_VOICE_MODEL_V1,
 ): Record<string, unknown> {
-  const format = {
-    type: "audio/pcm",
-    rate: OPENAI_REALTIME_VOICE_SAMPLE_RATE_V1,
-  };
+  const format = { type: "audio/pcm", rate: VOICE_REALTIME_PCM_RATE_V1 };
   return {
     type: "session.update",
     session: {
       type: "realtime",
-      model,
+      model: OPENAI_REALTIME_VOICE_MODEL_V1,
       instructions: options.instruction,
       output_modalities: ["audio"],
       audio: {
@@ -193,43 +193,34 @@ export class OpenAiRealtimeUpsamplerV1 {
   private position = 0;
 
   push(pcm: Uint8Array): Uint8Array {
-    const inView = new DataView(pcm.buffer, pcm.byteOffset, pcm.byteLength);
-    const count = Math.floor(pcm.byteLength / 2);
+    const view = new DataView(pcm.buffer, pcm.byteOffset, pcm.byteLength);
     const offset = this.previous === undefined ? 0 : 1;
-    const length = count + offset;
-    const sample = (index: number): number =>
-      offset === 1 && index === 0
-        ? this.previous!
-        : inView.getInt16((index - offset) * 2, true);
+    const length = Math.floor(pcm.byteLength / 2) + offset;
     if (length === 0) return new Uint8Array(0);
-    const step =
-      (CLIENT_INPUT_SAMPLE_RATE * 3) / OPENAI_REALTIME_VOICE_SAMPLE_RATE_V1;
-    const out: number[] = [];
+    const previous = this.previous ?? 0;
+    const sample = (index: number): number =>
+      index < offset ? previous : view.getInt16((index - offset) * 2, true);
     // `position` is in thirds; the last sample is only interpolated from once
-    // the next chunk supplies its neighbour.
-    while (true) {
+    // the next chunk supplies its neighbour, so the last output lands on it.
+    const last = (length - 1) * 3;
+    const count =
+      this.position > last
+        ? 0
+        : Math.floor((last - this.position) / UPSAMPLE_STEP) + 1;
+    const bytes = new Uint8Array(count * 2);
+    const out = new DataView(bytes.buffer);
+    for (let written = 0; written < count; written += 1) {
       const index = Math.floor(this.position / 3);
       const fraction = (this.position % 3) / 3;
-      if (index > length - 1) break;
-      if (fraction > 0 && index + 1 > length - 1) break;
       const value =
         fraction === 0
           ? sample(index)
           : sample(index) * (1 - fraction) + sample(index + 1) * fraction;
-      out.push(Math.round(value));
-      this.position += step;
+      out.setInt16(written * 2, Math.round(value), true);
+      this.position += UPSAMPLE_STEP;
     }
-    this.position -= (length - 1) * 3;
+    this.position -= last;
     this.previous = sample(length - 1);
-    const bytes = new Uint8Array(out.length * 2);
-    const outView = new DataView(bytes.buffer);
-    out.forEach((value, index) => {
-      outView.setInt16(
-        index * 2,
-        Math.max(-32768, Math.min(32767, value)),
-        true,
-      );
-    });
     return bytes;
   }
 }
@@ -258,24 +249,16 @@ export class OpenAiRealtimeVoiceCodecV1 implements VoiceSessionCodecV1 {
   private reply: { itemId: string; bytes: number; firstAt: number } | undefined;
   private readonly upsampler = new OpenAiRealtimeUpsamplerV1();
 
-  constructor(
-    private readonly model: string = OPENAI_REALTIME_VOICE_MODEL_V1,
-    private readonly now: () => number = () => Date.now(),
-  ) {}
+  constructor(private readonly now: () => number = () => Date.now()) {}
 
   setup(options: VoiceSessionSetupV1): string[] {
-    return [JSON.stringify(buildOpenAiRealtimeSessionV1(options, this.model))];
+    return [JSON.stringify(buildOpenAiRealtimeSessionV1(options))];
   }
 
   audio(pcm: Uint8Array): string[] {
     const upsampled = this.upsampler.push(pcm);
     if (upsampled.byteLength === 0) return [];
-    return [
-      JSON.stringify({
-        type: "input_audio_buffer.append",
-        audio: encodeGeminiBase64V1(upsampled),
-      }),
-    ];
+    return [voiceRealtimeAppendV1(upsampled)];
   }
 
   textTurn(text: string): string[] {
@@ -348,7 +331,7 @@ export class OpenAiRealtimeVoiceCodecV1 implements VoiceSessionCodecV1 {
         events.push({
           kind: "audio",
           pcm,
-          mimeType: `audio/pcm;rate=${GEMINI_LIVE_OUTPUT_SAMPLE_RATE_V1}`,
+          mimeType: OUTPUT_MIME,
         });
         break;
       }

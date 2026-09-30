@@ -268,7 +268,7 @@ describe("the server's events", () => {
   describe("barge-in", () => {
     test("speech over a reply still playing interrupts and truncates to what was heard", () => {
       let now = 1_000;
-      const codec = new OpenAiRealtimeVoiceCodecV1(undefined, () => now);
+      const codec = new OpenAiRealtimeVoiceCodecV1(() => now);
       codec.decode(JSON.stringify({ type: "response.created" }));
       // Two seconds of audio at 48 bytes a millisecond, sent at once.
       codec.decode(audio("item_9", 96_000));
@@ -295,7 +295,7 @@ describe("the server's events", () => {
 
     test("speech after the reply has all been played is just speech", () => {
       let now = 1_000;
-      const codec = new OpenAiRealtimeVoiceCodecV1(undefined, () => now);
+      const codec = new OpenAiRealtimeVoiceCodecV1(() => now);
       codec.decode(JSON.stringify({ type: "response.created" }));
       codec.decode(audio("item_9", 4_800));
       codec.decode(

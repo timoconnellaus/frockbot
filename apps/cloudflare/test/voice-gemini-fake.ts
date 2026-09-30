@@ -55,6 +55,7 @@ export interface GeminiFakeFrameV1 {
 export class GeminiFakeV1 {
   readonly frames: GeminiFakeFrameV1[] = [];
   readonly url: string;
+  readonly headers: Record<string, string> = {};
   private readonly socket: WebSocket;
   private open = true;
 

@@ -482,7 +482,7 @@ describe("the system prompt", () => {
       memory: { logDays: 30 },
       now: new Date("2026-09-12T23:35:42.000Z"),
     };
-    expect(renderVoiceSystemPromptV1(base)).toContain(
+    expect(renderVoiceSystemPromptV1({ ...base, webSearch: true })).toContain(
       "You can search the web yourself",
     );
     const blind = renderVoiceSystemPromptV1({ ...base, webSearch: false });

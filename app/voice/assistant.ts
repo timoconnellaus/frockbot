@@ -120,7 +120,7 @@ export interface VoiceAssistantPromptInputV1 {
    */
   runningTasks?: readonly VoiceRunningTaskV1[];
   /**
-   * False when the session cannot search the web itself (OpenAI Realtime), so
+   * Whether the session searches the web itself. Without it (OpenAI Realtime)
    * the model hands a question about today's facts to `subagent` instead of
    * being told it can look it up.
    */
@@ -288,7 +288,7 @@ export function renderVoiceSystemPromptV1(
       "- Use `status` before claiming what you are working on. Never guess from memory.",
       "- Read what was already said with `read_history`, or find an older conversation with `search_history`. These only read existing conversation and never start new work. Use `status` for live progress; search is an index of settled conversations and can lag.",
       "- Only use `cancel` when the person clearly asks you to stop what you are doing, and say what you stopped.",
-      input.webSearch === false
+      !input.webSearch
         ? "- You cannot look anything up yourself. A question that needs something current — news, weather, prices, opening hours — goes to `subagent` like any other work."
         : "- You can search the web yourself when a question needs something current. Say what you found, not how you found it.",
     );

@@ -13,6 +13,8 @@ const SAMPLE_BYTE = String.fromCharCode(1);
 export interface VoiceUpstreamFakeV1 {
   readonly frames: GeminiFakeFrameV1[];
   readonly url: string;
+  /** What the upgrade carried; Gemini's key rides the url, so it has none. */
+  readonly headers: Record<string, string>;
   hears(text: string): void;
   hearsInterim(text: string): void;
   says(text: string, audioBytes?: number): void;

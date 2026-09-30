@@ -163,8 +163,7 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
 
   /** The headers the newest session was opened with. */
   async probeUpstreamHeaders(): Promise<Record<string, string>> {
-    const fake = this.#fake();
-    return fake instanceof OpenAiRealtimeFakeV1 ? { ...fake.headers } : {};
+    return { ...(this.#fake()?.headers ?? {}) };
   }
 
   protected override modelSilenceTimeoutMs(): number {
