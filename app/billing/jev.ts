@@ -1,7 +1,7 @@
 // What a Jev decision the Computer asks for costs the account, and how it is
 // charged.
 //
-// Jev is priced on input tokens alone; its output is free. The account pays
+// Jev on Workers AI is priced on input tokens alone; its output is free. The account pays
 // twice the provider's rate, as it pays for every other platform-paid
 // resource. The tokens are only known once Jev answers, so each request
 // reserves a ceiling from its size first — a token is never shorter than a

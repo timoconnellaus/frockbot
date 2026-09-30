@@ -7,8 +7,10 @@ import {
 import {
   fakeJevAnswersV1,
   fakeJevFetchV1,
+  fakeWorkersAiJevRunV1,
   SUPERVISION_QUESTION_SETS_V1,
 } from "./testing.js";
+import { hostedJevClientV1 } from "./jev.js";
 import { turnStartQuestionsV1 } from "./turn-start.js";
 import { outcomeQuestionsV1 } from "./outcome.js";
 import { questionRouteQuestionsV1 } from "./question-route.js";
@@ -85,4 +87,23 @@ test("a harness Turn's claims are released and its long Turns never stuck", () =
       signals: ["repeated_call", "repeated_error"],
     }).stuck,
   ).toBe(false);
+});
+
+test("as the AI binding, the fake answers supervision through the production transport", async () => {
+  const client = hostedJevClientV1({
+    AI: {
+      run: async (model: string, input: unknown) =>
+        fakeWorkersAiJevRunV1(model, input) ?? { image: "" },
+    },
+  });
+  const answer = await client!.systemOne({
+    state: {},
+    questions: responseReviewQuestionsV1,
+  });
+  expect(answer.model).toBe("workers-ai:jev-1.13.0");
+  expect(answer.answers.alignment.choice).toBe("on_task");
+  expect(fakeWorkersAiJevRunV1("@cf/flux", {})).toBeUndefined();
+  expect(() =>
+    fakeWorkersAiJevRunV1("typesafe/jev", { questions: { other: {} } }),
+  ).toThrow("Turn supervision only");
 });

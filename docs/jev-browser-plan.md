@@ -127,10 +127,11 @@ same door at `https://jev.internal/v1/system-one`.
 - **Authority.** A request is answered only while the `computer_exec` or
   `computer_browser_task` call that made it is running, under that call's
   Turn, exactly as credentialed egress is. Outside a call it is refused.
-- **Shape.** The body is a TypeSafe System One request. The app sets the
-  model; the request's size is capped at 64 KB and 32 questions.
-- **Charge.** Before calling TypeSafe the app reserves the most the request
-  could cost; after, it settles on what TypeSafe reports.
+- **Shape.** The body is a Jev System One request. A model it names is
+  ignored: Workers AI answers with the Jev version it serves. The request's
+  size is capped at 64 KB and 32 questions.
+- **Charge.** Before calling Jev the app reserves the most the request
+  could cost; after, it settles on what Jev reports.
   - Rate: twice Jev's, as for every platform-paid resource — Jev is
     US$0.042 per million input tokens and free on output, so the account pays
     0.084 micro-dollars per input token (`jev-proxy-<date>` pricing version).
@@ -138,14 +139,13 @@ same door at `https://jev.internal/v1/system-one`.
     least a byte) times the rate, rounded up to a whole micro-dollar. A 64 KB
     request reserves 6 micro-dollars.
   - Settle: `usage.input_tokens` from the answer times the rate, rounded up
-    to a whole micro-dollar, recording the answering model and TypeSafe's
-    request id.
+    to a whole micro-dollar, recording the answering model.
   - Key: `jev:<call effect id>:<n>`, one per request, so a re-run after an
     eviction finds its reservation and is never billed twice.
-  - A refusal from TypeSafe releases the reservation. A timeout or a dropped
+  - A refusal from Jev releases the reservation. A timeout or a dropped
     connection leaves it reserved for reconciliation, as a web search does:
-    whether TypeSafe counted it is unknown.
-  - An account that cannot spend is refused before TypeSafe is asked.
+    whether Jev counted it is unknown.
+  - An account that cannot spend is refused before Jev is asked.
 - **Where it shows.** A `jev` operation kind in the ledger, a `jev` spend
   category on the billing page, and the calls itemised under the task on the
   Work view.
