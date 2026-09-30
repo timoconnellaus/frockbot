@@ -10,17 +10,17 @@
 
 **A FrockBot account is an identity and a credit wallet.** Every service a Bot uses is either **FrockBot's**, paid from credit, or **yours**: your key, your account or your machine. The person chooses per service.
 
-| Service                                  | FrockBot's             | Yours                                                                               |
-| ---------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------- |
-| **App** (conversation, memory, Routines) | frockbot.com           | Self-hosted in your Cloudflare account ([§6](#6-self-hosting))                      |
-| **Computer**                             | FrockBot's Computer    | Your Sprites, Your server, Your Mac ([§3](#3-where-your-computer-runs))             |
-| **Models**                               | Frock AI               | Any connected provider, Cloudflare, or a local model ([§4](#4-models-and-services)) |
-| **Jev**                                  | FrockBot's Jev         | Your Cloudflare account's Workers AI                                                |
-| **Voice calls**                          | Gemini Live on our key | Your Gemini or OpenAI key                                                           |
-| **Dictation**                            | Our transcription      | Your key, or on-device in the Mac app                                               |
-| **Web search**                           | Brave on our key       | Your search key                                                                     |
-| **Image generation**                     | Our image model        | Your image provider key                                                             |
-| **Connected apps**                       | Our Composio           | Your Composio key                                                                   |
+| Service                                  | FrockBot's                                                                      | Yours                                                                                                                                          |
+| ---------------------------------------- | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| **App** (conversation, memory, Routines) | frockbot.com                                                                    | Self-hosted in your Cloudflare account ([§6](#6-self-hosting))                                                                                 |
+| **Computer**                             | FrockBot's Computer                                                             | Your Sprites, Your server, Your Mac ([§3](#3-where-your-computer-runs))                                                                        |
+| **Models**                               | Frock AI                                                                        | Any connected provider, Cloudflare, or a local model ([§4](#4-models-and-services))                                                            |
+| **Jev**                                  | FrockBot's Jev                                                                  | Cloudflare Workers AI (`typesafe/jev`), TypeSafe's API, OpenRouter (Jev or Jev Router), or a custom model behind TypeSafe's System One adapter |
+| **Voice calls**                          | Gemini Live on our key                                                          | Google (Gemini Live) on your key; ChatGPT Realtime later                                                                                       |
+| **Dictation**                            | Our transcription                                                               | On your device (Parakeet or whisper.cpp in the Mac app, Apple's speech on iPhone), Cloudflare Whisper, OpenAI, Groq, Deepgram or ElevenLabs    |
+| **Web search**                           | Brave on our key                                                                | Your search key                                                                                                                                |
+| **Images**                               | Our image model                                                                 | Cloudflare (Flux), OpenAI, Google, OpenRouter, or local (Draw Things, ComfyUI)                                                                 |
+| **Connected apps**                       | Our Composio, which needs at least the BYO plan, also for a self-hosted install | Your Composio key                                                                                                                              |
 
 Rules that hold across every service:
 
@@ -42,7 +42,8 @@ Rules that hold across every service:
 - **Standard and Plus people can bring their own too.** Their included credit then simply goes further.
 - **The setup suggests a plan; the person picks.** The marketing chooser and the app recommend a plan from the setup (all yours → BYO; any of our Computer or models → Standard). Changing setup later suggests a change of plan but never makes one.
 - **Jev fair use on BYO.** Past US$2 of Jev in a month, Jev use draws from credit like any other service. With no credit, Turns that need Jev are refused with a message saying why, which follows from Jev having no permissive failure mode.
-- **A linked self-hosted install needs credit, not a plan.** Top-ups must become spendable without a subscription for these accounts. Today purchased credit needs a paid subscription (`docs/billing.md`).
+- **Connected apps through FrockBot need at least the BYO plan,** on frockbot.com and on a linked self-hosted install alike.
+- **Otherwise a linked self-hosted install needs credit, not a plan.** Top-ups must become spendable without a subscription for these accounts. Today purchased credit needs a paid subscription (`docs/billing.md`).
 - **Payments stay in `PaymentsPackageV1`.** The BYO plan is one more entry in `STRIPE_PLAN_V1`'s `subscriptions`, with no trial and no included credit. Included Jev and Composio are overhead the plan covers, as memory embeddings are today.
 
 ---
@@ -171,6 +172,12 @@ It is still a model call carrying a `requestId` idempotency key, and it costs no
 
 - **Voice calls** become a job with its own provider: Gemini Live today, OpenAI Realtime beside it, each on FrockBot's key or the person's.
 - **Dictation** gains an on-device option in the Mac app, following [OpenWhispr](https://github.com/OpenWhispr/openwhispr): a bundled whisper.cpp or Parakeet model, downloaded on first use, so speech never leaves the Mac. Cloud dictation stays for the phone and the web.
+
+### Each service is its own choice
+
+Chat, Jev, voice calls, dictation and images are separate sections, each with its own providers, because their providers differ: Jev has four ways to reach it, voice needs a realtime speech protocol, and dictation has a long tail of transcription services. A person's accounts are shared across sections: connecting Google once serves chat and voice.
+
+On a self-hosted install, Jev, dictation and images default to the account's own Workers AI (Jev, Whisper, Flux), and chat adds Cloudflare Workers AI, so a fresh install needs nothing configured.
 
 ### Settings UI: AI setup
 
