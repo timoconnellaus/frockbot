@@ -229,7 +229,7 @@ Jev runs. Drops are recorded, not enforced.
   `Re: your order` / empty body must be `is_or_might_be`, clear newsletter
   `clearly_unrelated`).
 - Runner beside `call-review-run.ts`. `bun run eval:routine-event`. Not in
-  the pre-push gate. Reads `JEV_API_KEY`.
+  the pre-push gate. Reads Jev credentials (`app/evals/jev-client.ts`).
 - Hosted adapter implements the judge. Shadow: classify, write a skipped
   _summary that did not happen_ only to logs / a non-user record, still
   admit the Turn.

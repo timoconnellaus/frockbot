@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
+import { EVAL_JEV_SETUP_HINT_V1, evalJevClientV1 } from "./jev-client.js";
 import { mkdir, writeFile } from "node:fs/promises";
-import { TypeSafeClient } from "@typesafe-ai/sdk";
 import { responseReviewFixturesV1 } from "./response-review.fixtures.js";
 import {
   gradeOutcomeV1,
@@ -46,30 +46,21 @@ import {
 /** Configuration the eval cannot run without. Reported, never graded. */
 class ResponseReviewSetupError extends Error {}
 
-/**
- * Production names the credential `JEV_API_KEY`. `TYPESAFE_API_KEY` remains a
- * local alias. The key is passed explicitly and never printed.
- */
 function responseReviewClientV1(env: Record<string, string | undefined>) {
-  const apiKey = (env.JEV_API_KEY ?? env.TYPESAFE_API_KEY ?? "").trim();
-  if (!apiKey)
-    throw new ResponseReviewSetupError(
-      "Set JEV_API_KEY, or TYPESAFE_API_KEY, in the main checkout's .dev.vars",
-    );
+  let client;
   try {
-    return new TypeSafeClient({
-      apiKey,
+    client = evalJevClientV1(env, {
       defaultModel: RESPONSE_REVIEW_MODEL_V1,
       retry: RESPONSE_REVIEW_RETRY_V1,
       timeout: RESPONSE_REVIEW_ATTEMPT_TIMEOUT_MS_V1,
-      // `debug` logs request bodies, which are conversation evidence.
-      logLevel: "off",
     });
   } catch (error) {
     throw new ResponseReviewSetupError(
       `TypeSafe client setup failed: ${describeFailureV1(error).message}`,
     );
   }
+  if (!client) throw new ResponseReviewSetupError(EVAL_JEV_SETUP_HINT_V1);
+  return client;
 }
 
 const sourceHash = async (relative: string) =>

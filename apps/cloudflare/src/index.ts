@@ -383,11 +383,6 @@ interface Env {
   ALLOWED_CLIENT_ORIGINS?: string;
   /** Authorizes `/api/debug/*`. Absent disables the surface entirely. */
   DEBUG_TOKEN?: string;
-  /**
-   * The hosted Jev credential: Turn supervision, the routine-event rejector,
-   * and dictation tidy review. Required: without it no Turn runs.
-   */
-  JEV_API_KEY?: string;
   /** Points Jev at a local stand-in; set by the test harness only. */
   JEV_BASE_URL?: string;
 }
@@ -1772,7 +1767,8 @@ function voiceGatewayDependencies(env: Env): VoiceGatewayDependencies {
         env,
         cleanup: voiceDictationCleanup(env, userId),
         cleanupJudge: createHostedDictationCleanupJudgeV1({
-          JEV_API_KEY: env.JEV_API_KEY,
+          AI: env.AI,
+          JEV_BASE_URL: env.JEV_BASE_URL,
         }),
         lease: {
           acquire: async () => {

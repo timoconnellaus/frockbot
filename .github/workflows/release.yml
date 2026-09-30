@@ -1799,7 +1799,6 @@ jobs:
           COMPOSIO_WEBHOOK_SECRET: ${{ secrets.COMPOSIO_WEBHOOK_SECRET }}
           BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
           FROCK_AI_GATEWAY_TOKEN: ${{ secrets.FROCK_AI_GATEWAY_TOKEN || secrets.FLOCK_AI_GATEWAY_TOKEN }}
-          JEV_API_KEY: ${{ secrets.JEV_API_KEY }}
         shell: bash
         run: |
           missing=()
@@ -2004,9 +2003,6 @@ jobs:
           # re-added as FROCK_AI_GATEWAY_TOKEN; `--secrets-file` replaces the
           # Worker's whole secret set, so an unresolved name would delete it.
           FROCK_AI_GATEWAY_TOKEN: ${{ secrets.FROCK_AI_GATEWAY_TOKEN || secrets.FLOCK_AI_GATEWAY_TOKEN }}
-          # Optional: the hosted TurnSupervisor's Jev credential. Absent,
-          # the chooser is unavailable.
-          JEV_API_KEY: ${{ secrets.JEV_API_KEY }}
         shell: bash
         run: |
           secrets_file="$RUNNER_TEMP/frockbot-production.env"

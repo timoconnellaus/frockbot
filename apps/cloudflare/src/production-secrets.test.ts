@@ -81,15 +81,6 @@ describe("the production secrets manifest", () => {
     expect(named.length).toBe(new Set(named).size);
   });
 
-  test("requires JEV_API_KEY: every Turn is supervised", () => {
-    expect(
-      REQUIRED_PRODUCTION_SECRETS_V1.map((secret) => secret.name),
-    ).toContain("JEV_API_KEY");
-    expect(
-      OPTIONAL_PRODUCTION_SECRETS_V1.map((secret) => secret.name),
-    ).not.toContain("JEV_API_KEY");
-  });
-
   test("requires both voice provider keys, so the hosted product needs no User setup", () => {
     const required = REQUIRED_PRODUCTION_SECRETS_V1.map(
       (secret) => secret.name,
@@ -139,7 +130,7 @@ describe("the production secrets manifest", () => {
     };
     const carried = deployedSecretNamesV1(external);
     expect(carried).toContain("STUB_SIGN_IN_SECRET");
-    expect(carried).toContain("JEV_API_KEY");
+    expect(carried).toContain("FCM_SERVICE_ACCOUNT");
     for (const build of [BETTER_AUTH_PACKAGE_V1, ACCESS_AUTH_PACKAGE_V1]) {
       for (const setting of build.required) {
         expect(carried).not.toContain(setting.name);

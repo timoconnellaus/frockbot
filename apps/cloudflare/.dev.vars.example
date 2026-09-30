@@ -37,12 +37,6 @@ GEMINI_API_KEY=replace-with-a-google-ai-studio-api-key
 # has landed, instead of Groq's 8B instant class. No `AI` binding means no
 # tidying and the raw transcript stands.
 # VOICE_DICTATION_CLEANUP_MODEL=groq/llama-3.1-8b-instant
-# Required: Turn supervision. Every Turn is supervised by Jev, so without it
-# no Bot runs a Turn. The same key reviews a Groq tidy before it replaces the
-# draft (a failed call keeps the raw transcript), the routine-event rejector
-# and group replies.
-JEV_API_KEY=replace-with-jev-api-key
-
 # Connected apps: the provider project key. Absent, no app can be connected
 # and the Connectors rows for apps say so.
 COMPOSIO_API_KEY=replace-with-composio-project-api-key

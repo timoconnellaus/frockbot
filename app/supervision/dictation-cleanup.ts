@@ -11,7 +11,11 @@ import {
   type DictationCleanupEvidenceV1,
   type DictationCleanupVerdictV1,
 } from "../evals/dictation-cleanup.js";
-import { hostedJevClientV1, type createJevClientV1 } from "./jev.js";
+import {
+  hostedJevClientV1,
+  type createJevClientV1,
+  type HostedJevEnvV1,
+} from "./jev.js";
 
 /**
  * Did Groq's tidy still say what the person said?
@@ -74,11 +78,11 @@ function classifyDictationCleanupFailureV1(
 }
 
 /**
- * The production chooser: a Jev adapter when `JEV_API_KEY` is present,
+ * The production chooser: a Jev adapter when the `AI` binding is present,
  * otherwise the hard-unavailable adapter that never accepts a tidy.
  */
 export function createHostedDictationCleanupJudgeV1(
-  env: Record<string, string | undefined>,
+  env: HostedJevEnvV1,
   fetch?: Fetch,
 ): DictationCleanupJudgeV1 {
   const client = hostedJevClientV1(env, fetch);

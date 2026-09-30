@@ -8,7 +8,11 @@ import {
   groupReplyDecisionOfV1,
   reviewGroupReplyV1,
 } from "../evals/group-reply.js";
-import { hostedJevClientV1, type createJevClientV1 } from "./jev.js";
+import {
+  hostedJevClientV1,
+  type createJevClientV1,
+  type HostedJevEnvV1,
+} from "./jev.js";
 
 /**
  * The hosted judge. A failure or a timeout asks nobody extra and lets a
@@ -38,11 +42,11 @@ export function createJevGroupReplyJudgeV1(options: {
 }
 
 /**
- * The production chooser: Jev when `JEV_API_KEY` is present, otherwise the
+ * The production chooser: Jev when the `AI` binding is present, otherwise the
  * unavailable judge.
  */
 export function createHostedGroupReplyJudgeV1(
-  env: Record<string, string | undefined>,
+  env: HostedJevEnvV1,
   fetch?: Fetch,
 ): GroupReplyJudgeV1 {
   const client = hostedJevClientV1(env, fetch);

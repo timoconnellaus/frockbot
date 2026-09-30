@@ -17,6 +17,9 @@ import {
 import {
   createHostedTurnSupervisorV1,
   createJevTurnSupervisorV1,
+  createWorkersAiJevClientV1,
+  WORKERS_AI_JEV_MODEL_V1,
+  type JevAiBindingV1,
 } from "./jev.js";
 import { RESPONSE_REVIEW_MODEL_V1 } from "./response-review.js";
 import { fakeJevAnswersV1 } from "./testing.js";
@@ -879,7 +882,7 @@ describe("the Jev adapter", () => {
 });
 
 describe("the hosted chooser", () => {
-  test("is unavailable when no credential is configured", async () => {
+  test("is unavailable without the AI binding", async () => {
     const supervisor = createHostedTurnSupervisorV1({}, "FrockBot");
     await expect(supervisor.startTurn(startEvidence)).rejects.toMatchObject({
       kind: "unavailable",
@@ -887,19 +890,97 @@ describe("the hosted chooser", () => {
     expect(createUnavailableTurnSupervisorV1()).toBeTruthy();
   });
 
-  test("reads JEV_API_KEY and ignores TYPESAFE_API_KEY", async () => {
-    await expect(
-      createHostedTurnSupervisorV1(
-        { TYPESAFE_API_KEY: "sk-test-do-not-leak-4f3a" },
-        "FrockBot",
-      ).startTurn(startEvidence),
-    ).rejects.toMatchObject({ kind: "unavailable" });
+  test("asks Jev on Workers AI, without a model, and records the transport", async () => {
+    const seen: { model: string; input: Record<string, unknown> }[] = [];
+    const AI: JevAiBindingV1 = {
+      async run(model, input) {
+        seen.push({ model, input });
+        return { ...fakeJevAnswersV1(input), model: "jev-1.13.0" };
+      },
+    };
     const directive = await createHostedTurnSupervisorV1(
-      { JEV_API_KEY: "sk-test-do-not-leak-4f3a" },
+      { AI },
+      "FrockBot",
+    ).startTurn(startEvidence);
+    expect(directive.acknowledge).toBe(false);
+    expect(directive.model).toBe(`workers-ai:${RESPONSE_REVIEW_MODEL_V1}`);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.model).toBe(WORKERS_AI_JEV_MODEL_V1);
+    expect(Object.keys(seen[0]!.input).sort()).toEqual(["questions", "state"]);
+  });
+
+  test("a capacity failure is retried once, then the Turn is unavailable", async () => {
+    let attempts = 0;
+    const AI: JevAiBindingV1 = {
+      async run() {
+        attempts += 1;
+        throw new Error("3040: Capacity temporarily exceeded");
+      },
+    };
+    const supervisor = createJevTurnSupervisorV1({
+      client: createWorkersAiJevClientV1(AI),
+      productName: "FrockBot",
+      budget,
+    });
+    await expect(supervisor.startTurn(startEvidence)).rejects.toMatchObject({
+      name: "SupervisionUnavailableError",
+      kind: "unavailable",
+    });
+    expect(attempts).toBe(2);
+  });
+
+  test("a request Workers AI refuses is not retried", async () => {
+    let attempts = 0;
+    const AI: JevAiBindingV1 = {
+      async run() {
+        attempts += 1;
+        throw new Error("5007: No such model typesafe/jev or task");
+      },
+    };
+    const supervisor = createJevTurnSupervisorV1({
+      client: createWorkersAiJevClientV1(AI),
+      productName: "FrockBot",
+      budget,
+    });
+    await expect(supervisor.startTurn(startEvidence)).rejects.toMatchObject({
+      kind: "unavailable",
+    });
+    expect(attempts).toBe(1);
+  });
+
+  test("a binding that never answers times out", async () => {
+    const AI: JevAiBindingV1 = { run: () => new Promise(() => {}) };
+    const supervisor = createJevTurnSupervisorV1({
+      client: createWorkersAiJevClientV1(AI),
+      productName: "FrockBot",
+      budget: { retry: { maxRetries: 0 }, timeout: 50 },
+    });
+    await expect(supervisor.startTurn(startEvidence)).rejects.toMatchObject({
+      kind: "timeout",
+    });
+  });
+
+  test("an answer in the wrong shape is not a judgment", async () => {
+    const AI: JevAiBindingV1 = { run: async () => ({ response: "yes" }) };
+    const supervisor = createJevTurnSupervisorV1({
+      client: createWorkersAiJevClientV1(AI),
+      productName: "FrockBot",
+      budget: { retry: { maxRetries: 0 }, timeout: 1_000 },
+    });
+    await expect(supervisor.startTurn(startEvidence)).rejects.toMatchObject({
+      kind: "unavailable",
+    });
+  });
+
+  test("a test harness's stand-in wins over the binding", async () => {
+    const AI: JevAiBindingV1 = {
+      run: () => Promise.reject(new Error("not asked")),
+    };
+    const directive = await createHostedTurnSupervisorV1(
+      { AI, JEV_BASE_URL: "https://jev.test" },
       "FrockBot",
       jevFetch(),
     ).startTurn(startEvidence);
-    expect(directive.acknowledge).toBe(false);
     expect(directive.model).toBe(RESPONSE_REVIEW_MODEL_V1);
   });
 });

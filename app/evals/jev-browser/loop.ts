@@ -2,7 +2,6 @@
 // a local Playwright page: observe is the page's accessibility snapshot, act
 // is Playwright by role and name, decide is live Jev. A click the loop would
 // send for review stops the task here, as a refusal would.
-import { TypeSafeClient } from "@typesafe-ai/sdk";
 import type { Page } from "playwright";
 import {
   runBrowserTaskV1,
@@ -10,13 +9,15 @@ import {
 } from "@frockbot/computer/browser-task";
 import { jevChargeMicrosV1 } from "../../billing/jev.ts";
 import { RESPONSE_REVIEW_MODEL_V1 } from "../../supervision/response-review.ts";
+import { requiredEvalJevClientV1 } from "../jev-client.ts";
 
 export const MODEL = RESPONSE_REVIEW_MODEL_V1;
 export const MICROS_PER_INPUT_TOKEN = jevChargeMicrosV1(1_000_000) / 1_000_000;
 
-const client = new TypeSafeClient({
-  apiKey: process.env.JEV_API_KEY ?? process.env.TYPESAFE_API_KEY!,
-  ...(process.env.JEV_BASE_URL ? { baseURL: process.env.JEV_BASE_URL } : {}),
+const client = requiredEvalJevClientV1(process.env, {
+  defaultModel: RESPONSE_REVIEW_MODEL_V1,
+  retry: { maxRetries: 2 },
+  timeout: 10_000,
 });
 
 export interface JevCall {

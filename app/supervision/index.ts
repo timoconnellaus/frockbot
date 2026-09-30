@@ -2,8 +2,12 @@ export {
   createHostedTurnSupervisorV1,
   createJevClientV1,
   createJevTurnSupervisorV1,
+  createWorkersAiJevClientV1,
   hostedJevClientV1,
   JEV_SUPERVISION_ADAPTER_ID_V1,
+  WORKERS_AI_JEV_MODEL_V1,
+  type HostedJevEnvV1,
+  type JevAiBindingV1,
 } from "./jev.js";
 export {
   createFakeDictationCleanupJudgeV1,

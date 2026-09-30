@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
-import { TypeSafeClient } from "@typesafe-ai/sdk";
+import { requiredEvalJevClientV1 } from "./jev-client.js";
 import { groupReplyFixturesV1 } from "./group-reply.fixtures.js";
 import {
   describeGroupReplyFailureV1,
@@ -14,22 +14,14 @@ import {
   GROUP_REPLY_RUN_TIMEOUT_MS_V1,
 } from "./group-reply.js";
 
-// The labelled run: `bun app/evals/group-reply-run.ts`, with JEV_API_KEY or
-// TYPESAFE_API_KEY set. Writes a report under `.eval-results/`.
+// The labelled run: `bun app/evals/group-reply-run.ts`, with Workers AI or Jev
+// credentials set (see `jev-client.ts`). Writes a report under `.eval-results/`.
 
 function groupReplyClientV1(env: Record<string, string | undefined>) {
-  const apiKey = (env.JEV_API_KEY ?? env.TYPESAFE_API_KEY ?? "").trim();
-  if (!apiKey) {
-    throw new Error(
-      "Set JEV_API_KEY, or TYPESAFE_API_KEY, in the main checkout's .dev.vars",
-    );
-  }
-  return new TypeSafeClient({
-    apiKey,
+  return requiredEvalJevClientV1(env, {
     defaultModel: GROUP_REPLY_MODEL_V1,
     retry: GROUP_REPLY_RETRY_V1,
     timeout: GROUP_REPLY_ATTEMPT_TIMEOUT_MS_V1,
-    logLevel: "off",
   });
 }
 

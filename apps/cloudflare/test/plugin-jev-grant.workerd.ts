@@ -20,11 +20,7 @@ import {
 } from "@frockbot/core/durable";
 import { provisionBot } from "./provision-bot.ts";
 import { hydratedStoredRunsV1 } from "./session-log-probe.ts";
-import {
-  JEV_STUB_ORIGIN,
-  JEV_TEST_API_KEY,
-  toolCallTriggerPrompt,
-} from "./harness/miniflare.ts";
+import { JEV_STUB_ORIGIN, toolCallTriggerPrompt } from "./harness/miniflare.ts";
 import { dynamicToolInputV1 } from "./dynamic-tools.ts";
 import {
   routineDeliveryIdV1,
@@ -279,11 +275,9 @@ function judge(pluginId: string, mode: string): string {
 
 /** Every Jev request that is a Plugin's, as the fake Jev received it. */
 function recordPluginJevRequests(): Array<{
-  authorization: string | null;
   body: { model?: string; questions?: Record<string, unknown> };
 }> {
   const seen: Array<{
-    authorization: string | null;
     body: { model?: string; questions?: Record<string, unknown> };
   }> = [];
   const real = globalThis.fetch;
@@ -295,7 +289,7 @@ function recordPluginJevRequests(): Array<{
       questions?: Record<string, unknown>;
     };
     if (body.questions && "urgency" in body.questions) {
-      seen.push({ authorization: request.headers.get("authorization"), body });
+      seen.push({ body });
     }
     return Response.json(fakeJevAnswersV1(body));
   });
@@ -339,7 +333,6 @@ describe("the jev grant", () => {
     });
     expect(seen).toHaveLength(1);
     expect(seen[0]!.body.model).toBe("jev-1.13.0");
-    expect(seen[0]!.authorization).toContain(JEV_TEST_API_KEY);
 
     const usage = events.filter(
       (event) => event.type === "package/model-usage",

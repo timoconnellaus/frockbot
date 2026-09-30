@@ -119,7 +119,7 @@ for any refused call.
 
 ## The Jev proxy
 
-The Computer never holds `JEV_API_KEY`. The Computer's local proxy already
+The Computer never holds a Jev credential. The Computer's local proxy already
 forwards requests for `*.connected.internal` to the app under the running
 call's authority ([`computer/egress.ts`](../computer/egress.ts)); Jev rides the
 same door at `https://jev.internal/v1/system-one`.

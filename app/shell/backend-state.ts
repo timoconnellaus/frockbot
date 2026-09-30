@@ -92,7 +92,7 @@ export interface BotStateEnv {
   EMAIL_SENDER?: EmailSenderV1;
   /** Optional in local and workerd hosts, which have no Vectorize simulator. */
   MEMORY_INDEX?: VectorizeIndex;
-  /** The native AI binding consumed through the image Package adapter. */
+  /** Workers AI: native image generation, and Jev. */
   AI?: NativeAiBindingV1;
   /** The Frock AI Gateway adapter constructed by the Cloudflare host. */
   FROCK_AI?: {
@@ -137,11 +137,6 @@ export interface BotStateEnv {
    * with that reason rather than given an unverifiable one.
    */
   ROUTINE_HOOK_SECRET?: string;
-  /**
-   * The hosted Jev credential. Required: without it Turn supervision is
-   * unavailable and no Turn runs. The key never leaves the chooser.
-   */
-  JEV_API_KEY?: string;
   /** A stand-in for Jev's API; only a test harness names one. */
   JEV_BASE_URL?: string;
 }
@@ -214,7 +209,7 @@ export interface ShellBotBackendHost extends ShellApplicationV1 {
   routineEventJudge?: RoutineEventJudgeV1;
   /**
    * Judges every Turn. Absent, the hosted Jev supervisor built from `env`,
-   * which refuses every Turn when no `JEV_API_KEY` is set.
+   * which refuses every Turn when no `AI` binding is bound.
    */
   turnSupervisor?: TurnSupervisor;
   /**
@@ -462,50 +457,50 @@ export class ShellBotStateV1 {
     this.routineEventJudge =
       host.routineEventJudge ??
       createHostedRoutineEventJudgeV1({
-        JEV_API_KEY: host.env.JEV_API_KEY,
+        AI: host.env.AI,
         JEV_BASE_URL: host.env.JEV_BASE_URL,
       });
     this.routineReportJudge =
       host.routineReportJudge ??
       createHostedRoutineReportJudgeV1({
-        JEV_API_KEY: host.env.JEV_API_KEY,
+        AI: host.env.AI,
         JEV_BASE_URL: host.env.JEV_BASE_URL,
       });
     this.emailTriageJudge =
       host.emailTriageJudge ??
       createHostedEmailTriageJudgeV1({
-        JEV_API_KEY: host.env.JEV_API_KEY,
+        AI: host.env.AI,
         JEV_BASE_URL: host.env.JEV_BASE_URL,
       });
     this.pluginFitJudge =
       host.pluginFitJudge ??
       createHostedPluginFitJudgeV1({
-        JEV_API_KEY: host.env.JEV_API_KEY,
+        AI: host.env.AI,
         JEV_BASE_URL: host.env.JEV_BASE_URL,
       });
     this.pageJudge =
       host.pageJudge ??
       createHostedPageJudgeV1({
-        JEV_API_KEY: host.env.JEV_API_KEY,
+        AI: host.env.AI,
         JEV_BASE_URL: host.env.JEV_BASE_URL,
       });
     this.compactionChooser =
       host.compactionChooser ??
       createHostedCompactionChooserV1({
-        JEV_API_KEY: host.env.JEV_API_KEY,
+        AI: host.env.AI,
         JEV_BASE_URL: host.env.JEV_BASE_URL,
       });
     this.toolResultPruner =
       host.toolResultPruner ??
       createHostedToolResultPrunerV1({
-        JEV_API_KEY: host.env.JEV_API_KEY,
+        AI: host.env.AI,
         JEV_BASE_URL: host.env.JEV_BASE_URL,
       });
     this.turnSupervisor =
       host.turnSupervisor ??
       createHostedTurnSupervisorV1(
         {
-          JEV_API_KEY: host.env.JEV_API_KEY,
+          AI: host.env.AI,
           JEV_BASE_URL: host.env.JEV_BASE_URL,
         },
         host.brand.productName,

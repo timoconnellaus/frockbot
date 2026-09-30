@@ -4,7 +4,7 @@ import type {
   CompactionChooserV1,
   CompactionItemV1,
 } from "../shell/compaction.js";
-import { hostedJevClientV1 } from "./jev.js";
+import { hostedJevClientV1, type HostedJevEnvV1 } from "./jev.js";
 import { RESPONSE_REVIEW_MODEL_V1 } from "./response-review.js";
 
 // Which messages survive compaction word for word, which are summarised and
@@ -112,7 +112,7 @@ export function createJevCompactionChooserV1(
 }
 
 export function createHostedCompactionChooserV1(
-  env: Record<string, string | undefined>,
+  env: HostedJevEnvV1,
 ): CompactionChooserV1 | undefined {
   const client = hostedJevClientV1(env);
   return client ? createJevCompactionChooserV1(client) : undefined;

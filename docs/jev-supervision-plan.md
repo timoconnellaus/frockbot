@@ -67,8 +67,16 @@ changing the agent loop.
 Plugins may separately receive a metered judgment binding when granted one.
 That binding lets Plugin authors ask bounded semantic questions, but it cannot
 approve the Plugin's own effects, change locked policy or bypass mandatory Turn
-supervision. The TypeSafe credential remains server-side. The hosted adapter
-reads `JEV_API_KEY` only; the key never leaves the chooser.
+supervision.
+
+The hosted adapter reaches Jev on Workers AI (`typesafe/jev`) through the
+deployment's `AI` binding, billed to the Cloudflare account, so there is no
+Jev credential to hold. `hostedJevClientV1` (`app/supervision/jev.ts`) is the
+one reader: it serves every judge, the Computer's Jev and the Plugin `jev`
+grant through the TypeSafe client, whose `fetch` is the binding, so each keeps
+the client's timeouts, retries and error classes. A self-hosted install gets
+Jev from its own account's binding with nothing to configure. Only a test
+harness points Jev elsewhere, at an HTTP stand-in (`JEV_BASE_URL`).
 
 The app owns the interface:
 
@@ -482,9 +490,11 @@ The supervisor has no permissive failure mode. Each Jev call is retried once;
 a second failure fails the Turn before anything it would have judged runs, and
 the person is told the reply failed. The one exception is the debug-only
 outcome judgment: one attempt of two seconds (`JEV_OUTCOME_BUDGET_V1`), left
-out when it fails. `JEV_API_KEY` is a required production
-secret; without it no Turn runs. Test harnesses answer through a
-supervision-only Jev fake (`app/supervision/testing.ts`).
+out when it fails. Without the `AI` binding no Turn runs. A Workers AI error
+with a known code keeps its HTTP meaning — a refusal is not retried, capacity
+and timeouts are — and any other binding failure is a connection error the
+budget retries. Test harnesses answer through a supervision-only Jev fake
+(`app/supervision/testing.ts`), over HTTP or as the `AI` binding.
 
 - The request path does not acknowledge new work as accepted unless its durable
   input admission succeeds.
@@ -506,7 +516,8 @@ and settings and see why Bots are paused.
 Add exact, versioned records for:
 
 - supervision request intent and stable effect identity;
-- resolved adapter and Jev model version;
+- resolved adapter and Jev model version (_done_: each decision's `model` is
+  `workers-ai:<version>`, the transport and the Jev version that answered);
 - token usage and latency;
 - typed raw judgments retained under the data policy;
 - composed directive or decision;
@@ -515,19 +526,23 @@ Add exact, versioned records for:
 - failure-score changes and Mentor dispatch;
 - continuation-state replacement.
 
-Do not log the TypeSafe key. Prefer hashes and durable references when raw
+Prefer hashes and durable references when raw
 conversation or policy content is not needed for diagnosis.
 
 ## Evaluation
 
-Keep live evaluation separate from unit tests. Pin the calibrated Jev version.
+Keep live evaluation separate from unit tests. Workers AI serves one Jev
+version and takes no `model`, so the calibrated version cannot be pinned on
+the request: it is recorded on every decision instead, and a change in the
+recorded version means rerunning the suites before trusting the thresholds.
 Run the labeled suites with `bun run eval:turn-start`,
 `bun run eval:response-review`, `bun run eval:call-review`,
-`bun run eval:plugin-fit` and
-`bun run eval:context`; each reads
-`JEV_API_KEY` from the main checkout's `.dev.vars` (the runners still accept
-`TYPESAFE_API_KEY` as a local alias) and writes traces to `.eval-results/`.
-Neither is part of ordinary tests or the pre-push gate.
+`bun run eval:plugin-fit`, `bun run eval:context` and
+`bun app/evals/group-reply-run.ts`. Each reads the main checkout's `.dev.vars`
+(`app/evals/jev-client.ts`): Workers AI over its REST API with
+`CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`, the transport production
+uses, or TypeSafe's own API with `JEV_API_KEY` when those are absent. Traces
+go to `.eval-results/`. None is part of ordinary tests or the pre-push gate.
 
 The call-review and response-review runners ask each case `EVAL_REPEAT`
 times (default once) and report, per case, whether the decision flipped and
@@ -573,9 +588,8 @@ _Done for step 4._ The loop is wired (`app/supervision/loop.ts`).
   `app/supervision/`).
 - _Done._ Labeled evals and adapter contract tests. Each Node report runner
   lives beside its suite in `app/evals/` so the Worker does not import it.
-- _Done._ Production owns `JEV_API_KEY` from the GitHub secret of that name:
-  required in `production-secrets.ts`, declared on Worker `Env`, and carried
-  by the release and staging deploys.
+- _Done._ Production runs Jev on Workers AI through the `AI` binding; no Jev
+  secret is deployed.
 - Add durable supervision effects and usage records.
 - Buffer private model proposals until review.
 - _Done._ The hard unavailable state: one retry, then the Turn fails. A resumed

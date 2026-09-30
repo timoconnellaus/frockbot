@@ -14,7 +14,11 @@ import {
   reviewRoutineEventV1,
   routineEventVerdictOfV1,
 } from "../evals/routine-event.js";
-import { hostedJevClientV1, type createJevClientV1 } from "./jev.js";
+import {
+  hostedJevClientV1,
+  type createJevClientV1,
+  type HostedJevEnvV1,
+} from "./jev.js";
 
 /**
  * The hosted rejector. Service failure and timeout are `is_or_might_be`:
@@ -56,11 +60,11 @@ function classifyRoutineEventFailureV1(error: unknown): RoutineEventVerdictV1 {
 }
 
 /**
- * The production chooser: a Jev adapter when `JEV_API_KEY` is present,
+ * The production chooser: a Jev adapter when the `AI` binding is present,
  * otherwise the hard-unavailable adapter that never drops.
  */
 export function createHostedRoutineEventJudgeV1(
-  env: Record<string, string | undefined>,
+  env: HostedJevEnvV1,
   fetch?: Fetch,
 ): RoutineEventJudgeV1 {
   const client = hostedJevClientV1(env, fetch);

@@ -8,7 +8,7 @@ import type {
   ComputerPageJudgeV1,
   ComputerPageStateV1,
 } from "@frockbot/computer/agent";
-import { hostedJevClientV1 } from "./jev.js";
+import { hostedJevClientV1, type HostedJevEnvV1 } from "./jev.js";
 import { RESPONSE_REVIEW_MODEL_V1 } from "./response-review.js";
 
 // What a page the Bot's browser landed on is showing, so the model is told a
@@ -153,7 +153,7 @@ export function createJevPageJudgeV1(
 }
 
 export function createHostedPageJudgeV1(
-  env: Record<string, string | undefined>,
+  env: HostedJevEnvV1,
 ): ComputerPageJudgeV1 | undefined {
   const client = hostedJevClientV1(env);
   return client ? createJevPageJudgeV1(client) : undefined;

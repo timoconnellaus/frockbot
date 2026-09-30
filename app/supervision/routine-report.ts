@@ -4,7 +4,7 @@ import {
   type JsonValue,
   type TypeSafeClient,
 } from "@typesafe-ai/sdk";
-import { hostedJevClientV1 } from "./jev.js";
+import { hostedJevClientV1, type HostedJevEnvV1 } from "./jev.js";
 import { RESPONSE_REVIEW_MODEL_V1 } from "./response-review.js";
 
 // Whether a Routine's report is worth telling the person, and how soon. Jev
@@ -124,7 +124,7 @@ export function createJevRoutineReportJudgeV1(
 
 /** The deployment's judge, or none: every report is then delivered as before. */
 export function createHostedRoutineReportJudgeV1(
-  env: Record<string, string | undefined>,
+  env: HostedJevEnvV1,
 ): RoutineReportJudgeV1 | undefined {
   const client = hostedJevClientV1(env);
   return client ? createJevRoutineReportJudgeV1(client) : undefined;

@@ -1,5 +1,4 @@
 import { expect, test } from "bun:test";
-import type { Fetch } from "@typesafe-ai/sdk";
 import type { GroupReplyEvidenceV1 } from "@frockbot/core/contracts";
 import { createHostedGroupReplyJudgeV1 } from "./group-reply.js";
 
@@ -15,7 +14,7 @@ const evidence: GroupReplyEvidenceV1 = {
   candidates: [],
 };
 
-test("without a key the judge is unavailable: nobody extra, mentions under the bound", async () => {
+test("without the AI binding the judge is unavailable: nobody extra, mentions under the bound", async () => {
   expect(await createHostedGroupReplyJudgeV1({}).decide(evidence)).toEqual({
     reply: [],
     mentions: "continues",
@@ -24,17 +23,17 @@ test("without a key the judge is unavailable: nobody extra, mentions under the b
 });
 
 test("a failing service is the same as an unavailable one", async () => {
-  const fetch: Fetch = async () => new Response("down", { status: 503 });
-  const judge = createHostedGroupReplyJudgeV1(
-    { JEV_API_KEY: "sk-test" },
-    fetch,
-  );
+  const judge = createHostedGroupReplyJudgeV1({
+    AI: { run: () => Promise.reject(new Error("3040: capacity")) },
+  });
   expect(await judge.decide(evidence)).toMatchObject({ unavailable: true });
 });
 
 test("an abort still aborts", async () => {
   const controller = new AbortController();
   controller.abort();
-  const judge = createHostedGroupReplyJudgeV1({ JEV_API_KEY: "sk-test" });
+  const judge = createHostedGroupReplyJudgeV1({
+    AI: { run: () => new Promise(() => {}) },
+  });
   await expect(judge.decide(evidence, controller.signal)).rejects.toThrow();
 });

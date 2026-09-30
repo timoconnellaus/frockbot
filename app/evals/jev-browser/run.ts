@@ -1,4 +1,5 @@
-// The labelled Jev browser suite (docs/jev-browser-plan.md). Needs JEV_API_KEY:
+// The labelled Jev browser suite (docs/jev-browser-plan.md). Needs Jev
+// credentials (see `../jev-client.ts`):
 //   bun run eval:browser, or bun app/evals/jev-browser/run.ts [task name]
 // PROBS=1 prints the top action probabilities per step.
 import { chromium } from "playwright";

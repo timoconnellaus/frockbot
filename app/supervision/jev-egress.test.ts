@@ -9,6 +9,7 @@ import {
   JEV_EGRESS_QUESTIONS_MAX_V1,
 } from "./jev-egress.js";
 import { RESPONSE_REVIEW_MODEL_V1 } from "./response-review.js";
+import { createWorkersAiJevClientV1 } from "./jev.js";
 
 const bytes = (value: unknown) =>
   new TextEncoder().encode(JSON.stringify(value));
@@ -62,6 +63,33 @@ const ANSWERED = async (request: unknown) => {
 };
 
 describe("Jev from the terminal", () => {
+  test("on Workers AI, a refused request releases its hold; a lost one keeps it", async () => {
+    for (const [thrown, status, settled] of [
+      ["5006: Error: oneOf at '/questions/pick' not met", 400, "release"],
+      ["network connection lost", 502, undefined],
+    ] as const) {
+      const billing = meter();
+      const jev = createJevEgressV1({
+        client: createWorkersAiJevClientV1({
+          run: () => Promise.reject(new Error(thrown)),
+        }),
+        meter: billing.value,
+        botId: "bot-1",
+        sessionId: "s-1",
+      });
+      const answer = read(
+        await jev({
+          body: bytes({ state: {}, questions: { pick: QUESTION } }),
+          effectId: "e:jev:1",
+        }),
+      );
+      expect(answer.status).toBe(status);
+      expect(billing.log).toEqual(
+        settled ? ["reserve e:jev:1", settled] : ["reserve e:jev:1"],
+      );
+    }
+  });
+
   test("answers on the platform's model and charges the tokens Jev counted", async () => {
     const billing = meter();
     const jev = createJevEgressV1({

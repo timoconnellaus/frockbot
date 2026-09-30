@@ -132,10 +132,6 @@ export interface NonSecretWorkerSettingV1 extends ProductionSecretV1 {
  */
 export const REQUIRED_PRODUCTION_SECRETS_V1: readonly ProductionSecretV1[] = [
   {
-    name: "JEV_API_KEY",
-    why: "Authorizes Turn supervision against Jev: every Turn is supervised, so without it no Bot runs a Turn. The routine-event rejector, group replies and dictation tidy review use it too.",
-  },
-  {
     name: "FCM_SERVICE_ACCOUNT",
     why: "Authorizes Firebase push delivery to registered Android devices.",
   },
@@ -339,9 +335,9 @@ export const NON_SECRET_WORKER_SETTINGS_V1: readonly NonSecretWorkerSettingV1[] 
     },
     {
       name: "JEV_BASE_URL",
-      why: "Points Turn supervision at a local stand-in for Jev; set by the test harness only.",
+      why: "Points Turn supervision at a local stand-in for Jev instead of Workers AI; set by the test harness only.",
       forbiddenLive:
-        "every Turn's supervision would be sent to that host instead of Jev",
+        "every Turn's supervision would be sent to that host instead of Jev on Workers AI",
     },
     { name: "FROCK_AI_AUTO_ROUTE", why: "A `vars` entry." },
     {

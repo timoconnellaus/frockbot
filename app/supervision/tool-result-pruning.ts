@@ -3,7 +3,7 @@ import type {
   ToolResultPruneInputV1,
   ToolResultPrunerV1,
 } from "../shell/tool-result-pruning.js";
-import { hostedJevClientV1 } from "./jev.js";
+import { hostedJevClientV1, type HostedJevEnvV1 } from "./jev.js";
 import { RESPONSE_REVIEW_MODEL_V1 } from "./response-review.js";
 
 // Which older tool results a dormant Bot's next Turn can do without. It runs
@@ -129,7 +129,7 @@ export function createJevToolResultPrunerV1(
 }
 
 export function createHostedToolResultPrunerV1(
-  env: Record<string, string | undefined>,
+  env: HostedJevEnvV1,
 ): ToolResultPrunerV1 | undefined {
   const client = hostedJevClientV1(env);
   return client ? createJevToolResultPrunerV1(client) : undefined;
