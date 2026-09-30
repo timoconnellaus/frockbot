@@ -14,6 +14,28 @@
     "not_found_handling": "404-page",
     "run_worker_first": true,
   },
+  // `/deploy`: one object per Cloudflare user, holding their sign-in, their
+  // installs and the deploy running now. `CLOUDFLARE_OAUTH_CLIENT_ID` and
+  // `CLOUDFLARE_OAUTH_CLIENT_SECRET` are secrets; without them `/deploy`
+  // points at the repository instead.
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "DEPLOY_ACCOUNTS",
+        "class_name": "DeployAccount",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["DeployAccount"],
+    },
+  ],
+  // A release step hashes and uploads the whole web client in one wake.
+  "limits": {
+    "cpu_ms": 300000,
+  },
   "observability": {
     "enabled": true,
   },

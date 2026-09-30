@@ -21,6 +21,23 @@
     "not_found_handling": "404-page",
     "run_worker_first": true,
   },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "DEPLOY_ACCOUNTS",
+        "class_name": "DeployAccount",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["DeployAccount"],
+    },
+  ],
+  "limits": {
+    "cpu_ms": 300000,
+  },
   "observability": {
     "enabled": true,
   },

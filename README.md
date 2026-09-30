@@ -10,7 +10,9 @@ FrockBot runs persistent conversational Bots. A Bot holds a conversation, calls 
 
 The **simple deployment profile** is FrockBot in your own Cloudflare account: Cloudflare Access sign-in, no billing, the Computer included, and nothing to customise ([ADR 0028](docs/adr/0028-open-deployment.md)). It is the same code `frockbot.com` runs — see [The hosted deployment](#the-hosted-deployment) for what the other profile adds.
 
-Every release publishes the simple profile as a prebuilt **deploy bundle**: the three Workers, the web client, the application artifact and a manifest, installed through the Cloudflare REST API with no wrangler build, no Docker and no Flutter on your machine ([`docs/deploy-bundles.md`](docs/deploy-bundles.md)). Deploying it from frockbot.com with your own Cloudflare sign-in is coming soon.
+Every release publishes the simple profile as a prebuilt **deploy bundle**: the three Workers, the web client, the application artifact and a manifest, installed through the Cloudflare REST API with no wrangler build, no Docker and no Flutter on your machine ([`docs/deploy-bundles.md`](docs/deploy-bundles.md)).
+
+Or skip the repository: [frockbot.com/deploy](https://frockbot.com/deploy) signs you in with Cloudflare and deploys a pinned release to a `workers.dev` address in that account, with no domain and nothing built locally, then updates it with one click. How it works, and the release manifest it installs, is in [`docs/hosted-deploy.md`](docs/hosted-deploy.md).
 
 From a checkout, `scripts/deploy-bundle.ts` installs a release's bundle with an API token:
 

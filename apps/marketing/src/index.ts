@@ -1,8 +1,11 @@
+import type { DeployEnvV1 } from "./deploy/env";
+import { handleDeployRequestV1, isDeployPathV1 } from "./deploy/routes";
+
 interface AssetFetcher {
   fetch(request: Request): Promise<Response>;
 }
 
-interface Env {
+interface Env extends Partial<DeployEnvV1> {
   ASSETS: AssetFetcher;
 }
 
@@ -84,6 +87,11 @@ export default {
     if (canonical) return Response.redirect(canonical, 308);
     const download = macDownloadRedirect(request);
     if (download) return download;
+    if (env.DEPLOY_ACCOUNTS && isDeployPathV1(new URL(request.url).pathname)) {
+      return withSecurityHeaders(
+        await handleDeployRequestV1(request, env as DeployEnvV1),
+      );
+    }
     return withSecurityHeaders(await env.ASSETS.fetch(request));
   },
 };
