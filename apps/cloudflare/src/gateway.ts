@@ -437,16 +437,22 @@ async function identifySetupReader(
     );
   if (!dependencies.setupReader || !setupReaderPathV1(url.pathname))
     return { refusal: jsonError(403, "Setup cannot open this") };
-  const userId = await dependencies.setupReader.verify(token);
-  if (!userId) return { refusal: expired() };
+  const claims = await dependencies.setupReader.verify(token);
+  if (!claims) return { refusal: expired() };
+  const { userId } = claims;
+  // A local stack admits its development identities without an account
+  // behind them, so a credential minted for one is admitted the same way —
+  // and only where development identities are.
   const development =
-    dependencies.allowDevelopmentIdentity && userId === DEVELOPMENT_USER_ID;
-  const isAdmin =
-    development ||
-    isDeploymentAdminV1(
-      { id: userId, emailVerified: false, mode: "better-auth" },
-      { emails: dependencies.adminEmails, userIds: dependencies.adminUserIds },
-    );
+    dependencies.allowDevelopmentIdentity === true && claims.development;
+  const isAdmin = isDeploymentAdminV1(
+    {
+      id: userId,
+      emailVerified: false,
+      mode: development ? "development" : "better-auth",
+    },
+    { emails: dependencies.adminEmails, userIds: dependencies.adminUserIds },
+  );
   if (!development && !isAdmin) {
     let admission;
     try {
@@ -461,9 +467,7 @@ async function identifySetupReader(
   return {
     userId,
     session: null,
-    development: development
-      ? { userId: DEVELOPMENT_USER_ID, persist: false }
-      : { persist: false },
+    development: development ? { userId, persist: false } : { persist: false },
     authMode: development ? ("development" as const) : ("better-auth" as const),
     isAdmin,
   };
@@ -703,7 +707,10 @@ export function createGateway(
       } catch {
         return jsonError(400, "invalid request");
       }
-      const reader = await dependencies.setupReader.mint(userId);
+      const reader = await dependencies.setupReader.mint({
+        userId,
+        development: authMode === "development",
+      });
       return Response.json(
         {
           schemaVersion: 1,

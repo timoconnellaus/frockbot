@@ -73,10 +73,22 @@ export function setupReaderBearerV1(request: Request): string | undefined {
   return header?.startsWith(prefix) ? header.slice(prefix.length) : undefined;
 }
 
+/** Who a reader credential was minted for. */
+export interface SetupReaderClaimsV1 {
+  userId: string;
+  /**
+   * Minted under the development identity, which a local stack admits
+   * without an account behind it; honoured only where that identity is.
+   */
+  development: boolean;
+}
+
 export interface SetupReader {
-  mint(userId: string): Promise<{ token: string; expiresAt: number }>;
-  /** The User a credential was minted for, or undefined when it is not one. */
-  verify(token: string): Promise<string | undefined>;
+  mint(
+    claims: SetupReaderClaimsV1,
+  ): Promise<{ token: string; expiresAt: number }>;
+  /** Whom a credential was minted for, or undefined when it is not one. */
+  verify(token: string): Promise<SetupReaderClaimsV1 | undefined>;
   /**
    * The beta-access authority's answer for the User, asked on every read as
    * a cookie's is; null when the account is unknown.
@@ -117,10 +129,12 @@ export function createSetupReader(options: {
       ["sign", "verify"],
     );
   return {
-    async mint(userId) {
+    async mint({ userId, development }) {
       const expiresAt = now() + SETUP_READER_LIFETIME_MS_V1;
       const payload = base64(
-        encoder.encode(JSON.stringify({ userId, expires: expiresAt })),
+        encoder.encode(
+          JSON.stringify({ userId, development, expires: expiresAt }),
+        ),
       );
       const signature = await crypto.subtle.sign(
         "HMAC",
@@ -157,16 +171,20 @@ export function createSetupReader(options: {
           new TextDecoder().decode(unbase64(payload)),
         );
         if (!claims || typeof claims !== "object") return undefined;
-        const { userId, expires } = claims as Record<string, unknown>;
+        const { userId, development, expires } = claims as Record<
+          string,
+          unknown
+        >;
         if (
           typeof userId !== "string" ||
+          typeof development !== "boolean" ||
           !/^[A-Za-z0-9_-]{1,128}$/.test(userId) ||
           typeof expires !== "number" ||
           !Number.isSafeInteger(expires) ||
           expires <= now()
         )
           return undefined;
-        return userId;
+        return { userId, development };
       } catch {
         return undefined;
       }

@@ -18,6 +18,7 @@ function gatewayFor(options: {
   signedIn?: boolean;
   now?: () => number;
   admitted?: boolean;
+  development?: boolean;
   userConfigurationFor?: GatewayDependencies["userConfigurationFor"];
 }) {
   const auth: AuthPackageV1 = {
@@ -50,6 +51,7 @@ function gatewayFor(options: {
         options.userConfigurationFor ?? unreached("userConfigurationFor"),
       botConfigurationFor: unreached("botConfigurationFor"),
       setupReader,
+      ...(options.development ? { allowDevelopmentIdentity: true } : {}),
     }),
   };
 }
@@ -138,7 +140,10 @@ describe("the reader credential", () => {
         connections: [],
       }),
     });
-    const { token } = await setupReader.mint("member");
+    const { token } = await setupReader.mint({
+      userId: "member",
+      development: false,
+    });
     const headers = { authorization: `Bearer frockbot-setup.${token}` };
     const settings = await gateway(
       new Request("https://frockbot.test/api/settings?view=2", { headers }),
@@ -166,7 +171,10 @@ describe("the reader credential", () => {
   test("expires, and says so in a way the page can ask for another", async () => {
     let now = 1_000;
     const { gateway, setupReader } = gatewayFor({ now: () => now });
-    const { token } = await setupReader.mint("member");
+    const { token } = await setupReader.mint({
+      userId: "member",
+      development: false,
+    });
     now += SETUP_READER_LIFETIME_MS_V1 + 1;
     const response = await gateway(
       new Request("https://frockbot.test/api/identity", {
@@ -185,7 +193,10 @@ describe("the reader credential", () => {
       secret: "another-secret",
       admit: unreached("admit"),
     });
-    const { token } = await other.mint("member");
+    const { token } = await other.mint({
+      userId: "member",
+      development: false,
+    });
     expect(await setupReader.verify(token)).toBeUndefined();
     const [payload] = token.split(".");
     expect(await setupReader.verify(`${payload}.AAAA`)).toBeUndefined();
@@ -194,13 +205,35 @@ describe("the reader credential", () => {
 
   test("a paused account is refused as a cookie is", async () => {
     const { gateway, setupReader } = gatewayFor({ admitted: false });
-    const { token } = await setupReader.mint("member");
+    const { token } = await setupReader.mint({
+      userId: "member",
+      development: false,
+    });
     const response = await gateway(
       new Request("https://frockbot.test/api/identity", {
         headers: { authorization: `Bearer frockbot-setup.${token}` },
       }),
     );
     expect(response.status).toBe(403);
+  });
+
+  test("one minted for a development identity is honoured only where those are", async () => {
+    for (const development of [true, false]) {
+      const { gateway, setupReader } = gatewayFor({
+        admitted: false,
+        development,
+      });
+      const { token } = await setupReader.mint({
+        userId: "local-person",
+        development: true,
+      });
+      const response = await gateway(
+        new Request("https://frockbot.test/api/identity", {
+          headers: { authorization: `Bearer frockbot-setup.${token}` },
+        }),
+      );
+      expect(response.status).toBe(development ? 200 : 403);
+    }
   });
 
   test("opens the account's settings, Connections and billing", () => {
