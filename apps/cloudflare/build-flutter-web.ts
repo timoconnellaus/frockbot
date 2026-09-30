@@ -76,7 +76,26 @@ const OMITTED = new Set([
   "manifest.json",
   "flutter_service_worker.js",
   "favicon.png",
+  "push-worker.js",
 ]);
+
+/**
+ * The push service worker, staged at the origin's root rather than under the
+ * build hash. Its URL is what a browser's push subscription is bound to, so it
+ * must stay the same across client builds, and a worker's scope cannot reach
+ * above its own path. Brand-neutral, so a white-label's build stages this one.
+ */
+const PUSH_WORKER = "push-worker.js";
+async function stagePushWorker(): Promise<void> {
+  await mkdir(assetsRoot, { recursive: true });
+  await cp(
+    resolve(root, "../native/web", PUSH_WORKER),
+    resolve(assetsRoot, PUSH_WORKER),
+    {
+      force: true,
+    },
+  );
+}
 
 async function emittedFiles(directory: string): Promise<string[]> {
   const entries = await readdir(directory, {
@@ -423,6 +442,7 @@ if (await stagedIsCurrent(fingerprint)) {
   // The staging directory is rewritten whole by a build, so the runtime is
   // copied on the skipping path too rather than only alongside one.
   await stageRiveWasm(riveVersion);
+  await stagePushWorker();
   process.stdout.write(
     "The Flutter web client is already built from these sources; skipping.\n",
   );
@@ -488,14 +508,17 @@ for (const path of files) {
 
 const fallbackFonts = await stageFallbackFonts(payload);
 const riveHost = await stageRiveWasm(riveVersion);
+await stagePushWorker();
 
 // Every URL under either prefix carries a version — the build hash, or Rive's
 // own — so a browser may keep it for a year: a new build is a new path, not a
-// new body at the same one.
+// new body at the same one. The push worker keeps its URL, so it is checked
+// every time.
 await writeFile(
   resolve(assetsRoot, "_headers"),
   `/${payloadPrefix}/*\n  cache-control: public, max-age=31536000, immutable\n` +
-    `${riveHost}*\n  cache-control: public, max-age=31536000, immutable\n`,
+    `${riveHost}*\n  cache-control: public, max-age=31536000, immutable\n` +
+    `/${PUSH_WORKER}\n  cache-control: no-cache\n`,
 );
 await writeFile(
   clientManifest,

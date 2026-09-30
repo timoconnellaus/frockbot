@@ -78,7 +78,7 @@ In your Cloudflare account:
 - **Two Cloudflare Access applications** on the app's hostname: Allow on the hostname itself — the document, the client, sign-out and the native sign-in flow, and the policy that is the allowlist — and Bypass on `/api`, so API requests reach the Worker, which authenticates every one of them itself from the Access cookie a browser sends or the bearer a phone exchanged.
 - **No D1.** The Access auth Package stores nothing.
 
-It mints six secrets and sets them with the deploy: `CREDENTIAL_KEYRING`, `COMPUTER_HOST_TOKEN`, `APPLET_BUILD_TOKEN`, `ROUTINE_HOOK_SECRET`, `MACHINE_TOKEN_SECRET` and `NATIVE_TOKEN_SECRET`. They are recorded in `.deployment/simple/secrets.env`, git-ignored and mode 0600, and that is the only copy: they encrypt and sign durable state — stored Connection credentials, issued Routine webhook keys, paired machines — so back the file up. A run whose record is intact mints nothing a second time.
+It mints seven secrets and sets them with the deploy: `CREDENTIAL_KEYRING`, `COMPUTER_HOST_TOKEN`, `APPLET_BUILD_TOKEN`, `ROUTINE_HOOK_SECRET`, `MACHINE_TOKEN_SECRET`, `NATIVE_TOKEN_SECRET` and `WEB_PUSH_VAPID_KEYS`, the deployment's own key pair for browser notifications. They are recorded in `.deployment/simple/secrets.env`, git-ignored and mode 0600, and that is the only copy: they encrypt and sign durable state — stored Connection credentials, issued Routine webhook keys, paired machines, browser push subscriptions — so back the file up. A run whose record is intact mints nothing a second time.
 
 ### What you do by hand
 
@@ -395,6 +395,7 @@ Configure these GitHub `staging` environment values. They are the same set produ
 | Secret   | `ROUTINE_HOOK_SECRET`   | HMAC secret for Routine webhook keys; generate it                               |
 | Secret   | `MACHINE_TOKEN_SECRET`  | HMAC secret for machine tokens and pairing codes; generate it                   |
 | Secret   | `FCM_SERVICE_ACCOUNT`   | Firebase service-account JSON authorizing Android push delivery                 |
+| Secret   | `WEB_PUSH_VAPID_KEYS`   | Staging's own VAPID key pair for browser notifications; generate it             |
 
 The three generated secrets are `openssl rand -hex 32`, and `CREDENTIAL_KEYRING` is the same JSON keyring `scripts/setup-production.sh` builds. `COMPUTER_HOST_TOKEN` is the exception that must be copied from production rather than generated, because the host it authenticates against is production's.
 
@@ -443,10 +444,13 @@ Configure these GitHub `production` environment values:
 | Secret   | `ROUTINE_HOOK_SECRET`     | HMAC secret every Routine webhook key is signed with; generate it                                                                             |
 | Secret   | `MACHINE_TOKEN_SECRET`    | HMAC secret every registered-machine token and pairing code is signed with; generate it                                                       |
 | Secret   | `FCM_SERVICE_ACCOUNT`     | Firebase service-account JSON authorizing push delivery, for the app and the push relay; see [`docs/notifications.md`](docs/notifications.md) |
+| Secret   | `WEB_PUSH_VAPID_KEYS`     | The deployment's VAPID key pair for browser notifications; generate it, never rotate it                                                       |
 
 Admission is closed by default. Set `FROCKBOT_ADMIN_EMAILS` to one or more comma-separated email addresses in the GitHub `production` environment; those identities are always admitted and may open the operator surface. Administration itself is not in the app: it is the [admin portal](#the-admin-portal) at `admin.frockbot.com`, and the same list says who may use it. Every other account needs access from the beta-access authority, and having signed in before is not access; see [`docs/beta-access.md`](docs/beta-access.md), including the release step that retired the signups switch.
 
 `ROUTINE_HOOK_SECRET` is generated too, once, with `openssl rand -hex 32` — `./scripts/setup-production.sh` does it if the secret is absent and preserves it if it is not. Every Routine webhook key is `HMAC-SHA256` over its own claims under this secret, and the gateway verifies that signature before any Durable Object is addressed. Rotating it invalidates every webhook key already handed out, which each Routine's owner then has to re-mint; without it set, the delivery route answers `503` and a webhook Routine is recorded without a key rather than given one nothing could verify.
+
+`WEB_PUSH_VAPID_KEYS` is generated once too, by `./scripts/setup-production.sh` when absent, as `{"subject","publicKey","privateKey"}` for `https://bot.frockbot.com`. Every browser that turned notifications on is subscribed to its public key, so replacing it silences them all until each turns notifications on again. For staging, `bun scripts/web-push-keys.ts staging` prints one for staging's origin.
 
 `MACHINE_TOKEN_SECRET` is generated the same way and on the same terms. Every registered machine's token and every pairing code is `HMAC-SHA256` over its own claims under this secret, verified at the edge before any Durable Object is addressed. Rotating it un-enrols every registered machine, which then has to be paired again; without it set, enrollment and every machine route answer `503` rather than admitting a caller nothing could verify.
 

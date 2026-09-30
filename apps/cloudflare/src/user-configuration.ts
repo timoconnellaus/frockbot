@@ -64,6 +64,7 @@ import {
   type PushRelayAddressV1,
   type PushUpdate,
 } from "./push.js";
+import { sendWebPush } from "./web-push.js";
 import { decodeThemeDocumentV1, decodeBotLookV1 } from "@frockbot/core/theme";
 import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 import { DurableObject } from "cloudflare:workers";
@@ -381,6 +382,8 @@ interface UserConfigurationEnv
   FCM_SERVICE_ACCOUNT?: string;
   /** The push relay a deployment without FCM credentials sends through. */
   PUSH_RELAY_URL?: string;
+  /** The deployment's own VAPID keys, which reach browsers directly. */
+  WEB_PUSH_VAPID_KEYS?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
   /** Where every Bot's email address is, and what it sends from. */
   EMAIL_DOMAIN?: string;
@@ -968,6 +971,16 @@ export class UserConfiguration
     ) => sendRelay(relayUrl, address, data, notify);
   }
 
+  private webPushSender() {
+    const keys = this.env.WEB_PUSH_VAPID_KEYS;
+    if (!keys) return undefined;
+    return (
+      subscription: string,
+      data: Record<string, string>,
+      notify: boolean,
+    ) => sendWebPush(keys, subscription, data, notify);
+  }
+
   async deliverPush(input: { userId: string; update: PushUpdate }) {
     await this.assertUserIdentity(input.userId);
     await this.assertAccountOpen();
@@ -984,6 +997,7 @@ export class UserConfiguration
       this.env.FCM_SERVICE_ACCOUNT,
       sendFcm,
       this.relaySender(),
+      this.webPushSender(),
     );
   }
 
@@ -1018,6 +1032,7 @@ export class UserConfiguration
       this.env.FCM_SERVICE_ACCOUNT,
       sendFcm,
       this.relaySender(),
+      this.webPushSender(),
     );
     return { schemaVersion: 1 } as const;
   }

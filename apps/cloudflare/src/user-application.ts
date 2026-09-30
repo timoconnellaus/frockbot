@@ -144,6 +144,7 @@ function appHtml(
   <title>${DOCUMENT_TITLE}</title>
   <link rel="icon" type="image/png" href="/favicon.ico">
   <link rel="apple-touch-icon" href="/favicon.ico">
+  <link rel="manifest" href="/manifest.webmanifest">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#15151e">
   <style>html,body{margin:0;height:100%;background:#15151e}</style>
@@ -419,6 +420,31 @@ function createUserApplicationRoute() {
             "cache-control": "no-cache",
           },
         }),
+        url,
+      );
+    }
+    if (request.method === "GET" && url.pathname === "/manifest.webmanifest") {
+      // An iPhone delivers Web Push only to an app on its home screen, and
+      // opens one standalone only when the manifest asks.
+      return withSecurityHeaders(
+        new Response(
+          JSON.stringify({
+            name: BRAND_V1.productName,
+            short_name: BRAND_V1.productName,
+            start_url: "/",
+            scope: "/",
+            display: "standalone",
+            background_color: "#15151e",
+            theme_color: "#15151e",
+            icons: [{ src: "/favicon.ico", sizes: "64x64", type: "image/png" }],
+          }),
+          {
+            headers: {
+              "content-type": "application/manifest+json",
+              "cache-control": "no-cache",
+            },
+          },
+        ),
         url,
       );
     }

@@ -13,6 +13,7 @@ import type {
   DeploymentRegionV1,
 } from "../../apps/cloudflare/deployment-config/profile.ts";
 import type { InstallV1 } from "../../apps/cloudflare/deployment-config/bundle.ts";
+import { generateVapidKeysV1 } from "../../apps/cloudflare/src/web-push.ts";
 import {
   OPTIONAL_PRODUCTION_SECRETS_V1,
   REQUIRED_PRODUCTION_SECRETS_V1,
@@ -235,10 +236,13 @@ export const MINTED_SECRETS_V1 = [
   { name: "ROUTINE_HOOK_SECRET", workers: ["app"], shape: "hex" },
   { name: "MACHINE_TOKEN_SECRET", workers: ["app"], shape: "hex" },
   { name: "NATIVE_TOKEN_SECRET", workers: ["app"], shape: "hex" },
+  // Every browser subscription is bound to this key pair, so a second one
+  // would silence every browser that turned notifications on.
+  { name: "WEB_PUSH_VAPID_KEYS", workers: ["app"], shape: "vapid" },
 ] as const satisfies readonly {
   name: string;
   workers: readonly ("app" | "computerHost" | "appletBuild")[];
-  shape: "keyring" | "hex";
+  shape: "keyring" | "hex" | "vapid";
 }[];
 
 export type MintedSecretV1 = (typeof MINTED_SECRETS_V1)[number];
@@ -267,6 +271,21 @@ export function credentialKeyringV1(
 
 export function randomBytesV1(length: number): Uint8Array {
   return crypto.getRandomValues(new Uint8Array(length));
+}
+
+export function appHostnameV1(profile: DeploymentProfileV1): string {
+  const hostname = profile.workers?.app?.hostnames?.[0];
+  if (!hostname) throw new Error("The profile gives the app no hostname.");
+  return hostname;
+}
+
+/**
+ * The deployment's VAPID key pair, as `WEB_PUSH_VAPID_KEYS` holds it. The
+ * subject is the app's own origin: the contact a push service is given.
+ * `scripts/web-push-keys.ts` mints the hosted and staging ones with it.
+ */
+export async function vapidKeysV1(appHostname: string): Promise<string> {
+  return JSON.stringify(await generateVapidKeysV1(`https://${appHostname}`));
 }
 
 /** 32 random bytes as hex, which is what every shared secret here is. */
@@ -325,8 +344,8 @@ export function formatMintedSecretsV1(
   const lines = [
     "# Written by `bun run setup`. Not tracked, never committed, mode 0600.",
     "# These values encrypt and sign durable state: stored Connection",
-    "# credentials, issued Routine webhook keys, paired machines and native",
-    "# sessions. Losing this file means the installer can only mint new ones,",
+    "# credentials, issued Routine webhook keys, paired machines, native",
+    "# sessions and browser push subscriptions. Losing this file means the installer can only mint new ones,",
     "# which invalidates all of it. Back it up.",
   ];
   for (const name of Object.keys(values).sort()) {

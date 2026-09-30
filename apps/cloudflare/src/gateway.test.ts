@@ -1176,6 +1176,7 @@ function createTestGateway(
   openBotStateChannel?: NonNullable<GatewayDependencies["openBotStateChannel"]>,
   voice?: GatewayDependencies["voice"],
   whatsNew = true,
+  webPushPublicKey?: string,
 ) {
   const loader = new DirectWorkerLoader();
   const states = new Map<string, MemoryBotState>();
@@ -1190,6 +1191,7 @@ function createTestGateway(
   };
   const gateway = createGateway({
     loader,
+    webPushPublicKey,
     artifacts: { load: () => Promise.resolve("export default {}") },
     auth,
     admitAccount:
@@ -2518,6 +2520,50 @@ describe("Cloudflare user application gateway", () => {
     expect(body.schemaVersion).toBe(1);
     expect(body.entries.length).toBeGreaterThan(0);
     expect(body.entries.map((entry) => entry.id)).toContain("whats-new");
+  });
+
+  test("the browser's push key is the deployment's, and null without one", async () => {
+    const unconfigured = createTestGateway();
+    expect(
+      (
+        await unconfigured.gateway(
+          new Request("https://frockbot.test/api/push/web"),
+        )
+      ).status,
+    ).toBe(401);
+    expect(
+      (await (
+        await unconfigured.gateway(request("/api/push/web", "alice"))
+      ).json()) as object,
+    ).toEqual({ schemaVersion: 1, publicKey: null });
+    const configured = createTestGateway(
+      undefined,
+      unauthenticatedAuth,
+      true,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+      "BPublicKey",
+    );
+    expect(
+      (await (
+        await configured.gateway(request("/api/push/web", "alice"))
+      ).json()) as object,
+    ).toEqual({ schemaVersion: 1, publicKey: "BPublicKey" });
+  });
+
+  test("serves the web app manifest without an authenticated identity", async () => {
+    const { gateway } = createTestGateway();
+    const manifest = await gateway(
+      new Request("https://frockbot.test/manifest.webmanifest"),
+    );
+    expect(manifest.status).toBe(200);
+    expect((await manifest.json()) as object).toMatchObject({
+      start_url: "/",
+      display: "standalone",
+    });
   });
 
   test("a brand with What’s New off serves an empty feed", async () => {

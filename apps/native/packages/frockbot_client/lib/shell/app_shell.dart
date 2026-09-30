@@ -53,6 +53,7 @@ import '../settings/credit.dart';
 import '../settings/bot_quick_writes.dart';
 import '../settings/bot_settings.dart';
 import '../settings/look_settings.dart';
+import '../settings/notifications_page.dart';
 import '../settings/personal_details.dart';
 import '../setup/page.dart';
 import '../settings/spending.dart';
@@ -395,7 +396,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     unawaited(_loadAppearance());
     unawaited(_readWhatsNew());
     _startPolling();
-    unawaited(push.start());
+    // A notification clicked while the web app is open.
+    push.webPush.onOpen((link) {
+      if (botLink(link) case final String target) {
+        widget.botLinks.value = target;
+      }
+    });
+    unawaited(push.start().then((_) => _repaint()));
   }
 
   void _repaint() {
@@ -3615,6 +3622,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               title: 'Personal details',
               page: _settingsPage,
             ),
+            // A browser asks only from a tap, so it has a page to tap on.
+            if (push.webPushOffered)
+              ProfileSection(
+                id: SettingsIds.profileNotifications,
+                icon: Icons.notifications_none_rounded,
+                title: 'Notifications',
+                page: () => NotificationsPage(push: push),
+              ),
             // The end of every Bot's email address, so it is the account's.
             ProfileSection(
               id: EmailIds.profileEntry,

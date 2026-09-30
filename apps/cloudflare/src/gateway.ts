@@ -99,9 +99,10 @@ function clientOfRequest(request: Request) {
   }
 }
 /**
- * What an unauthenticated GET may reach: the document, the site icon, and
- * What’s New stills. The stills are product copy, not a secret, and Flutter
- * loads them with a plain GET that carries no cookie on the web.
+ * What an unauthenticated GET may reach: the document, the site icon, the web
+ * app manifest and What’s New stills. The stills are product copy, not a
+ * secret, and Flutter loads them with a plain GET that carries no cookie on
+ * the web; a browser fetches the manifest without credentials too.
  *
  * The client's own payload is not here. It is the Worker's static assets,
  * content-addressed under `/_flutter/<buildHash>/` and answered by the asset
@@ -112,6 +113,7 @@ export function isPublicAssetPathV1(pathname: string): boolean {
   return (
     pathname === "/" ||
     pathname === "/favicon.ico" ||
+    pathname === "/manifest.webmanifest" ||
     whatsNewImageNameV1(pathname) !== undefined
   );
 }
@@ -731,6 +733,17 @@ export function createGateway(
         dependencies.whatsNew
           ? whatsNewFeedV1(whatsNewPublishedAtV1)
           : { schemaVersion: 1, entries: [] },
+        { headers: { "cache-control": "no-store" } },
+      );
+    }
+
+    if (url.pathname === "/api/push/web") {
+      if (request.method !== "GET") return jsonError(405, "method not allowed");
+      return Response.json(
+        {
+          schemaVersion: 1,
+          publicKey: dependencies.webPushPublicKey ?? null,
+        },
         { headers: { "cache-control": "no-store" } },
       );
     }

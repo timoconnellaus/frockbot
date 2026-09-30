@@ -1814,6 +1814,7 @@ jobs:
           STRIPE_PLUS_PRICE_ID: ${{ secrets.STRIPE_PLUS_PRICE_ID }}
           STRIPE_BYO_PRICE_ID: ${{ secrets.STRIPE_BYO_PRICE_ID }}
           FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
+          WEB_PUSH_VAPID_KEYS: ${{ secrets.WEB_PUSH_VAPID_KEYS }}
           APPLET_BUILD_TOKEN: ${{ secrets.APPLET_BUILD_TOKEN }}
           # The manifest requires both voice keys; the deploy step below
           # already passes them. Without them here the check reported them
@@ -2037,6 +2038,7 @@ jobs:
           STRIPE_PLUS_PRICE_ID: ${{ secrets.STRIPE_PLUS_PRICE_ID }}
           STRIPE_BYO_PRICE_ID: ${{ secrets.STRIPE_BYO_PRICE_ID }}
           FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
+          WEB_PUSH_VAPID_KEYS: ${{ secrets.WEB_PUSH_VAPID_KEYS }}
           # Required: the same shared secret the plugin build Worker and its
           # container check. A Turn's plugin_check and plugin_publish both call
           # the service, so without it no Plugin can be built or published.

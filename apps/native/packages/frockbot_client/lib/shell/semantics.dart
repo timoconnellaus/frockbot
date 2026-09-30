@@ -261,6 +261,11 @@ abstract final class SettingsIds {
   static const profileSettings = 'profile-settings';
   static const profileBilling = 'profile-billing';
 
+  /// A browser's own notifications: the row, and the switch on its page.
+  static const profileNotifications = 'profile-notifications';
+  static const notificationsTurnOn = 'notifications-turn-on';
+  static const notificationsTurnOff = 'notifications-turn-off';
+
   /// Deleting the Computer or the whole account.
   static const profileDelete = 'profile-delete';
   static const profileSignOut = 'profile-sign-out';

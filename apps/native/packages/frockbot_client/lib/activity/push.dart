@@ -7,7 +7,10 @@ import 'package:http/http.dart' as http;
 
 import '../client/transport.dart';
 import 'controller.dart';
+import 'web_push.dart';
 import 'window_focus.dart';
+
+export 'web_push.dart' show WebPushState;
 
 /// The push relay the released apps' FCM project is reached through by a
 /// server that holds no FCM credentials of its own (`apps/push-relay`).
@@ -92,7 +95,15 @@ class PushController {
     this.activity, {
     this.channel = const MethodChannel('frockbot/push'),
     PushRelay? relay,
-  }) : relay = relay ?? PushRelay();
+    WebPush? webPush,
+  }) : relay = relay ?? PushRelay(),
+       webPush = webPush ?? WebPush();
+
+  /// The browser's own push, which a web client turns on by hand.
+  final WebPush webPush;
+
+  /// The deployment's VAPID public key; null where it offers no web push.
+  String? webPushKey;
 
   /// The phones, where push reaches the person while Dart is stopped.
   bool get mobile =>
@@ -100,9 +111,13 @@ class PushController {
       (defaultTargetPlatform == TargetPlatform.android ||
           defaultTargetPlatform == TargetPlatform.iOS);
 
-  /// Which app holds [token], so the cloud knows what it has to tell APNs.
-  String get platform =>
-      defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android';
+  /// Which app holds [token], so the cloud knows what it has to tell APNs,
+  /// and that a browser's is a Web Push subscription.
+  String get platform => kIsWeb
+      ? 'web'
+      : defaultTargetPlatform == TargetPlatform.iOS
+      ? 'ios'
+      : 'android';
   final windowFocus = WindowFocus();
   bool platformReady = false;
   String? deviceId;
@@ -197,9 +212,82 @@ class PushController {
     delivery = await store.read('push-delivery:$userId');
     relayHandle = await store.read('push-relay-handle:$userId');
     if (disposed) return;
+    // Presence goes out first; a browser's own subscription follows it once
+    // the key and the worker are read, rather than holding the claim back.
     await register();
     if (disposed) return;
     _renewWhileFocused();
+    if (kIsWeb && await _startWebPush()) await register();
+  }
+
+  /// Reads the deployment's key and re-registers a subscription this browser
+  /// already holds. Nothing here asks: a browser asks only from a tap on
+  /// Turn on notifications.
+  /// Answers whether it found a subscription to register.
+  Future<bool> _startWebPush() async {
+    try {
+      final answer = await api.request('/api/push/web');
+      final key = answer is Map ? answer['publicKey'] : null;
+      webPushKey = key is String && key.isNotEmpty ? key : null;
+    } catch (_) {
+      webPushKey = null;
+    }
+    if (disposed || webPushKey == null) return false;
+    await webPush.prepare();
+    try {
+      token = await webPush.existing();
+    } catch (_) {
+      token = null;
+    }
+    return !disposed && token != null;
+  }
+
+  /// Whether this browser can be offered notifications at all.
+  bool get webPushOffered =>
+      kIsWeb && webPushKey != null && webPush.state != WebPushState.unsupported;
+
+  /// Whether this browser is subscribed.
+  bool get webPushOn => kIsWeb && token != null;
+
+  /// Asks and subscribes: run straight from the tap, before anything is
+  /// awaited, because the browser allows the prompt only inside the gesture.
+  /// Answers why it did not turn on, or null once it has.
+  Future<String?> turnOnWebPush() async {
+    final key = webPushKey;
+    if (key == null) return 'Notifications aren’t available here.';
+    String? subscription;
+    try {
+      subscription = await webPush.subscribe(key);
+    } catch (_) {
+      subscription = null;
+    }
+    if (subscription == null) {
+      // The page already says so when the browser refused outright.
+      return webPush.state == WebPushState.blocked
+          ? null
+          : 'Couldn’t turn on notifications. Try again.';
+    }
+    token = subscription;
+    await register();
+    return null;
+  }
+
+  /// Stops this browser's notifications. The registry keeps a token a
+  /// presence update omits, so the installation is removed and registered
+  /// again without one.
+  Future<void> turnOffWebPush() async {
+    await _dropWebSubscription();
+    await register(remove: true);
+    await register();
+  }
+
+  /// Removing the installation is what stops delivery; a subscription that
+  /// could not be dropped here is answered 410 and forgotten.
+  Future<void> _dropWebSubscription() async {
+    try {
+      await webPush.unsubscribe();
+    } catch (_) {}
+    token = null;
   }
 
   /// The presence lease is a claim a focused device makes, and every focus and
@@ -233,10 +321,12 @@ class PushController {
 
   /// This device's address for its server: the token for one that sends to
   /// FCM itself, the relay handle and sealing key for one that sends through
-  /// the relay, or nothing until the server has said which.
+  /// the relay, or nothing until the server has said which. A browser's
+  /// subscription is always sent: the server reaches it itself with its own
+  /// VAPID keys, never through FCM or the relay.
   Map<String, Object> _body(bool remove) => {
     'deviceId': deviceId!,
-    if (delivery == 'direct' && token != null) ...{
+    if ((kIsWeb || delivery == 'direct') && token != null) ...{
       'token': token!,
       'platform': platform,
     },
@@ -342,12 +432,19 @@ class PushController {
   final Map<String, String> _syncedRead = {};
 
   Future<void> syncRead() async {
-    if (!platformReady || disposed) return;
+    if (disposed || !(kIsWeb ? token != null : platformReady)) return;
     for (final view in activity.unread.values) {
       final cursor = view.lastSeenCursor?.value;
       if (cursor == null) continue;
       final botId = view.botId.value;
       if (_syncedRead[botId] == cursor) continue;
+      if (kIsWeb) {
+        // A browser is sent no read signal, so it clears its own
+        // notifications from the cloud's read cursors.
+        webPush.read(botId, cursor);
+        _syncedRead[botId] = cursor;
+        continue;
+      }
       await channel.invokeMethod<void>('read', {
         'botId': botId,
         'cursor': cursor,
@@ -363,6 +460,7 @@ class PushController {
     timer?.cancel();
     timer = null;
     if (platformReady) await channel.invokeMethod<void>('logout');
+    if (kIsWeb && token != null) await _dropWebSubscription();
     // Signing out deletes the handle, so nothing reaches this phone for the
     // account even if the server never hears the removal below.
     final handle = relayHandle;
@@ -384,6 +482,7 @@ class PushController {
     disposed = true;
     relay.client.close();
     windowFocus.dispose();
+    webPush.dispose();
     timer?.cancel();
     if (mobile) channel.setMethodCallHandler(null);
   }

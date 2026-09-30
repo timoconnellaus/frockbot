@@ -165,6 +165,7 @@ function install(overrides: Partial<InstallV1> = {}): InstallV1 {
       ROUTINE_HOOK_SECRET: "t",
       MACHINE_TOKEN_SECRET: "t",
       NATIVE_TOKEN_SECRET: "t",
+      WEB_PUSH_VAPID_KEYS: "t",
       SPRITES_TOKEN: "t",
     },
     ...overrides,
