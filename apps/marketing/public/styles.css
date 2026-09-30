@@ -893,7 +893,8 @@
   }
 
   /* Further down, characters pop out from behind cards and the screen's edges
-     as each section arrives. Without the script they simply stay out. */
+     as the card or section each one hides behind arrives. Without the script
+     they simply stay out. */
   [data-peek-zone] {
     position: relative;
     isolation: isolate;
