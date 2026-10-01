@@ -240,7 +240,7 @@ describe("marketing worker", () => {
     expect(zones).toEqual([
       "run",
       "why",
-      "teaser",
+      "yours",
       "how",
       "uses",
       "apps",
@@ -765,6 +765,51 @@ describe("homepage setup teaser", () => {
         options.presets.map((entry: { id: string }) => entry.id),
       ).toContain(preset);
     expect(homepage).toContain('href="/setup/"');
+  });
+});
+
+describe("homepage sections", () => {
+  test("make it yours, what it cost, and the questions sit in their places", async () => {
+    const homepage = await publicFile("index.html");
+    const order = [
+      'id="run-your-own"',
+      'id="why"',
+      'id="yours"',
+      'id="how"',
+      'id="uses"',
+      'id="apps"',
+      'id="pricing"',
+      'class="section setup-teaser"',
+      'id="faq"',
+      'class="section tinker"',
+      'class="cta"',
+    ].map((marker) => homepage.indexOf(marker));
+    expect(order.every((at) => at > 0)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    // The sections Make it yours and What it cost replaced are gone.
+    expect(homepage).not.toContain("inside-teaser");
+    expect(homepage).not.toContain("how it got there");
+  });
+
+  test("every carousel tab opens a slide that shows a real screenshot", async () => {
+    const homepage = await publicFile("index.html");
+    const controls = [
+      ...homepage.matchAll(/class="yours-tab"[^>]*aria-controls="([^"]+)"/g),
+    ].map((match) => match[1]!);
+    expect(controls).toEqual([
+      "yours-slide-1",
+      "yours-slide-2",
+      "yours-slide-3",
+    ]);
+    for (const id of controls) expect(homepage).toContain(`id="${id}"`);
+    for (const name of ["customers", "tuner", "theme", "spending"]) {
+      expect(homepage).toContain(`src="/assets/app/${name}.webp"`);
+      expect(
+        await Bun.file(
+          new URL(`../public/assets/app/${name}.webp`, import.meta.url),
+        ).exists(),
+      ).toBe(true);
+    }
   });
 });
 
