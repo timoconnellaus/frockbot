@@ -4,8 +4,9 @@ Every release publishes the simple profile's Workers **prebuilt**, with a
 manifest that says how to install them into somebody's Cloudflare account
 through the REST API alone. Nothing is built on the deployer's machine: no
 wrangler build, no Docker, no Flutter. `scripts/deploy-bundle.ts` installs from
-the bundle with a token, and so will the deploy page, which runs the same
-deployer in a browser with the person's own Cloudflare sign-in. The profile itself is
+the bundle with a token, and so does [frockbot.com/deploy](hosted-deploy.md),
+which runs the same deployer with the person's own Cloudflare sign-in. The
+profile itself is
 [ADR 0028](adr/0028-open-deployment.md).
 
 ## What a release publishes

@@ -5,7 +5,8 @@ are Tim's from the 2026-09-15 discussion. Each stage below carries a **Built**
 note where what was built differs from what was proposed. The interactive
 installer, `bun run setup`, was removed on 2026-10-01: the release's prebuilt
 deploy bundle replaces it ([`deploy-bundles.md`](../deploy-bundles.md)),
-installed by `scripts/deploy-bundle.ts` and, once it ships, the deploy page.
+installed by `scripts/deploy-bundle.ts` and by
+[frockbot.com/deploy](../hosted-deploy.md).
 
 ## Decision
 
