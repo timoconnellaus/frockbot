@@ -122,6 +122,9 @@ create them:
 3. Set the two values in the GitHub `production` environment. The next
    marketing deploy carries them.
 
+The What’s New entry for `/deploy` ships with the change that switches it on,
+not before: until then the page points at the repository.
+
 For a local run, put the same two values and
 `DEPLOY_ORIGIN=http://127.0.0.1:8787` in `apps/marketing/.dev.vars`, and
 register that callback on a private client.

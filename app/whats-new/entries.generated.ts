@@ -13,7 +13,6 @@ import entry_connect_app_card from "./entries/connect-app-card.ts";
 import entry_connected_apps_1400 from "./entries/connected-apps-1400.ts";
 import entry_daily_limits from "./entries/daily-limits.ts";
 import entry_delete_account from "./entries/delete-account.ts";
-import entry_deploy_to_cloudflare from "./entries/deploy-to-cloudflare.ts";
 import entry_edit_email_drafts from "./entries/edit-email-drafts.ts";
 import entry_email_your_bot from "./entries/email-your-bot.ts";
 import entry_flock_palette from "./entries/flock-palette.ts";
@@ -69,7 +68,6 @@ export const WHATS_NEW_ENTRY_FILES_V1 = [
   entry_connected_apps_1400,
   entry_daily_limits,
   entry_delete_account,
-  entry_deploy_to_cloudflare,
   entry_edit_email_drafts,
   entry_email_your_bot,
   entry_flock_palette,
