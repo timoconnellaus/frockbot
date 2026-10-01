@@ -6,8 +6,8 @@
 # this file. Change this file first, then paste it there.
 set -uo pipefail
 
-# Bun, pinned to CI and package.json's packageManager (the image ships 1.3.11).
-curl -fsSL https://bun.sh/install | bash -s "bun-v1.3.6" || echo "bun pin failed" >&2
+# Bun 1.4.2, pinned to CI and package.json's packageManager (the image ships 1.3.11).
+curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.2" || echo "bun pin failed" >&2
 
 # Flutter 3.47.0, as CI pins: the Flutter job, and the integration/e2e/build tiers,
 # which build the web client with `flutter build web`.
