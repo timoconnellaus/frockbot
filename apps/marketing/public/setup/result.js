@@ -271,7 +271,7 @@ export function describeSetup(choices, options) {
   const hostSoon = soon("host");
   if (own && hostSoon) {
     step(
-      "Run FrockBot from the source in your Cloudflare account today: clone the repository and run bun run setup.",
+      "Self-hosting from frockbot.com is coming soon. Until then, every line of FrockBot is on GitHub to read.",
       [],
     );
   } else if (own) {

@@ -21,7 +21,7 @@
     "./profile-schema.generated.ts",
     "../../../scripts/build-deploy-bundle.ts",
     "../../../scripts/check-deploy-bundle.ts",
-    "../../../scripts/setup.ts",
+    "../../../scripts/deploy-bundle/simple-profile.ts",
     "../../../scripts/deploy-bundle.ts",
     "../../../scripts/deploy-bundle/local.ts",
     "../../../scripts/deploy-bundle.test.ts",

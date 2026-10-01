@@ -42,29 +42,17 @@ object in anybody's bucket.
 
 ## Simple deployment
 
-Nobody writes `deployments/simple.json` by hand. `bun run setup`
-(`scripts/setup.ts`) writes it, in this order:
-
-1. Picks the account.
-2. Asks for the hostname, the admin emails and the Zero Trust team, and writes
-   the profile.
-3. Mints the internal secrets.
-4. Asks for the Fly token the Computer host needs.
-5. Sets up the two Access applications: Allow on the app's hostname, Bypass on
-   `/api`.
-6. Downloads the checked-out tag's deploy bundle.
-7. Installs the bundle through the Cloudflare API: buckets, index, artifact,
-   the three Workers and their container applications. The profile's prefix is
-   the install name, and nothing is generated or built locally
-   ([`docs/deploy-bundles.md`](../../../docs/deploy-bundles.md)).
-
-The bundle itself is built by this generator, in the release.
-`bun run setup --dry-run` asks the same questions and then prints every command
-and every value it would write, running no wrangler command and reaching no
-network; add `--yes` to take the defaults instead of answering, which is how it
-runs in a check. `scripts/setup-production.sh` is a different thing: it is the
-hosted deployment's wizard, and it sets GitHub environment secrets for
-`release.yml` rather than creating anything in Cloudflare.
+The simple profile is not a file under `deployments/`. It is
+`simpleProfileV1` in `scripts/deploy-bundle/simple-profile.ts`, and the release
+builds the deploy bundle from it with this generator, under a sentinel install
+name. An install supplies its own account, name, hostname and Access team and
+audience, and `scripts/deploy-bundle.ts` installs the bundle through the
+Cloudflare API: buckets, index, artifact, the three Workers and their container
+applications, with nothing generated or built locally
+([`docs/deploy-bundles.md`](../../../docs/deploy-bundles.md)).
+`scripts/setup-production.sh` is a different thing: it is the hosted
+deployment's wizard, and it sets GitHub environment secrets for `release.yml`
+rather than creating anything in Cloudflare.
 
 The simple profile is the one that builds the Access auth Package, which the
 generator writes as one `alias` entry:
@@ -87,7 +75,7 @@ cannot reach the Access build unnoticed.
 Five deployables: the app Worker, the Computer host, the Plugin build service,
 the marketing site and the admin portal. A profile generates exactly the ones it
 names, which is how `staging.json` has neither the marketing site nor the portal,
-and how `simple.json` has neither either: with Access deciding admission there is
+and how the simple profile has neither either: with Access deciding admission there is
 no admin operation left to administer.
 
 ## What a generated config is
@@ -335,8 +323,8 @@ installer can install.
 Workers prebuilt, the web client as the app's assets and the application
 artifact under its own sha256. The manifest names every Worker's modules,
 bindings, migrations, secrets and container images, with `{install}` where an
-install's name goes. `bun run setup` installs from it through the Cloudflare API,
-and so will the deploy page. Nothing is generated or built on the deployer's
+install's name goes. `scripts/deploy-bundle.ts` installs from it through the
+Cloudflare API, and so will the deploy page. Nothing is generated or built on the deployer's
 machine. The format, the gate that keeps an update on the same namespaces and
 the proof are in [`docs/deploy-bundles.md`](../../../docs/deploy-bundles.md).
 
@@ -348,7 +336,7 @@ passes the artifact's digest. A Worker whose var still says `foundation-v1` look
 for an object that is not there.
 
 `frockbot.apk` is also attached, by `patch-android` when the tag cut a full release and by `android-apk` otherwise. It is the hosted phone app,
-not an installer asset: `bun run setup` does not download it, and a deployer
+not an installer asset: no install downloads it, and a deployer
 who wants the phone app builds it against their own origin (`docs/app-updates.md`).
 
 [image-management]: https://developers.cloudflare.com/containers/image-management/

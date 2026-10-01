@@ -43,9 +43,9 @@ Deploy paths:
 Two deployments exist, and they are the same code ([ADR 0028](adr/0028-open-deployment.md)):
 
 - **hosted** — `frockbot.com`: better-auth with Google, billing live, the Android and macOS release channels, the marketing site and the admin portal. `deployments/hosted.json`, with `deployments/staging.json` as its disposable twin.
-- **simple** — what `bun run setup` installs into a deployer's own Cloudflare account: Cloudflare Access sign-in, no billing, no release ceremony, the Computer included. `deployments/simple.json`, written by the installer and never by hand.
+- **simple** — what a release's deploy bundle installs into a deployer's own Cloudflare account ([`deploy-bundles.md`](deploy-bundles.md)): Cloudflare Access sign-in, no billing, no release ceremony, the Computer included. `simpleProfileV1` in `scripts/deploy-bundle/simple-profile.ts`, not a file under `deployments/`.
 
-A profile is which auth and payments Packages are built in, which secrets exist, which workflows run, and whether the container images are built or pulled. It is not a fork, and nothing is gated: a deployer who sets `STRIPE_SECRET_KEY` gets billing, the simple installer simply never asks for one.
+A profile is which auth and payments Packages are built in, which secrets exist, which workflows run, and whether the container images are built or pulled. It is not a fork, and nothing is gated: a deployer who sets `STRIPE_SECRET_KEY` gets billing, the deploy bundle simply never asks for one.
 
 |                  | hosted                                                                  | simple                                                         |
 | ---------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------- |
@@ -56,7 +56,7 @@ A profile is which auth and payments Packages are built in, which secrets exist,
 | native sign-in   | `NATIVE_SLICE_2_AUTH=android,macos,macos-dev,ios`                       | no targets named, so none                                      |
 | deployables      | five Workers                                                            | three: the app, the Computer host, the Plugin build service    |
 | container images | built from the Dockerfiles by `release.yml`                             | pulled from Docker Hub for the release tag                     |
-| workflows        | `check.yml`, `main.yml`, `release.yml`                                  | none; a deployer runs the installer                            |
+| workflows        | `check.yml`, `main.yml`, `release.yml`                                  | none; a deployer installs the release's deploy bundle          |
 
 Identity lives in `deployments/<name>.json`, validated against `apps/cloudflare/deployment-config/profile.schema.json`. `bun run deployment:config <profile>` — `@frockbot/cloudflare`'s `frockbot-deployment-config` over this repository's own profiles — reads one and writes `.deployment/<profile>/<worker>/wrangler.jsonc` from the tracked files, which is what every `wrangler deploy -c` takes. `scripts/deployment-config.test.ts` is the equivalence gate: it generates `hosted` and `staging` and proves the result is still the configs those deployments ran before identity moved out, because a Worker name, Durable Object class or migration tag that differs on deploy is a new namespace, which is data loss.
 

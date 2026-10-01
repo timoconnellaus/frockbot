@@ -5,12 +5,12 @@
  *   bun scripts/web-push-keys.ts hosted
  *   bun scripts/web-push-keys.ts staging
  *
- * `bun run setup` mints its own; this is for the hosted and staging secrets,
- * which live in GitHub environments.
+ * A deploy-bundle install mints its own; this is for the hosted and staging
+ * secrets, which live in GitHub environments.
  */
 import { fileURLToPath } from "node:url";
 import { loadProfileV1 } from "../apps/cloudflare/deployment-config/profile.ts";
-import { appHostnameV1, vapidKeysV1 } from "./setup/plan.ts";
+import { appHostnameV1, vapidKeysV1 } from "./deploy-bundle/simple-profile.ts";
 
 const name = process.argv[2];
 if (!name) {

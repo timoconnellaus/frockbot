@@ -14,8 +14,8 @@ files, terminal), writes tools and plugins that extend it, talks and listens,
 and works inside 1,400+ connected apps (Gmail, Calendar, Drive, Slack,
 Notion, Shopify and the rest). One web + Mac + phone client (the phone app sideloads from GitHub releases; it is not in a store). Hosted at
 frockbot.com from US$5/month (Standard, US$20/month with US$20 credit
-included, is the lead), or self-hosted into
-your own Cloudflare account with one command. MIT licensed.
+included, is the lead). Deploying into your own Cloudflare account is coming
+soon. MIT licensed.
 
 ## Two audiences, two doors
 
@@ -40,10 +40,10 @@ carries the architecture and the capability reference.
 
 - Angles: MIT open source; bring your own model (40 providers); everything
   is a plugin (hooks on the loop, tools, storage, declared egress, Bots can
-  author plugins behind approval); one-command self-host on Cloudflare;
+  author plugins behind approval); self-host on Cloudflare (coming soon);
   same code as the hosted deployment; US$5 or free vs the US$200 category.
 - Vocabulary: theirs — harness, provider, plugin, Durable Object, Worker.
-- Primary CTA: read the install guide / star the repo.
+- Primary CTA: read the code / star the repo.
 
 ## The rule that joins them
 
@@ -151,11 +151,13 @@ sovereignty, with "read the docs" as the CTA and GitHub stars as proof.
   tool an app has. Some sign in with a key the person pastes on the app's
   sign-in page rather than a one-tap sign-in.
 - Mac app download at /download/mac. Phone app sideloads as frockbot.apk on GitHub releases.
-- Self-host: `bun run setup`, Workers Paid + a zone + Zero Trust + Fly token.
+- Self-host: deploying into your own Cloudflare account from frockbot.com is coming soon (the prebuilt deploy bundle). Needs Workers Paid + a zone + Zero Trust + Fly token.
 
 ## Things not to claim
 
 - Phone app availability in an app store (sideload from GitHub releases only).
+- A one-command or one-click self-host today: deploying into your own
+  Cloudflare account from frockbot.com is coming soon.
 - A named app that is not in `app/connect/catalog.ts` (no Spotify, Xero or
   X today), or that works only for a business account as if it were the
   personal one (WhatsApp and Instagram connect Business and Creator accounts).

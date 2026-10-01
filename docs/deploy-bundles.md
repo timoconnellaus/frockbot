@@ -3,9 +3,9 @@
 Every release publishes the simple profile's Workers **prebuilt**, with a
 manifest that says how to install them into somebody's Cloudflare account
 through the REST API alone. Nothing is built on the deployer's machine: no
-wrangler build, no Docker, no Flutter. `bun run setup` installs from the bundle,
-and so will the deploy page, which runs the same deployer in a browser with the
-person's own Cloudflare sign-in. The profile itself is
+wrangler build, no Docker, no Flutter. `scripts/deploy-bundle.ts` installs from
+the bundle with a token, and so will the deploy page, which runs the same
+deployer in a browser with the person's own Cloudflare sign-in. The profile itself is
 [ADR 0028](adr/0028-open-deployment.md).
 
 ## What a release publishes
@@ -34,8 +34,8 @@ application-artifact.mjs           the application artifact the app loads from R
 ```
 
 The modules are wrangler's own bundle, from `wrangler deploy --dry-run --outdir`,
-of the configs `deployment-config` generates for exactly the profile
-`bun run setup` writes. A build therefore produces what a wrangler deploy of
+of the configs `deployment-config` generates for the simple profile
+(`scripts/deploy-bundle/simple-profile.ts`). A build therefore produces what a wrangler deploy of
 that profile would have uploaded. Source maps are left out.
 
 ## The manifest
@@ -87,10 +87,9 @@ browser needs no BLAKE3.
 ## Install names
 
 An install is named once, and every Worker, bucket, index and container
-application is derived from that name by replacing `{install}`. The name is the
-setup profile's `prefix`, so an install `bun run setup` made and one the deploy
-page made are the same install. A profile that names a resource by hand is
-refused, because no bundle could reach it.
+application is derived from that name by replacing `{install}`, so an install
+`scripts/deploy-bundle.ts` made and one the deploy page made under the same name
+are the same install.
 
 The templates are not written out separately. The bundle is generated under a
 sentinel prefix, and whatever the generator derived is taken as derived.
@@ -161,12 +160,13 @@ fixtures. Bundles are held in three more places:
 
 Every step converges, so an update is the same call with the next release's
 bundle. The token needs Workers Scripts, Workers R2 Storage, Vectorize and
-Containers write, and Workers Routes on the hostname's zone. `bun run setup` uses
-`CLOUDFLARE_API_TOKEN`, or the `wrangler login` token that `wrangler auth token`
+Containers write, and Workers Routes on the hostname's zone.
+`scripts/deploy-bundle.ts` uses `CLOUDFLARE_API_TOKEN`, or the `wrangler login` token that `wrangler auth token`
 prints.
 
-Access is not the deployer's job. The two Access applications and their
-policies are the installer's step, and the deploy page's own.
+Access is not the deployer's job. The Access applications and their policies
+are made outside it: by hand for `scripts/deploy-bundle.ts`, and the deploy page
+will make its own.
 
 ## The proof
 

@@ -8,17 +8,22 @@ FrockBot runs persistent conversational Bots. A Bot holds a conversation, calls 
 
 ## Run your own
 
-FrockBot installs into your own Cloudflare account with one command. That is the **simple deployment profile**: Cloudflare Access sign-in, no billing, the Computer included, and nothing to customise ([ADR 0028](docs/adr/0028-open-deployment.md)). It is the same code `frockbot.com` runs — see [The hosted deployment](#the-hosted-deployment) for what the other profile adds.
+The **simple deployment profile** is FrockBot in your own Cloudflare account: Cloudflare Access sign-in, no billing, the Computer included, and nothing to customise ([ADR 0028](docs/adr/0028-open-deployment.md)). It is the same code `frockbot.com` runs — see [The hosted deployment](#the-hosted-deployment) for what the other profile adds.
 
-### What you need
+Every release publishes the simple profile as a prebuilt **deploy bundle**: the three Workers, the web client, the application artifact and a manifest, installed through the Cloudflare REST API with no wrangler build, no Docker and no Flutter on your machine ([`docs/deploy-bundles.md`](docs/deploy-bundles.md)). Deploying it from frockbot.com with your own Cloudflare sign-in is coming soon.
 
-- A **Cloudflare account on the Workers Paid plan**. Containers and Dynamic Workers both need it, and both are load-bearing: no Computer and no Plugins without them.
-- **One domain on that account**, its zone active. The app answers on a hostname you choose on it (`bot.example.com`).
-- A **Cloudflare Zero Trust team** (free). Its Access policy is this deployment's allowlist.
-- A **Fly Sprites token** for the Computer, from [fly.io](https://fly.io/dashboard).
-- [**Bun**](https://bun.sh) 1.4 or newer, and `git`, `curl` and `unzip` on `PATH`. No Docker and no Flutter: the container images and the web client are published with each release and pulled. `gh` is used to fetch the release assets when it is installed; without it the same public URLs are fetched with `curl`.
+From a checkout, `scripts/deploy-bundle.ts` installs a release's bundle with an API token:
 
-Optional keys. Each is asked for once and each can be skipped with Enter; a skipped key leaves that one thing shut and repairs nothing else.
+```bash
+bun install
+export CLOUDFLARE_API_TOKEN=… # Workers Scripts, R2, Vectorize, Containers; Workers Routes on the zone
+bun scripts/deploy-bundle.ts deploy --bundle <version> \
+  --account <account id> --install <name> --hostname <app hostname> \
+  --access-team <team>.cloudflareaccess.com --access-aud <aud> \
+  --secrets <secrets.json>
+```
+
+It needs a Cloudflare account on the Workers Paid plan, a zone on it for the hostname, and a Zero Trust team whose Access applications you create yourself. The secrets file holds `SPRITES_TOKEN` (a [Fly Sprites](https://fly.io/dashboard) token for the Computer) unless you pass `--no-computer-host`, plus any optional key below; the internal secrets are minted into the same file, which is their only copy. The script's header lists every flag.
 
 | Key                       | What it enables                                                    |
 | ------------------------- | ------------------------------------------------------------------ |
@@ -32,84 +37,11 @@ Optional keys. Each is asked for once and each can be skipped with Enter; a skip
 
 No model key is needed. Frock AI runs on the account's own `AI` binding, where Auto resolves to a concrete Workers AI chat model, so a deployment with no configuration at all still picks a model for a User who chose none.
 
-### Install
-
-Install from a release tag: the container images and the release assets are published per tag, and a checkout that is not on one can only pull whatever `latest` happens to be.
-
-```bash
-TAG=v0.0.0 # the newest release tag; see below
-git clone --branch "$TAG" --depth 1 https://github.com/timoconnellaus/frockbot.git
-cd frockbot
-bun install
-bunx wrangler login
-bun run setup
-```
-
-The tag is a `v*.*.*` from [Releases](https://github.com/timoconnellaus/frockbot/releases); take the newest. A checkout that is not on one warns and falls back to `latest`.
-
-`bun run setup --dry-run` asks the same questions, then prints every command and every value it would write without running a wrangler command or reaching the network. Other flags: `--yes` takes every default and skips every optional key, `--profile <path>` reuses a profile file instead of answering, `--account <id>` names the account when your token can reach several, and `--allow-hosted-account` overrides the refusal to install into the account `deployments/hosted.json` names.
-
-Setting `CLOUDFLARE_API_TOKEN` as well as signing wrangler in lets the installer read the account's plan and create the Access applications itself. Without it, both are left to you and it says so.
-
-### What the installer asks
-
-It runs eight steps — account, profile, resources, internal secrets, your keys, Access, the client and artifact, deploy — and each says what it did. What it asks for:
-
-- A Worker name prefix (default `frockbot`); everything below is named from it.
-- The app's hostname, on a zone this account holds.
-- Admin email addresses, which become `FROCKBOT_ADMIN_EMAILS`: the deployment's admins. They bypass admission, and the operator debug surface, which is gated on its own `DEBUG_TOKEN`, checks this list before it will send a Turn as an account.
-- The Zero Trust team domain, e.g. `yourteam.cloudflareaccess.com`.
-- The region for the R2 buckets and the Vectorize index (default `enam`).
-- The Fly Sprites token, then each optional key above.
-- The Access application's Audience (AUD) tag, when it could not create the application for you.
-
-A second run offers each earlier answer as the default, so the prefix, hostname, admin emails, team domain and region are one Enter each. The keys are not stored anywhere the installer can read them back, so a later run asks for the Fly token and any optional keys again.
-
-The answers are written to `deployments/simple.json`, and `bun run deployment:config simple` is what turns that file into the wrangler configs the deploy reads, under the git-ignored `.deployment/simple/`. Nobody writes that profile by hand.
-
-### What it creates
-
-In your Cloudflare account:
-
-- **Three Workers.** `<prefix>` is the app, on your hostname — declared as a custom domain, so Cloudflare creates and maintains its proxied DNS record on the first deploy. `<prefix>-computer-host` and `<prefix>-applet-build` have no public route at all and are reached only over the app's service bindings.
-- **Two container applications**, one in front of each of those two Workers, pulling the images `release.yml` published for your tag from Docker Hub. A public Docker Hub image needs no registry credentials, so nothing is configured and nothing is built locally.
-- **Two R2 buckets** — `<prefix>-application-artifacts` and `<prefix>-memory-files` — and **one Vectorize index**, `<prefix>-memory`, with 768 cosine dimensions from `@cf/baai/bge-base-en-v1.5`. Each step is create-if-absent.
-- **Five Durable Object namespaces**, which come with the app Worker that declares them, plus the `AI` binding and the Worker Loader bindings, which are configuration rather than resources.
-- **Two Cloudflare Access applications** on the app's hostname: Allow on the hostname itself — the document, the client, sign-out and the native sign-in flow, and the policy that is the allowlist — and Bypass on `/api`, so API requests reach the Worker, which authenticates every one of them itself from the Access cookie a browser sends or the bearer a phone exchanged.
-- **No D1.** The Access auth Package stores nothing.
-
-It mints seven secrets and sets them with the deploy: `CREDENTIAL_KEYRING`, `COMPUTER_HOST_TOKEN`, `APPLET_BUILD_TOKEN`, `ROUTINE_HOOK_SECRET`, `MACHINE_TOKEN_SECRET`, `NATIVE_TOKEN_SECRET` and `WEB_PUSH_VAPID_KEYS`, the deployment's own key pair for browser notifications. They are recorded in `.deployment/simple/secrets.env`, git-ignored and mode 0600, and that is the only copy: they encrypt and sign durable state — stored Connection credentials, issued Routine webhook keys, paired machines, browser push subscriptions — so back the file up. A run whose record is intact mints nothing a second time.
-
-### What you do by hand
-
-- **The zone.** It must already be active on the same account, and the credential wrangler deploys with must cover it.
-- **The two Access applications**, when your `CLOUDFLARE_API_TOKEN` is absent or lacks `Zero Trust: Access Apps and Policies Write`. The installer prints the dashboard steps for both, including the policy each needs, and waits.
-- **The audience tag.** Paste the Allow application's AUD when asked, or put it in `deployments/simple.json` and run `bun run setup` again. Until it is a real tag the Worker refuses every token, which is the right answer for a deployment whose Access application does not exist yet.
-- **An APK for your own deployment.** The `frockbot.apk` on a release is the hosted app. See [What the simple profile does not ship](#what-the-simple-profile-does-not-ship).
-
-### Signing in the first time
-
-Open `https://<your hostname>`. Cloudflare Access authenticates you, and whoever the Allow policy admits has an account: the policy is the allowlist, so there is no admission screen, no invitation and nothing to approve.
-
-The operator surface at `/api/debug` is gated by `DEBUG_TOKEN` alone and answers `404` when that key is unset, so skipping it is how a deployment has no operator surface at all.
-
-### Upgrading
-
-Check out the next tag and run the installer again. It converges — nothing already there is created twice, no minted secret is replaced, and the profile's answers come back as defaults. The Fly token and any optional keys are asked for again, because the installer keeps no copy of them, and are set with the deploy.
-
-```bash
-git fetch --tags
-TAG=v0.0.0 # the tag you are moving to
-git checkout "$TAG"
-bun install
-bun run setup
-```
-
 ### What the simple profile does not ship
 
-Nothing is gated. Every line of both profiles is in this repository, and a self-hoster who sets a secret gets what it switches on; the installer simply never asks for one.
+Nothing is gated. Every line of both profiles is in this repository, and a self-hoster who sets a secret gets what it switches on; the deploy bundle simply never asks for one.
 
-- **Billing.** Switched by `STRIPE_SECRET_KEY`, which the installer never asks for. Set one by hand and billing turns on.
+- **Billing.** Switched by `STRIPE_SECRET_KEY`, which the deploy bundle never asks for. Set one by hand and billing turns on.
 - **The Android and macOS release channel.** Shorebird patches and the Sparkle feed belong to the hosted deployment; both updaters are inert in a plain `flutter build`. The release's `frockbot.apk` is that hosted app, with the hosted origin baked in, so it is not your phone app. Build your own against your own origin ([`docs/app-updates.md`](docs/app-updates.md), [`apps/native/README.md`](apps/native/README.md)); the update control never appears.
 - **Native sign-in, for now.** The `assetlinks.json` and `apple-app-site-association` the Worker serves name the apps in the profile's `nativeApps`, and the simple profile names none, so a client you build and sign yourself has no verified return path on your hostname until you add it there — the profile therefore enables no native sign-in targets, and the web client is the client.
 - **The admin portal.** There is nothing for it to administer here: with Access deciding admission there are no admission modes, access records or invitations. An account's features — Plugin authoring and the admin-gated seeded Plugins — are turned on from the operator surface instead, `POST /api/debug/users/<userId>/features` under the deployment's `DEBUG_TOKEN`.
@@ -312,7 +244,7 @@ Merging integrates; tagging ships. The pipeline has four stages, and the only de
 
 Pushing a valid SemVer tag by hand — `v0.8.0` for a minor bump, `v0.8.0-rc.1` for a prerelease — runs the same release workflow; the automatic cut continues from whatever tag is highest. Build metadata such as `+build.1` is rejected because npm does not accept it in package versions. Prereleases use npm's `next` dist-tag rather than `latest`. Workspaces outside that list remain private.
 
-Two jobs exist for the other profile rather than for this one. `publish-images` pushes the Computer host and Plugin build container images to Docker Hub under `timoconnellaus`, which is what an installer with no Docker pulls; it needs the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets, and the production deploy waits on it so every tag it ships is installable. `release-assets` builds the deploy bundle and `github-release` attaches it to the Release, because a deployer has neither Flutter nor this repository's build. The bundle is the three Workers prebuilt, with the web client, the application artifact and a manifest, and it is what `bun run setup` and the deploy page install through the Cloudflare API ([`docs/deploy-bundles.md`](docs/deploy-bundles.md)). Details are in [`apps/cloudflare/deployment-config/README.md`](apps/cloudflare/deployment-config/README.md#what-a-release-publishes-and-what-an-installer-pulls).
+Two jobs exist for the other profile rather than for this one. `publish-images` pushes the Computer host and Plugin build container images to Docker Hub under `timoconnellaus`, which is what an installer with no Docker pulls; it needs the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets, and the production deploy waits on it so every tag it ships is installable. `release-assets` builds the deploy bundle and `github-release` attaches it to the Release, because a deployer has neither Flutter nor this repository's build. The bundle is the three Workers prebuilt, with the web client, the application artifact and a manifest, and it is what `scripts/deploy-bundle.ts`, and the deploy page once it ships, install through the Cloudflare API ([`docs/deploy-bundles.md`](docs/deploy-bundles.md)). Details are in [`apps/cloudflare/deployment-config/README.md`](apps/cloudflare/deployment-config/README.md#what-a-release-publishes-and-what-an-installer-pulls).
 
 Neither leg is finished when it starts, so `scripts/ci-watch.ts` watches each to a terminal state and reduces it to an exit code — `0` green or landed, `1` failed, `2` still pending:
 
@@ -458,7 +390,7 @@ Email to and from Bots needs no secret: it is on when the deployment profile nam
 
 `COMPUTER_HOST_TOKEN` is not obtained from anywhere — generate it, once, with `openssl rand -hex 32`, and add it as a GitHub `production` secret. It is checked inside the container as well as at the host Worker, because the service binding is not the only route to that port. Rotating it means redeploying both Workers together.
 
-`./scripts/setup-production.sh` is this profile's wizard: it creates the scoped Cloudflare token, configures the Google OAuth web client, and saves the generated platform secrets as GitHub `production` environment values. It creates no Cloudflare resource, and it is not `bun run setup`, which installs the simple profile into a deployer's own account. Run it, then add `FROCKBOT_ADMIN_EMAILS` to the `production` environment and verify the completed configuration.
+`./scripts/setup-production.sh` is this profile's wizard: it creates the scoped Cloudflare token, configures the Google OAuth web client, and saves the generated platform secrets as GitHub `production` environment values. It creates no Cloudflare resource, and it is not the deploy bundle, which installs the simple profile into a deployer's own account. Run it, then add `FROCKBOT_ADMIN_EMAILS` to the `production` environment and verify the completed configuration.
 
 #### The admin portal
 
@@ -578,8 +510,8 @@ providers/
   anthropic/        Optional Anthropic (Claude) model provider
   foundation/       Deterministic credential-free development provider
 scripts/
-  setup.ts          `bun run setup`: the simple deployment's installer
-  setup/            What it decides, separated from what it does
+  deploy-bundle.ts  Installs a release's deploy bundle into a Cloudflare account through the API
+  deploy-bundle/    The simple profile the bundle is built from, and fetching a bundle
   deployment-config.ts  `bun run deployment:config`: `@frockbot/cloudflare`'s generator over this repository's profiles
   deployment-config/    The equivalence gate's fixtures (the generator is `apps/cloudflare/deployment-config/`)
   npm-publish.ts        The workspaces a release publishes to npm
