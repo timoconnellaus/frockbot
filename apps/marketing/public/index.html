@@ -584,55 +584,104 @@
       </section>
 
       <section
-        class="inside-teaser-section"
-        aria-labelledby="inside-teaser-title"
-        data-peek-zone="teaser"
+        class="section yours"
+        id="yours"
+        aria-labelledby="yours-title"
+        data-peek-zone="yours"
       >
-        <div class="container inside-teaser">
-          <img
-            class="follow follow-teaser-fox"
-            src="/assets/characters/fox.png"
-            alt=""
-          />
-          <div class="inside-teaser-copy">
-            <p class="section-label">Inside FrockBot</p>
-            <h2 id="inside-teaser-title">
-              Dress your Bot<br /><em>however you want.</em>
-            </h2>
+        <div class="container">
+          <div class="split-heading split-heading-bottom">
+            <div>
+              <p class="section-label">Dress your Bot</p>
+              <h2 id="yours-title">Make it <em>yours.</em></h2>
+            </div>
             <p>
-              A persistent cloud Bot, native apps, and an open-source plugin
-              architecture. See how the pieces fit together and what you could
-              build on top.
+              Ask for a customer list and it keeps one. Ask for a tuner and it
+              listens. Give it a look that's all its own.
             </p>
-            <a class="button button-white" href="/how-it-works/"
-              >Explore how FrockBot works <span aria-hidden="true">→</span></a
-            >
           </div>
-          <div class="inside-teaser-art bot-builder" aria-hidden="true">
-            <div class="bot-builder-bar">
-              <span>Build your Bot</span><span>Live preview</span>
+          <div class="yours-carousel">
+            <div class="yours-tabs">
+              <button
+                class="yours-tab"
+                type="button"
+                aria-controls="yours-slide-1"
+                aria-pressed="true"
+              >
+                <span>Keeps your records</span
+                ><strong>It keeps the list. You just ask.</strong
+                ><small
+                  >Ask for a customer list and your bot builds one beside the
+                  chat, then adds every new enquiry from your inbox.</small
+                >
+              </button>
+              <button
+                class="yours-tab"
+                type="button"
+                aria-controls="yours-slide-2"
+                aria-pressed="false"
+              >
+                <span>Hears, when you let it</span
+                ><strong>A tuner that listens.</strong
+                ><small
+                  >Ask for a guitar tuner and it makes one that uses your
+                  microphone. You allow it once, and Stop is always one tap
+                  away.</small
+                >
+              </button>
+              <button
+                class="yours-tab"
+                type="button"
+                aria-controls="yours-slide-3"
+                aria-pressed="false"
+              >
+                <span>Wears its own look</span
+                ><strong>Colours and type that are all its own.</strong
+                ><small
+                  >Give each bot a look, so you know who you are talking to at a
+                  glance.</small
+                >
+              </button>
             </div>
-            <div class="bot-builder-stage">
-              <span class="bot-builder-tile tile-model"><b>Model</b>Auto</span>
-              <span class="bot-builder-tile tile-inbox"
-                ><b>Inbox</b>Connected</span
+            <div class="yours-stage">
+              <img
+                class="follow follow-yours-fox"
+                src="/assets/characters/fox.png"
+                alt=""
+              />
+              <div
+                class="yours-track"
+                tabindex="0"
+                aria-label="Examples of bots made yours"
               >
-              <span class="bot-builder-tile tile-voice"><b>Voice</b>On</span>
-              <span class="bot-builder-tile tile-computer"
-                ><b>Computer</b>Ready</span
-              >
-              <div class="bot-builder-core">
-                <img
-                  src="/assets/characters/pixel.png"
-                  alt=""
-                  width="112"
-                  height="151"
-                />
-                <strong>Pixel</strong><small>4 abilities equipped</small>
+                <figure class="yours-slide" id="yours-slide-1">
+                  <img
+                    src="/assets/app/customers.webp"
+                    alt="A FrockBot conversation in the light look, with a customer list the bot keeps beside the chat."
+                    width="1440"
+                    height="900"
+                    loading="lazy"
+                  />
+                </figure>
+                <figure class="yours-slide" id="yours-slide-2">
+                  <img
+                    src="/assets/app/tuner.webp"
+                    alt="A FrockBot conversation in the dark look, with a guitar tuner listening through the microphone and a Stop button."
+                    width="1440"
+                    height="900"
+                    loading="lazy"
+                  />
+                </figure>
+                <figure class="yours-slide" id="yours-slide-3">
+                  <img
+                    src="/assets/app/theme.webp"
+                    alt="A FrockBot conversation in a custom navy and amber look."
+                    width="1440"
+                    height="900"
+                    loading="lazy"
+                  />
+                </figure>
               </div>
-            </div>
-            <div class="bot-builder-footer">
-              <span><i></i> Persistent</span><span>+ Add a plugin</span>
             </div>
           </div>
         </div>
@@ -646,77 +695,93 @@
       >
         <div class="container work-grid">
           <div class="work-copy">
-            <p class="section-label">Every step on record</p>
-            <h2 id="work-title">You can see<br /><em>how it got there.</em></h2>
+            <p class="section-label">Nothing behind your back</p>
+            <h2 id="work-title">
+              See everything it did,<br /><em>and everything it cost.</em>
+            </h2>
             <p>
-              Every step a bot takes is written down. Protected actions ask for
-              your approval before they run. Watch its screen while it works, or
-              take over whenever you like.
+              Every step a bot takes is written down. Protected actions wait for
+              your tap. Watch its screen while it works.
+            </p>
+            <p>
+              Spending shows how much of your month each bot uses, and how long
+              the rest will last. Set a daily limit for any bot. When credit
+              runs out, work pauses instead of charging you more.
             </p>
           </div>
-          <div class="workspace" aria-label="Example bot workspace">
-            <img
-              class="follow follow-how-goat"
-              src="/assets/characters/goat.png"
-              alt=""
-            />
-            <img
-              class="follow follow-how-cat"
-              src="/assets/characters/cat.png"
-              alt=""
-            />
-            <div class="workspace-bar">
-              <i></i><i></i><i></i><strong>Pixel’s workspace</strong
-              ><span>Live · 7:12</span>
-            </div>
-            <div class="workspace-body">
-              <aside>
-                <strong>Your bots</strong>
-                <div class="bot-row active">
-                  <img src="/assets/characters/pixel.png" alt="" />Pixel
-                </div>
-                <div class="bot-row">
-                  <img src="/assets/characters/sunny.png" alt="" />Sunny
-                </div>
-                <div class="bot-row">＋ New bot</div>
-              </aside>
-              <div class="workspace-thread">
-                <div class="workspace-thread-head">
-                  <img src="/assets/characters/pixel.png" alt="" />
-                  <span
-                    ><strong>Pixel</strong
-                    ><small>Bali flights · Today at 7:12</small></span
-                  >
-                </div>
-                <div class="workspace-messages">
-                  <p class="workspace-bubble workspace-bubble-bot">
-                    Three fares under $900 for the school holidays. The Tuesday
-                    one has the best times.
-                  </p>
-                  <p class="workspace-bubble workspace-bubble-user">
-                    Grab the Tuesday one if it's still there.
-                  </p>
-                  <p class="workspace-bubble workspace-bubble-bot">
-                    It is. I need your okay to pay $868 on the saved card.
-                  </p>
-                </div>
-                <div class="workspace-composer">
-                  <span>Message Pixel</span><i>↑</i>
-                </div>
+          <div class="work-visual">
+            <div class="workspace" aria-label="Example bot workspace">
+              <img
+                class="follow follow-how-goat"
+                src="/assets/characters/goat.png"
+                alt=""
+              />
+              <img
+                class="follow follow-how-cat"
+                src="/assets/characters/cat.png"
+                alt=""
+              />
+              <div class="workspace-bar">
+                <i></i><i></i><i></i><strong>Pixel’s workspace</strong
+                ><span>Live · 7:12</span>
               </div>
-              <section class="workspace-panel" aria-label="Pixel details">
-                <div class="workspace-screen">
-                  <span>Pixel’s screen</span>
+              <div class="workspace-body">
+                <aside>
+                  <strong>Your bots</strong>
+                  <div class="bot-row active">
+                    <img src="/assets/characters/pixel.png" alt="" />Pixel
+                  </div>
+                  <div class="bot-row">
+                    <img src="/assets/characters/sunny.png" alt="" />Sunny
+                  </div>
+                  <div class="bot-row">＋ New bot</div>
+                </aside>
+                <div class="workspace-thread">
+                  <div class="workspace-thread-head">
+                    <img src="/assets/characters/pixel.png" alt="" />
+                    <span
+                      ><strong>Pixel</strong
+                      ><small>Bali flights · Today at 7:12</small></span
+                    >
+                  </div>
+                  <div class="workspace-messages">
+                    <p class="workspace-bubble workspace-bubble-bot">
+                      Three fares under $900 for the school holidays. The
+                      Tuesday one has the best times.
+                    </p>
+                    <p class="workspace-bubble workspace-bubble-user">
+                      Send me the Tuesday one.
+                    </p>
+                    <p class="workspace-bubble workspace-bubble-bot">
+                      Here it is: $868, direct, back before the long weekend.
+                    </p>
+                  </div>
+                  <div class="workspace-composer">
+                    <span>Message Pixel</span><i>↑</i>
+                  </div>
                 </div>
-                <div class="workspace-panel-title">
-                  <strong>Routines</strong><b>＋</b>
-                </div>
-                <div class="workspace-routine">
-                  <strong>Fare watch</strong>
-                  <small>Daily · 7:00</small>
-                </div>
-              </section>
+                <section class="workspace-panel" aria-label="Pixel details">
+                  <div class="workspace-screen">
+                    <span>Pixel’s screen</span>
+                  </div>
+                  <div class="workspace-panel-title">
+                    <strong>Routines</strong><b>＋</b>
+                  </div>
+                  <div class="workspace-routine">
+                    <strong>Fare watch</strong>
+                    <small>Daily · 7:00</small>
+                  </div>
+                </section>
+              </div>
             </div>
+            <img
+              class="work-spending"
+              src="/assets/app/spending.webp"
+              alt="FrockBot's Spending page: how much of the month is left, how long it will last, and what each bot uses."
+              width="1152"
+              height="900"
+              loading="lazy"
+            />
           </div>
         </div>
       </section>
@@ -2686,6 +2751,56 @@
               </dl>
               <span class="setup-teaser-soon">Partly coming soon</span>
             </a>
+          </div>
+        </div>
+      </section>
+
+      <section class="section faq" id="faq" aria-labelledby="faq-title">
+        <div class="container faq-shell">
+          <div>
+            <p class="section-label">Before you start</p>
+            <h2 id="faq-title">Fair <em>questions.</em></h2>
+          </div>
+          <div class="faq-list">
+            <details class="faq-item">
+              <summary>Is it safe with my email?</summary>
+              <p>
+                Your bots reach only the apps you connect, and every step they
+                take is written down for you to read. Protected actions ask you
+                first. The code is open, so anyone can check how it works.
+              </p>
+            </details>
+            <details class="faq-item">
+              <summary>What if it gets something wrong?</summary>
+              <p>
+                Tell it, the way you'd tell a person. It remembers how you like
+                things done, and you can see exactly what it did.
+              </p>
+            </details>
+            <details class="faq-item">
+              <summary>I already pay for ChatGPT. Why this?</summary>
+              <p>
+                Connect it and your bots use it. FrockBot adds what a chat
+                window can't: memory for each job, routines that run while
+                you're out, a computer of its own, and your apps.
+              </p>
+            </details>
+            <details class="faq-item">
+              <summary>Can it spend my money?</summary>
+              <p>
+                It doesn't buy things for you. It finds the deal and sends you
+                the link. Its own running costs come from your balance, which
+                you can see and cap for each bot, and which pauses rather than
+                overcharging.
+              </p>
+            </details>
+            <details class="faq-item">
+              <summary>What happens if I cancel?</summary>
+              <p>
+                Your plan runs to the end of the period you paid for, and your
+                conversations stay yours to read afterwards.
+              </p>
+            </details>
           </div>
         </div>
       </section>

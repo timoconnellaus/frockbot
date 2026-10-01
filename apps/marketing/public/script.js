@@ -72,3 +72,32 @@ if ("IntersectionObserver" in window) {
     for (const host of peekers.keys()) observer.observe(host);
   }
 }
+
+const yoursTrack = document.querySelector(".yours-track");
+const yoursTabs = [...document.querySelectorAll(".yours-tab")];
+
+const showYours = (index) => {
+  yoursTabs.forEach((tab, i) =>
+    tab.setAttribute("aria-pressed", String(i === index)),
+  );
+};
+
+yoursTabs.forEach((tab, index) => {
+  tab.addEventListener("click", () => {
+    const slide = document.getElementById(
+      tab.getAttribute("aria-controls") ?? "",
+    );
+    const smooth = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+    slide?.scrollIntoView({
+      behavior: smooth ? "smooth" : "auto",
+      block: "nearest",
+      inline: "start",
+    });
+    showYours(index);
+  });
+});
+
+yoursTrack?.addEventListener("scrollend", () => {
+  if (!(yoursTrack instanceof HTMLElement)) return;
+  showYours(Math.round(yoursTrack.scrollLeft / yoursTrack.clientWidth));
+});
