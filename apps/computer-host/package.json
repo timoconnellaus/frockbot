@@ -35,8 +35,8 @@
     "ws": "8.21.3"
   },
   "devDependencies": {
-    "@cloudflare/vitest-plugin": "^1.1.10",
-    "@cloudflare/workers-types": "5.20260920.1",
+    "@cloudflare/vitest-plugin": "^1.2.5",
+    "@cloudflare/workers-types": "5.20260924.1",
     "@types/bun": "1.4.2",
     "@types/node": "26.6.2",
     "@types/ws": "8.18.1",
