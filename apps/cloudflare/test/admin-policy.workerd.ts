@@ -416,6 +416,38 @@ describe("beta access authority in workerd", () => {
     await setMode(admin, "closed");
   });
 
+  test("a waitlist entry is invited in a batch, then leaves the list when it signs in", async () => {
+    const gateway = testGateway();
+    const admin = operations();
+    await setMode(admin, "invite-only");
+    const email = `waiting-${crypto.randomUUID()}@example.com`;
+    expect(
+      await authority().joinWaitlist({ schemaVersion: 1, email }),
+    ).toMatchObject({ status: "joined" });
+    expect(
+      await authority().joinWaitlist({ schemaVersion: 1, email }),
+    ).toMatchObject({ status: "already-joined" });
+
+    const before = await admin.readWaitlist();
+    expect(before.rows.some((row) => row.entry.email === email)).toBe(true);
+    const batch = await admin.inviteWaitlist({
+      schemaVersion: 1,
+      count: 100,
+      invitedBy: owner,
+    });
+    expect(batch.invitations.map((invitation) => invitation.email)).toContain(
+      email,
+    );
+
+    const person = fresh("waiting", { email });
+    expect(await (await gateway(signedInRequest("/", person))).text()).toBe(
+      "admitted",
+    );
+    const after = await admin.readWaitlist();
+    expect(after.rows.some((row) => row.entry.email === email)).toBe(false);
+    await setMode(admin, "closed");
+  });
+
   test("concurrent sign-ins and admin writes serialize, and a stale admin write conflicts", async () => {
     const gateway = testGateway();
     const admin = operations();
