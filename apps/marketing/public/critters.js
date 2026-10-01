@@ -175,6 +175,7 @@
   // A poke ducks the character. The second time it comes back only as far
   // as its eyes; by the third it has had enough.
   const poke = (critter) => {
+    if (critter.busy && !still) return;
     const now = performance.now();
     critter.pokes = now - critter.lastPoke < 5000 ? critter.pokes + 1 : 1;
     critter.lastPoke = now;
@@ -182,7 +183,6 @@
       say(critter, critter.pokes >= 3 ? FED_UP[0] : "Hi.", 1800);
       return;
     }
-    if (critter.busy) return;
     if (critter.romp || critter.card) {
       startle(critter);
       return;
@@ -702,6 +702,7 @@
       script.src = "/vendor/rive/rive.js";
       script.onload = () => {
         window.rive.RuntimeLoader.setWasmUrl("/vendor/rive/rive.wasm");
+        window.rive.RuntimeLoader.setWasmFallbackUrl(null);
         resolve(window.rive);
       };
       script.onerror = reject;

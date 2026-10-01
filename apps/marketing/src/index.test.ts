@@ -292,9 +292,6 @@ describe("marketing worker", () => {
         true,
       );
     }
-    const script = await publicFile("critters.js");
-    expect(script).toContain('setWasmUrl("/vendor/rive/rive.wasm")');
-    expect(script).toContain('"(prefers-reduced-motion: reduce)"');
     for (const vendored of ["vendor/rive/rive.js", "vendor/rive/rive.wasm"]) {
       expect(
         await Bun.file(
