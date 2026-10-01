@@ -508,18 +508,26 @@ async function installSpending(page: Page) {
             suspended: false,
             subscription: {
               status: "active",
+              planId: "standard",
               periodEnd: renews,
               cancelAtPeriodEnd: false,
             },
             includedMicros: 11_400_000,
+            includedGrantedMicros: 20_000_000,
             complimentaryMicros: 0,
             purchasedMicros: 0,
             reservedMicros: 0,
             payments: [],
             plan: {
               currency: "usd",
-              monthlyCents: 2000,
-              includedMicros: 15_000_000,
+              subscriptions: [
+                {
+                  id: "standard",
+                  name: "Standard",
+                  monthlyCents: 2000,
+                  includedMicros: 20_000_000,
+                },
+              ],
               topUpCents: [1000, 2500, 5000],
             },
             computerRate: {
@@ -565,6 +573,34 @@ async function setAccountLook(
   });
 }
 
+// A Bot's character is picked at random when it is made: these give every
+// Bot in the shots its own, so no two rows of the sidebar look alike.
+const CHARACTERS: Record<string, [string, string]> = {
+  General: ["pixel", "#fc85ae"],
+  Home: ["sunny", "#ffc928"],
+  Travel: ["goat", "#d8c8ab"],
+  Deals: ["chill", "#59c7ff"],
+  Guitar: ["nudge", "#ff8b27"],
+  Customers: ["cat", "#8b72d9"],
+};
+
+async function cast(request: APIRequestContext, userId: string) {
+  const bootstrap = await asUser(request, userId, "/api/bots/bootstrap");
+  ids.General = bootstrap.generalBotId as string;
+  for (const [name, [characterId, primary]] of Object.entries(CHARACTERS)) {
+    const botId = idOf(name);
+    const current = await asUser(request, userId, `/api/bots/${botId}/avatar`);
+    await asUser(request, userId, `/api/bots/${botId}/avatar`, {
+      schemaVersion: 1,
+      type: "bot/update-avatar",
+      commandId: crypto.randomUUID(),
+      expectedRevision: current.revision,
+      botId,
+      avatar: { schemaVersion: 1, characterId, primary },
+    });
+  }
+}
+
 async function dressDeals(request: APIRequestContext, userId: string) {
   const botId = idOf("Deals");
   const current = await asUser(request, userId, `/api/bots/${botId}/look`);
@@ -579,15 +615,17 @@ async function dressDeals(request: APIRequestContext, userId: string) {
       schemaVersion: 1,
       look: "ink",
       tokens: {
+        // Neither Ink nor Paper could be this: beside the Ink sidebar the
+        // conversation has to read as the Bot's own at a glance.
         surfaces: {
-          window: "#0e1526",
-          surface: "#121b30",
-          raised: "#1a2540",
-          text: "#eef2fb",
-          muted: "#95a3c0",
-          line: "#25324f",
-          accent: "#f0a830",
-          onAccent: "#1a1206",
+          window: "#ffe7a3",
+          surface: "#ffdd85",
+          raised: "#fff6dc",
+          text: "#2a1606",
+          muted: "#8a5a1f",
+          line: "#f2c24f",
+          accent: "#c8321b",
+          onAccent: "#fff8ec",
         },
         type: "manrope",
         bubbles: { bot: "raised", me: "accent" },
@@ -670,7 +708,10 @@ test("marketing screenshots", async ({ page, userId, baseURL }) => {
         await sendMessage(page, said, { replies: 1 });
     }
 
+    await cast(page.request, userId);
     await dressDeals(page.request, userId);
+    // The sidebar picks up the new characters on the next load.
+    await openApplication(page, userId);
 
     // 1. The customer list, in Paper.
     await show(page, "Customers");
@@ -703,6 +744,10 @@ test("marketing screenshots", async ({ page, userId, baseURL }) => {
     await expect(page.getByText(/Credit left|Spending/).first())
       .toBeVisible({ timeout: 30_000 })
       .catch(() => undefined);
+    // Spending, chart and all, rather than the plan card above it.
+    await page.mouse.move(860, 500);
+    await page.mouse.wheel(0, 560);
+    await page.mouse.move(140, 880);
     // The Billing pane alone: the account column beside it is chrome.
     await shoot(page, "spending", { x: 288, y: 0, width: 1152, height: 900 });
   } finally {
