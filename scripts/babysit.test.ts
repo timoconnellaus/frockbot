@@ -337,6 +337,14 @@ describe("pull requests", () => {
     ).toBe("skip");
   });
 
+  test("an unsigned CLA waits for Tim rather than a fix", () => {
+    const cla = { name: "CLA", status: "COMPLETED", conclusion: "FAILURE" };
+    expect(decide(pr({ statusCheckRollup: [...green, cla] }))).toMatchObject({
+      action: "skip",
+      reason: "CLA unsigned: needs Tim",
+    });
+  });
+
   test("a review asking for changes holds the merge", () => {
     expect(decide(pr({ reviewDecision: "CHANGES_REQUESTED" })).reason).toBe(
       "changes requested",

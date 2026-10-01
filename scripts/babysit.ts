@@ -35,6 +35,8 @@ export const FIX_MAIN_LABEL = "fix-main";
  * the pull request's to fix.
  */
 export const MAIN_HEALTH_CHECK = "main-health";
+/** The contributor licence agreement check, `.github/workflows/cla.yml`. */
+export const CLA_CHECK = "CLA";
 
 /**
  * Whether a pull request may merge while `main` is red. Applying a label
@@ -437,6 +439,9 @@ export function pullRequestState(
     return state("skip", "changes requested");
   if (text(value.mergeable).toUpperCase() === "CONFLICTING")
     return state("rebase", "conflicts with main");
+  // Only the author can sign the CLA, so a red CLA check is nothing to fix.
+  if (failedChecks.includes(CLA_CHECK))
+    return state("skip", "CLA unsigned: needs Tim");
   if (failedChecks.length > 0)
     return state("fix", `failing: ${failedChecks.join(", ")}`);
 

@@ -167,6 +167,9 @@ The snapshot gives each open pull request an action:
   contribution to a public repository whose merges deploy production: never
   merge, push to or rerun it; list it once under "needs Tim".
 
+A failing `CLA` check is **skip**: only an author can sign
+[`CLA.md`](../../../CLA.md). List it once under "needs Tim".
+
 Dependabot pull requests go through the same actions; a bump that breaks
 `Check` in a way that isn't a one-line fix goes to Tim.
 
