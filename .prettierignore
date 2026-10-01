@@ -19,6 +19,7 @@ core/protocol-schemas/validators.generated.js
 
 # Pinned upstream platform adapter; preserve original source formatting.
 apps/native/vendor/
+apps/marketing/public/vendor/
 apps/native/build/
 apps/native/.dart_tool/
 apps/native/macos/Flutter/ephemeral/
