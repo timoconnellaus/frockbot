@@ -5,9 +5,9 @@ and `/deploy` installs a pinned FrockBot release into the account they signed
 in with, then updates it in place when a newer release is out. Nothing is
 cloned or built on their machine: the release is its
 [deploy bundle](deploy-bundles.md), installed by the same deployer,
-`deployBundleV1`, that `bun run setup` runs, so an install made here and one
-made from the repository are the same install. The repository path, `bun run setup`, stays
-for a custom domain or changed code ([ADR 0028](adr/0028-open-deployment.md)).
+`deployBundleV1`, that `scripts/deploy-bundle.ts` runs, so an install made here
+and one made from the repository are the same install. The repository path,
+`scripts/deploy-bundle.ts`, stays for a custom domain or changed code ([ADR 0028](adr/0028-open-deployment.md)).
 
 The code is `apps/marketing/src/deploy/`, served by the marketing Worker under
 `/deploy`. The pages are server-rendered under the site's CSP, and

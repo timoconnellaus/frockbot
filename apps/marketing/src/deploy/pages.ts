@@ -657,7 +657,7 @@ export function installsPageV1(
       }
       <p class="deploy-small deploy-muted">
         Only installs deployed from this page are listed. An install from the
-        repository updates with <code>bun run setup</code>.
+        repository updates with <code>scripts/deploy-bundle.ts</code>.
       </p>
       <form method="post" action="/deploy/sign-out">
         <button class="deploy-link" type="submit">

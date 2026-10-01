@@ -3,7 +3,7 @@
  *
  * The release itself goes in through the deploy bundle's own deployer,
  * `deployBundleV1` ([docs/deploy-bundles.md](../../../../docs/deploy-bundles.md)),
- * the same one `bun run setup` runs, so an install made here and one made
+ * the same one `scripts/deploy-bundle.ts` runs, so an install made here and one made
  * from the repository are the same install. What is this page's own is around
  * it: staging the release, Access, the secrets a first install mints, and the
  * checks.
