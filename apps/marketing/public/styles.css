@@ -1826,7 +1826,8 @@
     justify-content: center;
     pointer-events: none;
   }
-  .cta-flock img {
+  .cta-flock > * {
+    position: relative;
     width: 128px;
     height: 172px;
     margin-inline: -11px;
@@ -1834,10 +1835,10 @@
     filter: drop-shadow(0 12px 10px rgb(89 13 43 / 18%));
     transform-origin: 50% 100%;
   }
-  .cta-flock img:nth-child(2n) {
+  .cta-flock > *:nth-child(2n) {
     transform: translateY(10px) rotate(3deg);
   }
-  .cta-flock img:nth-child(3n) {
+  .cta-flock > *:nth-child(3n) {
     transform: translateY(-6px) rotate(-3deg);
   }
   .cta-action small {
@@ -2593,7 +2594,7 @@
       bottom: -115px;
       left: 0;
     }
-    .cta-flock img {
+    .cta-flock > * {
       width: 105px;
       height: 142px;
     }
@@ -2678,13 +2679,13 @@
     .cta-shell {
       min-height: 400px;
     }
-    .cta-flock img {
+    .cta-flock > * {
       width: 76px;
       height: 105px;
       margin-inline: -9px;
     }
-    .cta-flock img:first-child,
-    .cta-flock img:last-child {
+    .cta-flock > *:first-child,
+    .cta-flock > *:last-child {
       display: none;
     }
     .footer-links {
@@ -3015,31 +3016,31 @@
   }
 }
 
-.cta-flock img {
+.cta-flock > * {
   transition: translate 620ms cubic-bezier(0.34, 1.56, 0.5, 1);
 }
-.js-peek .cta:not(.is-peeking) .cta-flock img {
+.js-peek .cta:not(.is-peeking) .cta-flock > * {
   translate: 0 260px;
 }
-.cta-flock img:nth-child(1) {
+.cta-flock > *:nth-child(1) {
   transition-delay: 90ms;
 }
-.cta-flock img:nth-child(2) {
+.cta-flock > *:nth-child(2) {
   transition-delay: 180ms;
 }
-.cta-flock img:nth-child(3) {
+.cta-flock > *:nth-child(3) {
   transition-delay: 270ms;
 }
-.cta-flock img:nth-child(4) {
+.cta-flock > *:nth-child(4) {
   transition-delay: 360ms;
 }
-.cta-flock img:nth-child(5) {
+.cta-flock > *:nth-child(5) {
   transition-delay: 450ms;
 }
-.cta-flock img:nth-child(6) {
+.cta-flock > *:nth-child(6) {
   transition-delay: 540ms;
 }
-.cta-flock img:nth-child(7) {
+.cta-flock > *:nth-child(7) {
   transition-delay: 630ms;
 }
 
@@ -3523,4 +3524,123 @@
       display: none;
     }
   }
+}
+
+/* The flock as live characters (critters.js): the PNG until the Rive rig has
+   drawn, then the rig, drawn on the artboard the PNG sits inside. */
+.critter {
+  display: block;
+  pointer-events: none;
+}
+.critter-body {
+  position: absolute;
+  inset: 0;
+  transform-origin: 50% 92%;
+}
+.critter-body > img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+}
+.critter-rig {
+  position: absolute;
+  left: -20.131%;
+  top: -16.26%;
+  width: 140.044%;
+  height: 123.577%;
+  opacity: 0;
+}
+.critter.is-live .critter-rig {
+  opacity: 1;
+}
+.critter.is-live .critter-body > img {
+  opacity: 0;
+}
+html.is-over-critter body {
+  cursor: pointer;
+}
+.critter-bubble {
+  position: absolute;
+  z-index: 60;
+  max-width: min(260px, calc(100vw - 24px));
+  padding: 6px 14px 8px;
+  border-radius: 16px;
+  background: var(--paper, #fff);
+  box-shadow:
+    0 1px 0 rgb(30 29 39 / 8%),
+    0 10px 28px rgb(30 29 39 / 22%);
+  color: var(--ink, #1e1d27);
+  font-family: "Caveat", cursive;
+  font-size: 1.45rem;
+  font-weight: 600;
+  line-height: 1.1;
+  pointer-events: none;
+  transform-origin: var(--tail, 50%) 100%;
+  animation: critter-bubble-in 320ms cubic-bezier(0.34, 1.56, 0.5, 1);
+}
+.critter-bubble::after {
+  content: "";
+  position: absolute;
+  bottom: -7px;
+  left: calc(var(--tail, 50%) - 8px);
+  border: 8px solid transparent;
+  border-top-color: var(--paper, #fff);
+  border-bottom: 0;
+}
+.critter-bubble.is-leaving {
+  opacity: 0;
+  translate: 0 -6px;
+  transition:
+    opacity 240ms ease,
+    translate 240ms ease;
+}
+.critter-yarn {
+  position: absolute;
+  z-index: 60;
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--ink, #1e1d27);
+  border-radius: 50%;
+  background: repeating-linear-gradient(35deg, #f47aa0 0 4px, #fbd0dd 4px 7px);
+  pointer-events: none;
+}
+@keyframes critter-bubble-in {
+  from {
+    opacity: 0;
+    scale: 0.6;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .critter-bubble {
+    animation: none;
+  }
+}
+
+/* A few of the flock ride the app wall, each taking a tile's spot: no tile,
+   feet on the row's floor, head up into the gap above. */
+.app-tile-critter {
+  position: relative;
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+.app-tile-critter .romp {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  width: calc((var(--tile) + var(--tile-gap)) * 0.743);
+  height: calc(var(--tile) + var(--tile-gap));
+  max-width: none;
+  margin-left: calc((var(--tile) + var(--tile-gap)) * -0.3715);
+  filter: drop-shadow(0 8px 12px rgb(30 29 39 / 14%));
+}
+
+/* Characters on cards keep the artwork's own proportions once they are live,
+   centred where the contained image used to sit. */
+.critter.feature-character {
+  position: relative;
+  width: calc(72px * 0.743);
+  margin-inline: calc((64px - 72px * 0.743) / 2);
 }

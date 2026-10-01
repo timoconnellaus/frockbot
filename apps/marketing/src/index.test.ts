@@ -266,6 +266,44 @@ describe("marketing worker", () => {
     expect(zone?.declarations["overflow-x"]).toBe("clip");
   });
 
+  test("every character on the homepage can become its Rive rig", async () => {
+    const homepage = await worker.fetch(new Request("https://frockbot.com/"), {
+      ASSETS: assets(new Response(await publicFile("index.html"))),
+    });
+    // The runtime compiles its wasm from our origin; nothing comes off a CDN.
+    expect(homepage.headers.get("content-security-policy")).toContain(
+      "script-src 'self' 'wasm-unsafe-eval'",
+    );
+    const page = await homepage.text();
+    expect(page.indexOf('src="/critters.js"')).toBeLessThan(
+      page.indexOf('src="/script.js"'),
+    );
+    const flock = new Set(
+      [
+        ...page.matchAll(
+          /class="(?:peek|follow)[^"]*"\s+src="\/assets\/characters\/([a-z]+)\.png"/g,
+        ),
+      ].map((match) => match[1]!),
+    );
+    expect(flock.size).toBe(11);
+    const characters = new URL("../public/assets/characters/", import.meta.url);
+    for (const name of flock) {
+      expect(await Bun.file(new URL(`${name}.riv`, characters)).exists()).toBe(
+        true,
+      );
+    }
+    const script = await publicFile("critters.js");
+    expect(script).toContain('setWasmUrl("/vendor/rive/rive.wasm")');
+    expect(script).toContain('"(prefers-reduced-motion: reduce)"');
+    for (const vendored of ["vendor/rive/rive.js", "vendor/rive/rive.wasm"]) {
+      expect(
+        await Bun.file(
+          new URL(`../public/${vendored}`, import.meta.url),
+        ).exists(),
+      ).toBe(true);
+    }
+  });
+
   test.each(["/download/mac", "/download/mac/"])(
     "%s redirects to the latest notarized disk image on our own domain",
     async (path: string) => {

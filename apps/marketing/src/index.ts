@@ -50,7 +50,8 @@ const SECURITY_HEADERS = {
     "frame-ancestors 'none'",
     "img-src 'self' data:",
     "object-src 'none'",
-    "script-src 'self'",
+    // The flock's Rive runtime compiles its WebAssembly from our own origin.
+    "script-src 'self' 'wasm-unsafe-eval'",
     "style-src 'self'",
   ].join("; "),
   "permissions-policy": "camera=(), microphone=(), geolocation=()",
