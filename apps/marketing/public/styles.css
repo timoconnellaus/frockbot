@@ -3335,3 +3335,192 @@
     }
   }
 }
+
+@layer components {
+  .beta-tag {
+    align-self: center;
+    padding: 3px 9px;
+    border: 1.5px solid currentColor;
+    border-radius: 999px;
+    color: var(--pink-dark);
+    font-size: 0.66rem;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+  .site-header-dark .beta-tag {
+    color: #fc85ae;
+  }
+
+  .beta-hero {
+    padding-block: 64px 88px;
+  }
+  .beta-hero-copy {
+    max-width: 640px;
+  }
+  .beta-hero .legal-hero-shell > .beta-hero-character {
+    flex: none;
+    width: min(320px, 32vw);
+    height: auto;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    transform: none;
+  }
+  .beta-form {
+    display: grid;
+    gap: 16px;
+    margin-top: 32px;
+  }
+  .beta-field {
+    display: grid;
+    gap: 8px;
+  }
+  .beta-field label {
+    font-size: 0.92rem;
+    font-weight: 700;
+  }
+  .beta-field label span {
+    color: var(--muted);
+    font-weight: 500;
+  }
+  .beta-field input {
+    min-height: 52px;
+    padding: 0 20px;
+    border: 1.5px solid var(--line);
+    border-radius: 999px;
+    background: #fff;
+    color: var(--ink);
+    font: inherit;
+    font-size: 1rem;
+  }
+  .beta-field input::placeholder {
+    color: var(--muted);
+  }
+  .beta-field input:focus-visible {
+    border-color: var(--pink);
+    outline: 3px solid #8c2244;
+    outline-offset: 2px;
+  }
+  /* People never see it; a script that fills every field does. */
+  .beta-trap {
+    position: absolute;
+    left: -10000px;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+  }
+  .beta-submit {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 20px;
+    align-items: center;
+    margin-top: 4px;
+  }
+  .beta-submit button {
+    border: 0;
+    cursor: pointer;
+  }
+  .beta-submit p {
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+  .beta-submit a,
+  .beta-wait a {
+    color: var(--pink-dark);
+    font-weight: 700;
+  }
+  .beta-section h2,
+  .beta-tinker h2 {
+    margin-top: 12px;
+    font-family: "Archivo Black", "Arial Black", sans-serif;
+    font-size: clamp(2.4rem, 5vw, 3.4rem);
+    font-weight: 400;
+    letter-spacing: -0.05em;
+    line-height: 0.98;
+  }
+  .beta-section + .beta-section {
+    padding-top: 0;
+  }
+  .beta-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 20px;
+    margin-top: 32px;
+  }
+  .beta-card {
+    display: grid;
+    gap: 10px;
+    align-content: start;
+    padding: 26px;
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    background: #fff;
+  }
+  .beta-card h3,
+  .beta-wait h2 {
+    font-size: 1.05rem;
+    font-weight: 700;
+  }
+  .beta-card p {
+    color: var(--muted);
+    line-height: 1.6;
+  }
+  .beta-wait {
+    margin-top: 28px;
+  }
+  .beta-steps {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 28px;
+    margin: 32px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .beta-steps li {
+    display: grid;
+    gap: 8px;
+    align-content: start;
+  }
+  .beta-steps p {
+    color: var(--muted);
+    line-height: 1.6;
+  }
+  .beta-step-number {
+    color: var(--pink);
+    font-family: Caveat, cursive;
+    font-size: 2.4rem;
+    font-weight: 600;
+    line-height: 1;
+  }
+  .beta-tinker {
+    padding-block: 88px;
+    background: var(--ink);
+    color: #fff;
+  }
+  .beta-tinker .section-label,
+  .beta-tinker em {
+    color: #fc85ae;
+  }
+  .beta-tinker p:not(.section-label) {
+    max-width: 560px;
+    margin-top: 14px;
+    color: #bbb7c2;
+    line-height: 1.6;
+  }
+  .beta-tinker-shell {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 32px;
+    align-items: center;
+    justify-content: space-between;
+  }
+}
+
+@layer responsive {
+  @media (max-width: 760px) {
+    .beta-hero .legal-hero-shell > .beta-hero-character {
+      display: none;
+    }
+  }
+}

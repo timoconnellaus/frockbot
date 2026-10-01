@@ -18,6 +18,7 @@ import {
   type SetUserFeaturesCommandV1,
 } from "@frockbot/app/admin/shared";
 import { decodeSaveHostedModelRatesCommandV1 } from "@frockbot/app/billing/rates";
+import { WAITLIST_INVITE_BATCH_MAX_V1 } from "@frockbot/app/admin/waitlist";
 import {
   accessTokenFromRequestV1,
   isPortalAdminV1,
@@ -105,7 +106,16 @@ const NOTICES: Readonly<Record<string, NoticeV1>> = {
   invited: {
     tone: "done",
     message:
-      "The invitation is recorded. Only a sign-in whose provider verified that address can redeem it.",
+      "The invitation is recorded, and its email sent where this deployment can send one. Only a sign-in whose provider verified that address can redeem it.",
+  },
+  "waitlist-invited": {
+    tone: "done",
+    message:
+      "The longest-waiting people are invited. Each row below says whether their email went.",
+  },
+  "waitlist-empty": {
+    tone: "done",
+    message: "Nobody on the waitlist is still waiting, so nobody was invited.",
   },
   access: { tone: "done", message: "That account's access is saved." },
   features: { tone: "done", message: "That account's settings are saved." },
@@ -219,6 +229,25 @@ async function apply(
       await admin.inviteEmail(field(form, "email"), by);
       return { redirect: "/?notice=invited" };
     }
+    case "invite-waitlist": {
+      const count = Number(field(form, "count"));
+      if (
+        !Number.isSafeInteger(count) ||
+        count < 1 ||
+        count > WAITLIST_INVITE_BATCH_MAX_V1
+      ) {
+        throw new Error(
+          `Invite between 1 and ${WAITLIST_INVITE_BATCH_MAX_V1} people at a time.`,
+        );
+      }
+      const { invitations } = await admin.inviteWaitlist(count, by);
+      return {
+        redirect:
+          invitations.length > 0
+            ? "/?notice=waitlist-invited#waitlist"
+            : "/?notice=waitlist-empty#waitlist",
+      };
+    }
     case "account-access": {
       const written = await admin.setAccountAccess(
         field(form, "userId"),
@@ -288,12 +317,13 @@ async function renderPage(
 ): Promise<Response> {
   const admin = administrationV1(env.APP);
   const nonce = crypto.randomUUID();
-  const [policy, accounts, rates] = await Promise.all([
+  const [policy, accounts, rates, waitlist] = await Promise.all([
     admin.readPolicy(),
     admin.listAccounts(),
-    // A rate table that cannot be read is shown as unreadable; it does not
-    // take admission and accounts down with it.
+    // A rate table or waitlist that cannot be read is shown as unreadable; it
+    // does not take admission and accounts down with it.
     admin.readModelRates().catch(() => undefined),
+    admin.readWaitlist().catch(() => undefined),
   ]);
   return html(
     renderAdminPageV1({
@@ -301,6 +331,7 @@ async function renderPage(
       policy,
       accounts,
       ...(rates ? { rates } : {}),
+      ...(waitlist ? { waitlist } : {}),
       ...(ratesDraft !== undefined ? { ratesDraft } : {}),
       ...(notice ? { notice } : {}),
       grantId: crypto.randomUUID(),

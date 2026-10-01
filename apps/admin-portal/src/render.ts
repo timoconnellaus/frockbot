@@ -16,6 +16,11 @@ import {
   type AdminUserViewV1,
   type DeploymentPolicyV1,
 } from "@frockbot/app/admin/shared";
+import {
+  WAITLIST_INVITE_BATCH_MAX_V1,
+  type WaitlistRowV1,
+  type WaitlistViewV1,
+} from "@frockbot/app/admin/waitlist";
 import type {
   HostedModelRatesV1,
   HostedModelRatesViewV1,
@@ -35,6 +40,8 @@ export interface AdminPageV1 {
   accounts: AdminUserListViewV1;
   /** Absent when the authority could not be read. */
   rates?: HostedModelRatesViewV1;
+  /** Absent when the authority could not be read. */
+  waitlist?: WaitlistViewV1;
   /** A refused or stale rate edit, returned to the field it was typed in. */
   ratesDraft?: string;
   notice?: NoticeV1;
@@ -335,6 +342,84 @@ function invitation(): string {
     </div>
     <button type="submit">Invite</button>
   </form>
+</section>`;
+}
+
+/** Where one row stands: waiting, or invited and whether its email went. */
+function waitlistStatus(row: WaitlistRowV1): string {
+  if (!row.invitation) return `<span class="pill pill-quiet">Waiting</span>`;
+  const invited = `Invited ${when(row.invitation.invitedAt)}`;
+  switch (row.notice?.status) {
+    case "sent":
+      return `<span class="pill pill-good">Email sent</span> <span class="who">${invited}</span>`;
+    case "unavailable":
+      return `<span class="pill pill-bad">Email not sent</span> <span class="who">${invited}. ${escapeHtmlV1(
+        row.notice.detail ?? "",
+      )}</span>`;
+    case "sending":
+    case "unknown":
+      return `<span class="pill pill-warn">Email may have sent</span> <span class="who">${invited}. It is never sent twice.</span>`;
+    default:
+      return `<span class="pill pill-quiet">No email</span> <span class="who">${invited}. This deployment has no sender, so they get in by signing in.</span>`;
+  }
+}
+
+function waitlistRow(row: WaitlistRowV1): string {
+  const email = escapeHtmlV1(row.entry.email);
+  const invite = row.invitation
+    ? ""
+    : `<form method="post" action="/">
+          <input type="hidden" name="action" value="invite-email">
+          <input type="hidden" name="email" value="${email}">
+          <button type="submit" class="quiet">Invite</button>
+        </form>`;
+  return `<div class="row">
+      <div>
+        <h3>${email}</h3>
+        <p>Joined ${when(row.entry.joinedAt)}${
+          row.entry.firstJob === undefined
+            ? ""
+            : ` · First job: “${escapeHtmlV1(row.entry.firstJob)}”`
+        }</p>
+        <p>${waitlistStatus(row)}</p>
+      </div>
+      ${invite}
+    </div>`;
+}
+
+function waitlist(view: WaitlistViewV1 | undefined): string {
+  if (!view) {
+    return `<section id="waitlist">
+  <h2>Waitlist</h2>
+  <p class="unreadable">The authority could not be reached, so the waitlist
+  is not known. Reload to try again.</p>
+</section>`;
+  }
+  const shown =
+    view.rows.length < view.total
+      ? `<p class="who spaced">Showing the first ${view.rows.length} of ${view.total}.</p>`
+      : "";
+  return `<section id="waitlist">
+  <h2>Waitlist</h2>
+  <p class="lede">People who asked to join from the site, oldest first.
+  ${view.waiting} waiting, ${view.total - view.waiting} invited and not yet
+  in. Someone leaves the list when they first sign in. Inviting sends one
+  email per invitation, never two.</p>
+  <form method="post" action="/" class="inline spaced">
+    <input type="hidden" name="action" value="invite-waitlist">
+    <div class="field">
+      <label for="waitlist-count">Invite the longest-waiting</label>
+      <input id="waitlist-count" type="number" name="count" required
+        min="1" max="${WAITLIST_INVITE_BATCH_MAX_V1}" value="20" size="5">
+    </div>
+    <button type="submit"${view.waiting === 0 ? " disabled" : ""}>Invite</button>
+  </form>
+  ${
+    view.rows.length === 0
+      ? `<p class="who spaced">Nobody has joined yet.</p>`
+      : `<div class="rows">${view.rows.map(waitlistRow).join("\n")}</div>`
+  }
+  ${shown}
 </section>`;
 }
 
@@ -678,6 +763,7 @@ export function renderAdminPageV1(page: AdminPageV1): string {
 ${notice(page.notice)}
 ${admission(page.policy)}
 ${invitation()}
+${waitlist(page.waitlist)}
 ${modelRates(page)}
 ${accounts(page)}
 <footer>

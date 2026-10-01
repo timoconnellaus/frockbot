@@ -162,6 +162,7 @@ import {
 } from "@frockbot/app/admin/shared";
 import { AUTH_PACKAGE_V1 } from "#auth-package";
 import { BRAND_V1 } from "#brand";
+import { routeWaitlistV1, WAITLIST_PATH_V1 } from "./waitlist-route.js";
 import {
   createNativeAuth,
   nativeAppsV1,
@@ -849,6 +850,7 @@ interface DeploymentPolicyRpc {
   readAccountAccess(input: unknown): Promise<unknown>;
   setAccountAccess(input: unknown): Promise<unknown>;
   inviteEmail(input: unknown): Promise<unknown>;
+  joinWaitlist(input: unknown): Promise<unknown>;
   admitAccount(input: unknown): Promise<unknown>;
   checkAccount(input: unknown): Promise<unknown>;
   mayCreateIdentity(input: unknown): Promise<unknown>;
@@ -2727,9 +2729,21 @@ export default {
     }
   },
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    const pathname = new URL(request.url).pathname;
+    // The marketing site's beta form: public, before sessions or admission,
+    // because the people it is for cannot sign in yet.
+    if (pathname === WAITLIST_PATH_V1) {
+      return routeWaitlistV1(request, {
+        homepage: BRAND_V1.homepage,
+        join: async (input) =>
+          rpcJsonSnapshotV1(
+            await deploymentPolicyStub(env).joinWaitlist(input),
+          ),
+      });
+    }
     // The Computer's connected-account proxy: authorized by its own signed
     // token, before sessions, admission or any backend is mounted.
-    if (new URL(request.url).pathname === COMPUTER_EGRESS_PATH_V1) {
+    if (pathname === COMPUTER_EGRESS_PATH_V1) {
       return routeComputerEgressV1(request, {
         ...(env.COMPUTER_HOST_TOKEN ? { secret: env.COMPUTER_HOST_TOKEN } : {}),
         answer: (input) => {

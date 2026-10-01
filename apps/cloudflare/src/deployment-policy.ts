@@ -18,6 +18,22 @@ import {
   type EmailInvitationV1,
 } from "@frockbot/app/admin/shared";
 import {
+  decodeInvitationNoticeRequestV1,
+  decodeInvitationNoticeV1,
+  decodeInviteWaitlistRequestV1,
+  decodeJoinWaitlistRequestV1,
+  decodeRecordInvitationNoticeRequestV1,
+  decodeWaitlistEntryV1,
+  WAITLIST_CAPACITY_V1,
+  WAITLIST_VIEW_LIMIT_V1,
+  type InvitationNoticeV1,
+  type InviteWaitlistResultV1,
+  type JoinWaitlistResultV1,
+  type WaitlistEntryV1,
+  type WaitlistRowV1,
+  type WaitlistViewV1,
+} from "@frockbot/app/admin/waitlist";
+import {
   claimEmailUsernameV1,
   readEmailUsernameV1,
   releaseEmailUsernameV1,
@@ -47,6 +63,10 @@ import { decodeRpcEnvelopeV1, rpcIdentifier } from "./durable-rpc.js";
 const POLICY_KEY = "deployment:admission:v1";
 const ACCESS_PREFIX = "account:access:v1:";
 const INVITATION_PREFIX = "invitation:email:v1:";
+const INVITATION_NOTICE_PREFIX = "invitation:notice:v1:";
+const WAITLIST_PREFIX = "waitlist:entry:v1:";
+/** How many entries the waitlist holds, so a join need not count them all. */
+const WAITLIST_SIZE_KEY = "waitlist:size:v1";
 export const DEPLOYMENT_POLICY_SINGLETON_NAME = "frockbot-deployment-policy";
 
 /** An email username, in the shape and outside the names nobody may hold. */
@@ -120,7 +140,8 @@ function nextRevision(current: number, label: string): number {
  * The deployment's beta-access authority: the admission mode, each account's
  * access record and the email invitations not yet redeemed. It also holds the
  * versioned hosted model rate table (`./model-rates.ts`), which is equally
- * deployment-wide and equally an administrator's to change, and the email
+ * deployment-wide and equally an administrator's to change, the beta
+ * waitlist and the email each invitation sends, and the email
  * usernames (`app/email/directory.ts`): one account per username across the
  * deployment, and the one object the whole deployment shares is what can say
  * whose a message's username is before any User's object is addressed.
@@ -164,6 +185,47 @@ export class DeploymentPolicy extends DurableObject<Record<string, never>> {
     if (email === undefined) return null;
     const stored = this.kv.get<unknown>(INVITATION_PREFIX + email);
     return stored === undefined ? null : decodeEmailInvitationV1(stored);
+  }
+
+  private notice(email: string): InvitationNoticeV1 | null {
+    const stored = this.kv.get<unknown>(INVITATION_NOTICE_PREFIX + email);
+    return stored === undefined ? null : decodeInvitationNoticeV1(stored);
+  }
+
+  private waitlistSize(): number {
+    return this.kv.get<number>(WAITLIST_SIZE_KEY) ?? 0;
+  }
+
+  /** Oldest first; ties broken by address so the order never wavers. */
+  private waitlistEntries(): WaitlistEntryV1[] {
+    return [...this.kv.list<unknown>({ prefix: WAITLIST_PREFIX })]
+      .map(([, value]) => decodeWaitlistEntryV1(value))
+      .sort(
+        (a, b) =>
+          a.joinedAt.localeCompare(b.joinedAt) ||
+          a.email.localeCompare(b.email),
+      );
+  }
+
+  /** The person is in, or gone: they are no longer waiting. */
+  private leaveWaitlist(email: string): void {
+    if (this.kv.get(WAITLIST_PREFIX + email) === undefined) return;
+    this.kv.delete(WAITLIST_PREFIX + email);
+    this.kv.put(WAITLIST_SIZE_KEY, Math.max(0, this.waitlistSize() - 1));
+  }
+
+  private recordInvitation(
+    email: string,
+    invitedBy: string,
+  ): EmailInvitationV1 {
+    const invitation: EmailInvitationV1 = {
+      schemaVersion: 1,
+      email,
+      invitedAt: new Date().toISOString(),
+      invitedBy,
+    };
+    this.kv.put(INVITATION_PREFIX + email, invitation);
+    return invitation;
   }
 
   async readPolicy(input: unknown): Promise<DeploymentPolicyV1> {
@@ -236,15 +298,117 @@ export class DeploymentPolicy extends DurableObject<Record<string, never>> {
     return this.ctx.storage.transactionSync(() => {
       const existing = this.invitation(request.command.email);
       if (existing) return existing;
-      const invitation: EmailInvitationV1 = {
-        schemaVersion: 1,
-        email: request.command.email,
-        invitedAt: new Date().toISOString(),
-        invitedBy: request.invitedBy,
-      };
-      this.kv.put(INVITATION_PREFIX + invitation.email, invitation);
-      return invitation;
+      return this.recordInvitation(request.command.email, request.invitedBy);
     });
+  }
+
+  /**
+   * A public sign-up. Joining twice keeps the first entry, and a full list
+   * answers without keeping anything, so the page a person sees is the same
+   * either way and a flood of addresses is bounded.
+   */
+  async joinWaitlist(input: unknown): Promise<JoinWaitlistResultV1> {
+    const request = decodeJoinWaitlistRequestV1(input);
+    return this.ctx.storage.transactionSync<JoinWaitlistResultV1>(() => {
+      if (this.kv.get(WAITLIST_PREFIX + request.email) !== undefined) {
+        return { schemaVersion: 1, status: "already-joined" };
+      }
+      const size = this.waitlistSize();
+      if (size >= WAITLIST_CAPACITY_V1) {
+        return { schemaVersion: 1, status: "full" };
+      }
+      const entry: WaitlistEntryV1 = {
+        schemaVersion: 1,
+        email: request.email,
+        joinedAt: new Date().toISOString(),
+        ...(request.firstJob === undefined
+          ? {}
+          : { firstJob: request.firstJob }),
+      };
+      this.kv.put(WAITLIST_PREFIX + entry.email, entry);
+      this.kv.put(WAITLIST_SIZE_KEY, size + 1);
+      return { schemaVersion: 1, status: "joined" };
+    });
+  }
+
+  /** Who is waiting, oldest first, then who is invited and not yet in. */
+  async readWaitlist(input: unknown): Promise<WaitlistViewV1> {
+    decodeDeploymentPolicyReadRequestV1(input);
+    return this.ctx.storage.transactionSync(() => {
+      const waiting: WaitlistRowV1[] = [];
+      const invited: WaitlistRowV1[] = [];
+      for (const entry of this.waitlistEntries()) {
+        const invitation = this.invitation(entry.email);
+        if (!invitation) {
+          waiting.push({ entry });
+          continue;
+        }
+        const notice = this.notice(entry.email);
+        invited.push({ entry, invitation, ...(notice ? { notice } : {}) });
+      }
+      return {
+        schemaVersion: 1,
+        total: waiting.length + invited.length,
+        waiting: waiting.length,
+        rows: [...waiting, ...invited].slice(0, WAITLIST_VIEW_LIMIT_V1),
+      };
+    });
+  }
+
+  /** Invites the longest-waiting entries that hold no invitation yet. */
+  async inviteWaitlist(input: unknown): Promise<InviteWaitlistResultV1> {
+    const request = decodeInviteWaitlistRequestV1(input);
+    return this.ctx.storage.transactionSync(() => {
+      const invitations: EmailInvitationV1[] = [];
+      for (const entry of this.waitlistEntries()) {
+        if (invitations.length === request.count) break;
+        if (this.invitation(entry.email)) continue;
+        invitations.push(this.recordInvitation(entry.email, request.invitedBy));
+      }
+      return { schemaVersion: 1, invitations };
+    });
+  }
+
+  /**
+   * The right to send one invitation's email, taken once. The claim is
+   * recorded before anything is sent, so whatever happens to the send — an
+   * answer, an error, an eviction mid-call — this invitation never sends
+   * another.
+   */
+  async claimInvitationNotice(
+    input: unknown,
+  ): Promise<{ schemaVersion: 1; claimed: boolean }> {
+    const { email } = decodeInvitationNoticeRequestV1(input);
+    return this.ctx.storage.transactionSync(() => {
+      if (!this.invitation(email) || this.notice(email)) {
+        return { schemaVersion: 1, claimed: false };
+      }
+      const notice: InvitationNoticeV1 = {
+        schemaVersion: 1,
+        email,
+        status: "sending",
+        updatedAt: new Date().toISOString(),
+      };
+      this.kv.put(INVITATION_NOTICE_PREFIX + email, notice);
+      return { schemaVersion: 1, claimed: true };
+    });
+  }
+
+  /** What a claimed send came to. Only a claim still `sending` is answered. */
+  async recordInvitationNotice(input: unknown): Promise<{ schemaVersion: 1 }> {
+    const request = decodeRecordInvitationNoticeRequestV1(input);
+    this.ctx.storage.transactionSync(() => {
+      if (this.notice(request.email)?.status !== "sending") return;
+      const notice: InvitationNoticeV1 = {
+        schemaVersion: 1,
+        email: request.email,
+        status: request.status,
+        updatedAt: new Date().toISOString(),
+        ...(request.detail === undefined ? {} : { detail: request.detail }),
+      };
+      this.kv.put(INVITATION_NOTICE_PREFIX + request.email, notice);
+    });
+    return { schemaVersion: 1 };
   }
 
   /**
@@ -267,9 +431,11 @@ export class DeploymentPolicy extends DurableObject<Record<string, never>> {
           updatedBy: ADMISSION_UPDATED_BY,
         };
         this.kv.put(ACCESS_PREFIX + identity.userId, next);
+        if (identity.email !== undefined) this.leaveWaitlist(identity.email);
       }
       if (evaluation.redeemInvitation && identity.email !== undefined) {
         this.kv.delete(INVITATION_PREFIX + identity.email);
+        this.kv.delete(INVITATION_NOTICE_PREFIX + identity.email);
       }
       return evaluation.decision;
     });
@@ -408,7 +574,8 @@ export class DeploymentPolicy extends DurableObject<Record<string, never>> {
 
   /**
    * The last trace of a deleted account here: its access record, any
-   * invitation still waiting under its address, and its email username, which
+   * invitation, invitation email or waitlist entry still under its address,
+   * and its email username, which
    * anyone may take again. Called only once the identity itself is gone, so no
    * session is left that could be admitted afresh.
    */
@@ -418,6 +585,8 @@ export class DeploymentPolicy extends DurableObject<Record<string, never>> {
       this.kv.delete(ACCESS_PREFIX + request.userId);
       if (request.email !== undefined) {
         this.kv.delete(INVITATION_PREFIX + request.email);
+        this.kv.delete(INVITATION_NOTICE_PREFIX + request.email);
+        this.leaveWaitlist(request.email);
       }
       releaseEmailUsernameV1(this.kv, request.userId);
     });

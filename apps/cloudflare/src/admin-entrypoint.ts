@@ -1,4 +1,5 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
+import { BRAND_V1 } from "#brand";
 import {
   createAdminOperationsV1,
   type AdminOperationsHostV1,
@@ -20,21 +21,35 @@ import type {
   HostedModelRatesV1,
   HostedModelRatesViewV1,
 } from "@frockbot/app/billing/rates";
+import type {
+  InviteWaitlistResultV1,
+  WaitlistViewV1,
+} from "@frockbot/app/admin/waitlist";
+import {
+  createBindingEmailSenderV1,
+  type EmailBindingV1,
+} from "@frockbot/app/email/sender";
+import { createInvitationNoticeSenderV1 } from "./invitation-notice.js";
 import { createDeploymentPolicyAdminHost } from "./deployment-policy-admin-host.js";
 import { DEPLOYMENT_POLICY_SINGLETON_NAME } from "./deployment-policy.js";
 import { rpcJsonSnapshotV1 } from "./durable-rpc.js";
 
 /**
  * What administration needs from the Worker's environment: the access
- * authority, the identity store and one account's User Durable Object.
+ * authority, the identity store, one account's User Durable Object, and the
+ * sender and origin an invitation's email is written with.
  *
- * Deliberately narrower than the app's `Env`. Administration reaches three
- * bindings, and naming them here is what says so.
+ * Deliberately narrower than the app's `Env`, and naming them here is what
+ * says so.
  */
 export interface AdminEntrypointEnvV1 {
   AUTH_DB: D1Database;
   USER_CONFIGURATIONS: DurableObjectNamespace;
   DEPLOYMENT_POLICY: DurableObjectNamespace;
+  SEND_EMAIL?: EmailBindingV1;
+  EMAIL_DOMAIN?: string;
+  BETTER_AUTH_URL?: string;
+  APP_ORIGIN?: string;
 }
 
 interface DeploymentPolicyAdminRpc {
@@ -43,6 +58,10 @@ interface DeploymentPolicyAdminRpc {
   readAccountAccess(input: unknown): Promise<unknown>;
   setAccountAccess(input: unknown): Promise<unknown>;
   inviteEmail(input: unknown): Promise<unknown>;
+  readWaitlist(input: unknown): Promise<unknown>;
+  inviteWaitlist(input: unknown): Promise<unknown>;
+  claimInvitationNotice(input: unknown): Promise<unknown>;
+  recordInvitationNotice(input: unknown): Promise<unknown>;
   readModelRatesView(input: unknown): Promise<unknown>;
   saveModelRates(input: unknown): Promise<unknown>;
 }
@@ -77,6 +96,13 @@ export function createAdminOperationsHostV1(
 ): AdminOperationsHostV1 {
   return {
     ...createDeploymentPolicyAdminHost(() => deploymentPolicyStub(env)),
+    sendInvitationNotice: createInvitationNoticeSenderV1({
+      authority: () => deploymentPolicyStub(env),
+      sender: createBindingEmailSenderV1(env, BRAND_V1.emailSenderName),
+      origin: env.BETTER_AUTH_URL || env.APP_ORIGIN || undefined,
+      productName: BRAND_V1.productName,
+      senderName: BRAND_V1.emailSenderName,
+    }),
     listUsers: async () => {
       const result = await env.AUTH_DB.prepare(
         'select "id", "email", "name" from "user" order by "createdAt" desc limit 200',
@@ -172,6 +198,14 @@ export class AdminEntrypoint extends WorkerEntrypoint<AdminEntrypointEnvV1> {
 
   inviteEmail(input: unknown): Promise<EmailInvitationV1> {
     return this.operations.inviteEmail(input);
+  }
+
+  readWaitlist(): Promise<WaitlistViewV1> {
+    return this.operations.readWaitlist();
+  }
+
+  inviteWaitlist(input: unknown): Promise<InviteWaitlistResultV1> {
+    return this.operations.inviteWaitlist(input);
   }
 
   setAccountFeatures(input: unknown): Promise<UserFeaturesV1> {

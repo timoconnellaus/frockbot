@@ -111,6 +111,43 @@ function ratesView(): HostedModelRatesViewV1 {
   };
 }
 
+function waitlistView() {
+  return {
+    schemaVersion: 1,
+    total: 2,
+    waiting: 1,
+    rows: [
+      {
+        entry: {
+          schemaVersion: 1,
+          email: "waiting@example.com",
+          joinedAt: "2026-09-28T00:00:00.000Z",
+          firstJob: 'Watch <b>"flights"</b>',
+        },
+      },
+      {
+        entry: {
+          schemaVersion: 1,
+          email: "invited@example.com",
+          joinedAt: "2026-09-27T00:00:00.000Z",
+        },
+        invitation: {
+          schemaVersion: 1,
+          email: "invited@example.com",
+          invitedAt: "2026-09-30T00:00:00.000Z",
+          invitedBy: ADMIN,
+        },
+        notice: {
+          schemaVersion: 1,
+          email: "invited@example.com",
+          status: "sent",
+          updatedAt: "2026-09-30T00:00:01.000Z",
+        },
+      },
+    ],
+  };
+}
+
 interface Recorded {
   calls: Array<{ method: string; input?: unknown }>;
 }
@@ -155,6 +192,18 @@ function app(
         email: "friend@example.com",
         invitedAt: "2026-09-15T00:00:00.000Z",
         invitedBy: ADMIN,
+      })),
+      readWaitlist: record("readWaitlist", () => waitlistView()),
+      inviteWaitlist: record("inviteWaitlist", () => ({
+        schemaVersion: 1,
+        invitations: [
+          {
+            schemaVersion: 1,
+            email: "waiting@example.com",
+            invitedAt: "2026-10-01T00:00:00.000Z",
+            invitedBy: ADMIN,
+          },
+        ],
       })),
       setAccountFeatures: record("setAccountFeatures", () => ({
         ...defaultUserFeaturesV1(),
@@ -370,6 +419,38 @@ describe("the page", () => {
     expect(body).toContain("Person One");
   });
 
+  test("shows the waitlist, escaped, with who is waiting and whose email went", async () => {
+    const body = await (await get(environment())).text();
+
+    expect(body).toContain('<section id="waitlist">');
+    expect(body).toContain("1 waiting, 1 invited and not yet");
+    expect(body).toContain("waiting@example.com");
+    expect(body).not.toContain("<b>&quot;flights");
+    expect(body).toContain("&lt;b&gt;&quot;flights&quot;&lt;/b&gt;");
+    expect(body).toContain("Email sent");
+    expect(body).toContain(
+      '<input type="hidden" name="email" value="waiting@example.com">',
+    );
+  });
+
+  test("a waitlist that cannot be read leaves the rest of the page", async () => {
+    const response = await get(
+      environment({
+        APP: app({
+          readWaitlist: () => {
+            throw new Error("authority unreachable");
+          },
+        }).binding,
+      }),
+    );
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(body).toContain("the waitlist");
+    expect(body).toContain("is not known");
+    expect(body).toContain("Person One");
+  });
+
   test("shows the notice a finished write redirected to", async () => {
     const response = await get(environment(), "/?notice=invited");
 
@@ -479,6 +560,36 @@ describe("a write", () => {
       command: { type: "access/invite-email", email: "Friend@Example.com" },
       invitedBy: ADMIN,
     });
+  });
+
+  test("invites the longest-waiting in a batch", async () => {
+    const binding = app();
+    const response = await post(environment({ APP: binding.binding }), {
+      action: "invite-waitlist",
+      count: "20",
+    });
+
+    expect(response.headers.get("location")).toBe(
+      "/?notice=waitlist-invited#waitlist",
+    );
+    expect(
+      binding.recorded.calls.find((call) => call.method === "inviteWaitlist")
+        ?.input,
+    ).toEqual({ schemaVersion: 1, count: 20, invitedBy: ADMIN });
+  });
+
+  test("refuses a batch outside its bounds without reaching the app", async () => {
+    for (const count of ["0", "101", "ten"]) {
+      const binding = app();
+      const response = await post(environment({ APP: binding.binding }), {
+        action: "invite-waitlist",
+        count,
+      });
+      expect(response.status).toBe(400);
+      expect(
+        binding.recorded.calls.some((call) => call.method === "inviteWaitlist"),
+      ).toBe(false);
+    }
   });
 
   test("writes the whole features record, so an unchecked box is off", async () => {

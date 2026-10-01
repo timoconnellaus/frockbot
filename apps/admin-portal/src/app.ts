@@ -27,6 +27,12 @@ import {
   type UserFeaturesV1,
 } from "@frockbot/app/admin/shared";
 import {
+  decodeInviteWaitlistResultV1,
+  decodeWaitlistViewV1,
+  type InviteWaitlistResultV1,
+  type WaitlistViewV1,
+} from "@frockbot/app/admin/waitlist";
+import {
   decodeHostedModelRatesV1,
   decodeHostedModelRatesViewV1,
   type HostedModelRatesV1,
@@ -42,6 +48,8 @@ export interface AdminAppBindingV1 {
   readAccountAccess(input: unknown): Promise<unknown>;
   setAccountAccess(input: unknown): Promise<unknown>;
   inviteEmail(input: unknown): Promise<unknown>;
+  readWaitlist(): Promise<unknown>;
+  inviteWaitlist(input: unknown): Promise<unknown>;
   setAccountFeatures(input: unknown): Promise<unknown>;
   grantCredit(input: unknown): Promise<unknown>;
   readModelRates(): Promise<unknown>;
@@ -62,6 +70,11 @@ export interface AdministrationV1 {
     updatedBy: string,
   ): Promise<AdminWriteResultV1<AccountAccessV1>>;
   inviteEmail(email: string, invitedBy: string): Promise<EmailInvitationV1>;
+  readWaitlist(): Promise<WaitlistViewV1>;
+  inviteWaitlist(
+    count: number,
+    invitedBy: string,
+  ): Promise<InviteWaitlistResultV1>;
   setAccountFeatures(
     userId: string,
     command: SetUserFeaturesCommandV1,
@@ -117,6 +130,13 @@ export function administrationV1(app: AdminAppBindingV1): AdministrationV1 {
           command: { schemaVersion: 1, type: "access/invite-email", email },
           invitedBy,
         }),
+      ),
+
+    readWaitlist: async () => decodeWaitlistViewV1(await app.readWaitlist()),
+
+    inviteWaitlist: async (count, invitedBy) =>
+      decodeInviteWaitlistResultV1(
+        await app.inviteWaitlist({ schemaVersion: 1, count, invitedBy }),
       ),
 
     setAccountFeatures: async (userId, command, updatedBy) =>

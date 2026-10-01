@@ -718,11 +718,11 @@ describe("hosted or self-hosted", () => {
     );
     expect(note).toContain('href="#run-your-own"');
     expect(note.replace(/<[^>]+>/g, "").replace(/\s+/g, " ")).toContain(
-      "Early access · 7-day trial · From US$20 a month · Open source, or run your own →",
+      "In beta · 7-day trial · From US$20 a month · Open source, or run your own →",
     );
   });
 
-  test("starts the trial where the hero does and never links the deploy page yet", async () => {
+  test("joins the beta where the hero does and never links the deploy page yet", async () => {
     const homepage = await publicFile("index.html");
     const heroButton = homepage.match(
       /<div class="hero-actions">\s*<a class="button" href="([^"]+)"/,
@@ -737,7 +737,7 @@ describe("hosted or self-hosted", () => {
     );
     expect(heroButton).toBeDefined();
     expect(section).toMatch(
-      new RegExp(`<a class="button" href="${heroButton}"\\s*>Start free trial`),
+      new RegExp(`<a class="button" href="${heroButton}"\\s*>Join the beta`),
     );
     expect(hrefs.some((href) => href?.includes("/deploy"))).toBe(false);
     expect(section).toMatch(
@@ -868,5 +868,65 @@ describe("connected apps", () => {
     ]);
     // The service behind connected apps is plumbing, never named here.
     expect(homepage.toLowerCase()).not.toContain("composio");
+  });
+});
+
+describe("the beta", () => {
+  test("every way to start on the homepage leads to the beta page", async () => {
+    const homepage = await publicFile("index.html");
+    const starts = [
+      ...homepage.matchAll(/<a class="button[^"]*" href="([^"]+)"\s*>([^<]+)/g),
+    ].filter(([, , label]) =>
+      /Join|Start your team|Start free trial/.test(label!),
+    );
+    expect(starts.length).toBeGreaterThanOrEqual(4);
+    for (const [, href] of starts) expect(href).toBe("/beta/");
+    expect(homepage).not.toContain("Available now");
+    expect(homepage).toContain(
+      '<span class="beta-tag" aria-hidden="true">Beta</span>',
+    );
+  });
+
+  test("the form posts to the waitlist with an email, a first job and a hidden trap", async () => {
+    const page = await publicFile("beta/index.html");
+    const form = page.slice(
+      page.indexOf("<form"),
+      page.indexOf("</form>") + "</form>".length,
+    );
+    expect(form).toContain('id="join"');
+    expect(form).toContain('method="post"');
+    expect(form).toContain('action="https://bot.frockbot.com/api/waitlist"');
+    expect(form).toMatch(/type="email"\s+name="email"\s+required/);
+    expect(form).toContain('name="firstJob"');
+    expect(form).toContain('maxlength="200"');
+    expect(form).toMatch(
+      /<div class="beta-trap" aria-hidden="true">[\s\S]*name="website"[\s\S]*tabindex="-1"/,
+    );
+
+    // The site's own policy has to let the form leave for the app.
+    const response = await worker.fetch(
+      new Request("https://frockbot.com/beta/"),
+      { ASSETS: assets(new Response(page)) },
+    );
+    expect(response.headers.get("content-security-policy")).toContain(
+      "form-action 'self' https://bot.frockbot.com",
+    );
+  });
+
+  test("the thanks page is unlisted and says what happens next", async () => {
+    const page = await publicFile("beta/thanks/index.html");
+    expect(page).toContain('<meta name="robots" content="noindex" />');
+    expect(page.replace(/\s+/g, " ")).toContain(
+      "We'll email you when your invite is ready.",
+    );
+    expect(page).toContain('href="/open/#run"');
+  });
+
+  test("the privacy policy covers the waitlist the form links to", async () => {
+    const privacy = await publicFile("privacy/index.html");
+    expect(privacy).toContain('id="waitlist"');
+    expect(privacy.replace(/\s+/g, " ")).toContain(
+      "send you one email when your invite is ready",
+    );
   });
 });

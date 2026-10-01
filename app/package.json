@@ -10,6 +10,7 @@
     "./admin/definition": "./admin/definition.ts",
     "./admin/operations": "./admin/operations.ts",
     "./admin/shared": "./admin/shared.ts",
+    "./admin/waitlist": "./admin/waitlist.ts",
     "./agent-runtime": "./agent-runtime.ts",
     "./analytics/events": "./analytics/events.ts",
     "./approvals/bot": "./approvals/bot.ts",
