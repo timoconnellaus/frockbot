@@ -1,9 +1,9 @@
 /**
  * What a deployer on a machine needs around `deployBundleV1`: the bundle for a
  * release, fetched, verified and unpacked; a Cloudflare token; and a
- * conversation with the installed Bot to prove it answers. `bun run setup` and
- * `scripts/deploy-bundle.ts` share these. The deploy page has its own, in a
- * browser, over the same manifest.
+ * conversation with the installed Bot to prove it answers, for
+ * `scripts/deploy-bundle.ts`. The deploy page has its own, in a browser, over
+ * the same manifest.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
@@ -23,28 +23,6 @@ export const BUNDLE_RELEASE_REPOSITORY_V1 = "timoconnellaus/frockbot";
 
 export function releaseAssetUrlV1(version: string, asset: string): string {
   return `https://github.com/${BUNDLE_RELEASE_REPOSITORY_V1}/releases/download/v${version}/${asset}`;
-}
-
-/**
- * The newest release's version, for a checkout that is on no tag. GitHub
- * answers `/releases/latest` with a redirect to the tag it means.
- */
-export async function latestReleaseVersionV1(
-  fetchImpl: typeof fetch = fetch,
-): Promise<string> {
-  const response = await fetchImpl(
-    `https://github.com/${BUNDLE_RELEASE_REPOSITORY_V1}/releases/latest`,
-    { redirect: "manual" },
-  );
-  const tag = response.headers
-    .get("location")
-    ?.match(/\/tag\/v(\d+\.\d+\.\d+)$/)?.[1];
-  if (!tag) {
-    throw new Error(
-      "Could not tell which release is the newest; check out a release tag and run this again",
-    );
-  }
-  return tag;
 }
 
 export interface LocalBundleV1 {

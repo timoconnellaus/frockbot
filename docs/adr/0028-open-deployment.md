@@ -2,7 +2,10 @@
 
 Status: accepted, 2026-09-15; stage 6's external deploy outstanding. Decisions
 are Tim's from the 2026-09-15 discussion. Each stage below carries a **Built**
-note where what was built differs from what was proposed.
+note where what was built differs from what was proposed. The interactive
+installer, `bun run setup`, was removed on 2026-10-01: the release's prebuilt
+deploy bundle replaces it ([`deploy-bundles.md`](../deploy-bundles.md)),
+installed by `scripts/deploy-bundle.ts` and, once it ships, the deploy page.
 
 ## Decision
 
@@ -303,7 +306,7 @@ and the native flow, and the policy that is the deployment's allowlist — Bypas
 on `/api`, which reaches the Worker, which authenticates every one of those
 requests itself from the Access cookie or the bearer, and Bypass on
 `/.well-known/frockbot.json`, which an app reads before anyone has signed in. An
-install made before the discovery file existed gets the third application by
+install made before the discovery file existed got the third application by
 running `bun run setup` again. `ui.<app hostname>` is in none of them: an
 Applet's page is anonymous by design. Secrets go in with the script upload
 itself, as `secret_text` bindings beside `keep_bindings`, rather than a separate
@@ -354,7 +357,7 @@ a deploy bundle per release, built by `release-assets` and attached by
 prebuilt with the web client and the application artifact, and the manifest
 `frockbot-deploy-<version>.json`. The manifest names every Worker's modules,
 bindings, migrations, secrets and images, with `{install}` where the install's
-name goes. `bun run setup` installs it through the Cloudflare API rather than
+name goes. `bun run setup` installed it through the Cloudflare API rather than
 wrangler, the same calls the deploy page makes, so nothing is generated or built
 on the deployer's machine. That also removed the installer's own resource and
 upload steps.

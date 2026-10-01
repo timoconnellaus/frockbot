@@ -121,7 +121,7 @@ The flip served the Flutter web build at `/` and took the Vue client out in the 
 
 ## Next: the simple deployment
 
-A second deployment profile anyone installs into their own Cloudflare account with `bun run setup`: Cloudflare Access sign-in, no billing, no release ceremony, the Computer included. The hosted deployment is unchanged. The decisions and the staged plan are [ADR 0028](adr/0028-open-deployment.md).
+A second deployment profile anyone installs into their own Cloudflare account from a release's prebuilt deploy bundle ([`deploy-bundles.md`](deploy-bundles.md)): Cloudflare Access sign-in, no billing, no release ceremony, the Computer included. The hosted deployment is unchanged. The decisions and the staged plan are [ADR 0028](adr/0028-open-deployment.md).
 
 ## Startup and Memory implementation handoff
 

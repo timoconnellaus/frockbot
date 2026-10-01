@@ -45,7 +45,11 @@ import {
   readBackV1,
   type LocalBundleV1,
 } from "./deploy-bundle/local.ts";
-import { credentialKeyringV1, randomHexV1, vapidKeysV1 } from "./setup/plan.ts";
+import {
+  credentialKeyringV1,
+  randomHexV1,
+  vapidKeysV1,
+} from "./deploy-bundle/simple-profile.ts";
 
 const say = (line: string) => console.log(line);
 

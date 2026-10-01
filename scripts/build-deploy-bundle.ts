@@ -13,8 +13,7 @@
  *   frockbot-deploy-<version>.json     the manifest, naming the archive's sha256
  *
  * The modules are wrangler's own bundle (`wrangler deploy --dry-run --outdir`)
- * of the configs `deployment-config` generates for the profile `bun run setup`
- * writes, under a sentinel install name the manifest turns into `{install}`.
+ * of the configs `deployment-config` generates for the simple profile, under a sentinel install name the manifest turns into `{install}`.
  */
 import {
   existsSync,
@@ -69,11 +68,11 @@ import {
   MINTED_SECRETS_V1,
   simpleProfileV1,
   UNISSUED_ACCESS_AUD_V1,
-} from "./setup/plan.ts";
+} from "./deploy-bundle/simple-profile.ts";
 
 /**
- * The profile a bundle is built from: exactly what `bun run setup` writes, for
- * an install named by the sentinel. Every value an install supplies — account,
+ * The profile a bundle is built from: the simple profile, for an install named
+ * by the sentinel. Every value an install supplies — account,
  * hostname, Access team and audience — is a placeholder the manifest leaves out.
  */
 export function bundleProfileV1(version: string): DeploymentProfileV1 {

@@ -162,7 +162,7 @@ jobs:
 
   publish-images:
     name: Publish container images
-    # What a deployment with no Docker pulls. `bun run setup` deploys
+    # What a deployment with no Docker pulls. A deploy-bundle install puts
     # `computer-host` and `applet-build` into an account that has never built an
     # image, so the images have to already exist somewhere Cloudflare will pull
     # them from — published under this tag, and before production moves, so a tag
@@ -246,8 +246,8 @@ jobs:
     # prebuilt, with the Flutter web client as the app Worker's assets and the
     # application artifact it loads from R2, and the manifest a deploy reads to
     # install this tag through the Cloudflare API alone (docs/deploy-bundles.md).
-    # `bun run setup` and the deploy page both install from it; neither has
-    # Flutter or this repository's build. It is held to the previous release's
+    # `scripts/deploy-bundle.ts` and the deploy page both install from it;
+    # neither has Flutter or this repository's build. It is held to the previous release's
     # manifest first, so an install of that one can take this one without a
     # Worker, bucket or Durable Object namespace moving.
     #
@@ -1305,7 +1305,7 @@ jobs:
         #
         # The other two are what a deploy downloads for a tag, beside the
         # container images `publish-images` pushed: the deploy bundle and its
-        # manifest, which `bun run setup` and the deploy page install from.
+        # manifest, which `scripts/deploy-bundle.ts` and the deploy page install from.
         # Neither can be built without Flutter, which is the point of attaching
         # them.
         env:

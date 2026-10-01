@@ -46,7 +46,7 @@ import {
 } from "./build-deploy-bundle.ts";
 import { REPO_ROOT_V1 } from "./deployment-config/repository.ts";
 import { converseV1 } from "./deploy-bundle/local.ts";
-import { simpleProfileV1 } from "./setup/plan.ts";
+import { simpleProfileV1 } from "./deploy-bundle/simple-profile.ts";
 
 const VERSION = "1.2.3";
 const ARTIFACT_SHA = "a".repeat(64);

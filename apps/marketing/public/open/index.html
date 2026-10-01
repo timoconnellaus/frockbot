@@ -5,14 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="FrockBot is an open-source, always-on agent harness: persistent Bots on their own cloud computer, 40 model providers, everything-is-a-plugin, and a one-command install into your own Cloudflare account."
+      content="FrockBot is an open-source, always-on agent harness: persistent Bots on their own cloud computer, 40 model providers, everything-is-a-plugin, and the source to read, MIT licensed."
     />
     <meta name="theme-color" content="#1e1d27" />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="FrockBot, open all the way down" />
     <meta
       property="og:description"
-      content="Always-on Bots with their own cloud computer. MIT licensed. Bring your own model. Everything is a plugin. One command to run it yourself."
+      content="Always-on Bots with their own cloud computer. MIT licensed. Bring your own model. Everything is a plugin. Running it in your own account is coming soon."
     />
     <meta property="og:image" content="https://frockbot.com/assets/hero.png" />
     <meta property="og:url" content="https://frockbot.com/open/" />
@@ -83,14 +83,15 @@
             <p class="legal-intro">
               An always-on agent with its own cloud computer, the kind that
               usually costs US$200 a month, except this one is MIT licensed,
-              runs on the model you choose, treats every capability as a plugin,
-              and installs into your own Cloudflare account with one command.
+              runs on the model you choose, and treats every capability as a
+              plugin. Deploying it into your own Cloudflare account is coming
+              soon.
             </p>
             <p class="open-actions">
               <a
                 class="button"
-                href="https://github.com/timoconnellaus/frockbot#run-your-own"
-                >Read the install guide <span aria-hidden="true">→</span></a
+                href="https://github.com/timoconnellaus/frockbot"
+                >Read the code on GitHub <span aria-hidden="true">→</span></a
               >
               <a class="button button-outline" href="https://bot.frockbot.com"
                 >Or use the hosted one for US$20</a
@@ -1087,81 +1088,26 @@
           <div class="split-heading split-heading-bottom">
             <div>
               <p class="section-label">Run it yourself</p>
-              <h2 id="run-title">One command.<br /><em>Your account.</em></h2>
+              <h2 id="run-title">Your account.<br /><em>Coming soon.</em></h2>
             </div>
             <div>
               <p>
-                <code>bun run setup</code> installs the same code frockbot.com
-                runs into a Cloudflare account you own: Workers, Durable
-                Objects, R2, Vectorize and Containers, with Cloudflare Access as
-                the sign-in and no billing at all. You need a Workers Paid plan,
-                one domain on the account, a free Zero Trust team, and a Fly
-                token for the computer. Model, voice and connected-app keys are
-                optional and each one only unlocks its own thing.
+                Deploying FrockBot into a Cloudflare account you own is coming
+                soon: the same code frockbot.com runs, with Cloudflare Access as
+                the sign-in and no billing at all.
               </p>
               <p>
-                The web client and the container images are published with every
-                release, so there is no Docker and no Flutter on your machine. A
-                Mac app is built; the phone apps are on the way.
+                It is MIT licensed, so every line is already on GitHub to read.
               </p>
               <p class="open-actions">
                 <a
                   class="button"
-                  href="https://github.com/timoconnellaus/frockbot#run-your-own"
-                  >Read the install guide <span aria-hidden="true">→</span></a
-                >
-                <a
-                  class="button button-outline"
-                  href="https://github.com/timoconnellaus/frockbot/releases"
-                  >Releases <span aria-hidden="true">→</span></a
+                  href="https://github.com/timoconnellaus/frockbot"
+                  >Read the code on GitHub <span aria-hidden="true">→</span></a
                 >
               </p>
             </div>
           </div>
-          <ol class="deploy-steps" aria-label="Self-hosting in four steps">
-            <li>
-              <b>01</b
-              ><span
-                ><strong>Clone</strong
-                ><small>Choose a published release.</small></span
-              >
-            </li>
-            <li>
-              <b>02</b
-              ><span
-                ><strong>Connect</strong
-                ><small>Sign in to your Cloudflare account.</small></span
-              >
-            </li>
-            <li>
-              <b>03</b
-              ><span
-                ><strong>Configure</strong
-                ><small>Add only the providers you want.</small></span
-              >
-            </li>
-            <li>
-              <b>04</b
-              ><span
-                ><strong>Deploy</strong
-                ><small>Open your Bot on your own domain.</small></span
-              >
-            </li>
-          </ol>
-          <pre
-            class="terminal"
-            aria-label="The installer"
-          ><span class="p">$</span> <span class="cmd">git clone --branch &lt;tag&gt; --depth 1 https://github.com/timoconnellaus/frockbot.git</span>
-<span class="p">$</span> <span class="cmd">cd frockbot &amp;&amp; bun install &amp;&amp; bunx wrangler login</span>
-<span class="p">$</span> <span class="cmd">bun run setup</span>
-<span class="ok">✓</span> account          Workers Paid plan found
-<span class="ok">✓</span> profile          simple: Cloudflare Access sign-in, no billing
-<span class="ok">✓</span> resources        Durable Objects, R2, Vectorize, Containers
-<span class="ok">✓</span> internal secrets generated and stored
-<span class="ok">✓</span> your keys        OPENAI_API_KEY, ELEVENLABS_API_KEY, COMPOSIO_API_KEY (each optional)
-<span class="ok">✓</span> Access           bot.example.com and bot.example.com/api
-<span class="ok">✓</span> client           web client and container images pulled from the release
-<span class="ok">✓</span> deploy           https://bot.example.com</pre>
         </div>
       </section>
 

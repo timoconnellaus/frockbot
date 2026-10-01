@@ -42,7 +42,6 @@
     "lint:computer-host-imports": "bun scripts/check-computer-host-imports.ts",
     "lint:auth-package-imports": "bun scripts/check-auth-package-imports.ts",
     "lint:payments-package-imports": "bun scripts/check-payments-package-imports.ts",
-    "setup": "bun scripts/setup.ts",
     "test": "bun test",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

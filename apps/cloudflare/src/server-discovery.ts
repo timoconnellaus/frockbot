@@ -8,7 +8,7 @@ import type { BrandV1 } from "@frockbot/core/contracts";
  * Where an app finds out what a server is before anyone signs in to it: the
  * native app reads it when a person types an address under "Use another
  * server". Public and holding nothing secret; on a simple deployment Access
- * bypasses this one path (`scripts/setup/plan.ts`).
+ * bypasses this one path.
  */
 export const SERVER_DISCOVERY_PATH_V1 = "/.well-known/frockbot.json";
 

@@ -10,8 +10,7 @@
  * is the same call with the next release's bundle.
  *
  * Browser-safe on purpose: the deploy page runs this with the person's own
- * Cloudflare sign-in. `bun run setup` and `scripts/deploy-bundle.ts` run it with
- * a token.
+ * Cloudflare sign-in. `scripts/deploy-bundle.ts` runs it with a token.
  */
 import {
   installNameOfV1,

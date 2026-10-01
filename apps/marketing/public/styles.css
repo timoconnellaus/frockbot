@@ -1391,7 +1391,7 @@
     background: var(--ink);
     color: #fff;
   }
-  /* Open-source page: diagrams, code and terminal blocks */
+  /* Open-source page: diagrams and code blocks */
   .open-figure {
     margin-top: 48px;
     border: 1px solid rgb(30 29 39 / 10%);
@@ -1418,8 +1418,7 @@
     margin-top: 48px;
     align-items: start;
   }
-  .code-block,
-  .terminal {
+  .code-block {
     margin: 0;
     border-radius: 20px;
     background: var(--ink);
@@ -1440,16 +1439,6 @@
   }
   .code-block .c {
     color: #8d8896;
-  }
-  .terminal .p {
-    color: #8d8896;
-  }
-  .terminal .ok {
-    color: #7ee2a8;
-  }
-  .terminal .cmd {
-    color: #fff;
-    font-weight: 700;
   }
   .hook-chain {
     display: grid;
@@ -1560,8 +1549,7 @@
     font-weight: 700;
     text-align: center;
   }
-  .plugin-flow,
-  .deploy-steps {
+  .plugin-flow {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: 12px;
@@ -1569,8 +1557,7 @@
     padding: 0;
     list-style: none;
   }
-  .plugin-flow li,
-  .deploy-steps li {
+  .plugin-flow li {
     position: relative;
     display: flex;
     gap: 12px;
@@ -1580,8 +1567,7 @@
     border-radius: 16px;
     background: var(--cream);
   }
-  .plugin-flow li:not(:last-child)::after,
-  .deploy-steps li:not(:last-child)::after {
+  .plugin-flow li:not(:last-child)::after {
     content: "→";
     position: absolute;
     z-index: 2;
@@ -1594,29 +1580,24 @@
     text-align: center;
     transform: translateY(-50%);
   }
-  .plugin-flow b,
-  .deploy-steps b {
+  .plugin-flow b {
     color: var(--pink);
     font-family: "Caveat", cursive;
     font-size: 1.35rem;
   }
-  .plugin-flow span,
-  .deploy-steps span {
+  .plugin-flow span {
     display: grid;
     gap: 4px;
   }
-  .plugin-flow strong,
-  .deploy-steps strong {
+  .plugin-flow strong {
     font-size: 0.86rem;
   }
-  .plugin-flow small,
-  .deploy-steps small {
+  .plugin-flow small {
     color: var(--muted);
     font-size: 0.7rem;
     line-height: 1.45;
   }
-  .plugin-flow li:nth-child(2),
-  .deploy-steps li:nth-child(4) {
+  .plugin-flow li:nth-child(2) {
     background: var(--blush);
     border-color: #f2cad7;
   }
@@ -1626,9 +1607,6 @@
   }
   .plugin-flow li:nth-child(3) small {
     color: #cfcbd6;
-  }
-  .deploy-steps {
-    margin-bottom: 18px;
   }
   .open-page .legal-hero::after {
     display: none;
@@ -1655,12 +1633,10 @@
     .model-studio-options {
       display: none;
     }
-    .plugin-flow,
-    .deploy-steps {
+    .plugin-flow {
       grid-template-columns: 1fr 1fr;
     }
-    .plugin-flow li:nth-child(2)::after,
-    .deploy-steps li:nth-child(2)::after {
+    .plugin-flow li:nth-child(2)::after {
       display: none;
     }
     .open-split {
@@ -1711,12 +1687,10 @@
       text-align: center;
       transform: rotate(90deg);
     }
-    .plugin-flow,
-    .deploy-steps {
+    .plugin-flow {
       grid-template-columns: 1fr;
     }
-    .plugin-flow li::after,
-    .deploy-steps li::after {
+    .plugin-flow li::after {
       display: none;
     }
   }
@@ -2083,21 +2057,6 @@
     color: var(--pink-dark);
     font-size: 0.75rem;
     font-weight: 700;
-  }
-  .run-own-link {
-    color: #efa2ba;
-    font-size: 0.9rem;
-    font-weight: 700;
-    text-decoration: underline;
-    text-underline-offset: 3px;
-  }
-  .run-own-link:hover {
-    color: #fff;
-  }
-  .run-own-link:focus-visible {
-    outline: 3px solid #efa2ba;
-    outline-offset: 3px;
-    border-radius: 4px;
   }
   .pricing-plans {
     display: grid;
