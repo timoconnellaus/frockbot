@@ -1,6 +1,7 @@
 #!/bin/bash
 # Cloud sessions only. The environment cache keeps the toolchains its setup
-# script installed, but not this branch's dependencies or a running dockerd.
+# script (.claude/cloud-setup.sh) installed, but not this branch's dependencies
+# or a running dockerd.
 set -uo pipefail
 
 [ "${CLAUDE_CODE_REMOTE:-}" = "true" ] || exit 0
