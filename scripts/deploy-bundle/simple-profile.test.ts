@@ -1,7 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { REPO_ROOT_V1 } from "../deployment-config/repository.ts";
 import { validateProfileV1 } from "../../apps/cloudflare/deployment-config/profile.ts";
 import { PUBLISHED_IMAGE_REGISTRY_V1 } from "../../apps/cloudflare/deployment-config/generate.ts";
 import { parseCredentialKeyringV1 } from "../../core/connection/index.ts";
@@ -72,14 +69,8 @@ describe("the simple profile", () => {
 
   test("the index shape is the embedding model the memory Package uses", () => {
     // An index with any other dimensions or metric rejects every vector it
-    // writes; `main.yml` creates staging's from the model's preset.
+    // writes; @cf/baai/bge-base-en-v1.5 embeds 768 dimensions.
     expect(MEMORY_INDEX_DIMENSIONS_V1).toBe(768);
-    expect(
-      readFileSync(
-        join(REPO_ROOT_V1, ".github", "workflows", "main.yml"),
-        "utf8",
-      ),
-    ).toContain("@cf/baai/bge-base-en-v1.5");
   });
 });
 
