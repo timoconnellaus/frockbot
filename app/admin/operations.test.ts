@@ -52,6 +52,8 @@ interface Recorded {
   features: Map<string, UserFeaturesV1>;
   credit: Map<string, number>;
   grants: Array<{ userId: string; id: string; cents: number; by: string }>;
+  waiting: string[];
+  notices: string[];
 }
 
 /**
@@ -65,6 +67,8 @@ function memoryHost(
     unreadableFeatures?: ReadonlySet<string>;
     /** Accounts whose access record cannot be read. */
     unreadableAccess?: ReadonlySet<string>;
+    /** Addresses whose invitation email fails to send. */
+    failingNotices?: ReadonlySet<string>;
   } = {},
 ): AdminOperationsHostV1 & { recorded: Recorded } {
   let policy = initialPolicy();
@@ -77,6 +81,8 @@ function memoryHost(
     features: new Map(),
     credit: new Map(),
     grants: [],
+    waiting: [],
+    notices: [],
   };
   const billing = (userId: string): AdminUserBillingV1 => ({
     ...noCredit,
@@ -134,6 +140,37 @@ function memoryHost(
       };
       recorded.invitations.set(command.email, invitation);
       return Promise.resolve(invitation);
+    },
+    readWaitlist: () =>
+      Promise.resolve({
+        schemaVersion: 1,
+        total: recorded.waiting.length,
+        waiting: recorded.waiting.filter(
+          (email) => !recorded.invitations.has(email),
+        ).length,
+        rows: [],
+      }),
+    inviteWaitlist: (count, invitedBy) => {
+      const invitations = recorded.waiting
+        .filter((email) => !recorded.invitations.has(email))
+        .slice(0, count)
+        .map((email): EmailInvitationV1 => ({
+          schemaVersion: 1,
+          email,
+          invitedAt: "2026-09-01T01:00:00.000Z",
+          invitedBy,
+        }));
+      for (const invitation of invitations) {
+        recorded.invitations.set(invitation.email, invitation);
+      }
+      return Promise.resolve(invitations);
+    },
+    sendInvitationNotice: (email) => {
+      if (options.failingNotices?.has(email)) {
+        return Promise.reject(new Error("send failed"));
+      }
+      recorded.notices.push(email);
+      return Promise.resolve();
     },
     listUsers: () => Promise.resolve(listed),
     readUserFeatures: (userId) =>
@@ -403,6 +440,11 @@ describe("an email invitation", () => {
     });
     expect(second).toEqual(first);
     expect(host.recorded.invitations.size).toBe(1);
+    // The host's claim is what keeps it to one email; both asked.
+    expect(host.recorded.notices).toEqual([
+      "friend@example.com",
+      "friend@example.com",
+    ]);
   });
 
   test("a malformed address never reaches the authority", async () => {
@@ -420,6 +462,63 @@ describe("an email invitation", () => {
         invitedBy: owner,
       }),
     ).rejects.toThrow("invalid");
+    expect(host.recorded.invitations.size).toBe(0);
+  });
+});
+
+describe("the waitlist", () => {
+  test("invites the longest-waiting and sends each one's email", async () => {
+    const host = memoryHost();
+    host.recorded.waiting.push(
+      "first@example.com",
+      "second@example.com",
+      "third@example.com",
+    );
+    const admin = createAdminOperationsV1(host);
+
+    const result = await admin.inviteWaitlist({
+      schemaVersion: 1,
+      count: 2,
+      invitedBy: owner,
+    });
+    expect(result.invitations.map((invitation) => invitation.email)).toEqual([
+      "first@example.com",
+      "second@example.com",
+    ]);
+    expect(host.recorded.notices).toEqual([
+      "first@example.com",
+      "second@example.com",
+    ]);
+    expect((await admin.readWaitlist()).waiting).toBe(1);
+  });
+
+  test("one failed email leaves its invitation and the rest of the batch", async () => {
+    const host = memoryHost([], {
+      failingNotices: new Set(["first@example.com"]),
+    });
+    host.recorded.waiting.push("first@example.com", "second@example.com");
+    const admin = createAdminOperationsV1(host);
+
+    const result = await admin.inviteWaitlist({
+      schemaVersion: 1,
+      count: 5,
+      invitedBy: owner,
+    });
+    expect(result.invitations).toHaveLength(2);
+    expect(host.recorded.invitations.has("first@example.com")).toBe(true);
+    expect(host.recorded.notices).toEqual(["second@example.com"]);
+  });
+
+  test("a batch outside its bounds never reaches the authority", async () => {
+    const host = memoryHost();
+    host.recorded.waiting.push("first@example.com");
+    const admin = createAdminOperationsV1(host);
+
+    for (const count of [0, 101, 1.5]) {
+      await expect(
+        admin.inviteWaitlist({ schemaVersion: 1, count, invitedBy: owner }),
+      ).rejects.toThrow();
+    }
     expect(host.recorded.invitations.size).toBe(0);
   });
 });

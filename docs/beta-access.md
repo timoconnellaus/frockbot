@@ -52,7 +52,17 @@ Both compare-and-swaps answer `{ status: "applied", value }` or `{ status: "conf
 
 An account's features are also writable from the operator surface, `POST /api/debug/users/:userId/features` under the deployment's `DEBUG_TOKEN`: a deployment with no portal still has to be able to turn Plugin authoring on.
 
-Waitlists, invitation email, redemption UI, trial credit and onboarding are not built. They build on these operations rather than beside them.
+- `readWaitlist` and `inviteWaitlist`: the beta waitlist, and `{ schemaVersion: 1, count, invitedBy }` invites the longest-waiting entries that hold no invitation yet, at most 100 at a time.
+
+## The waitlist and the invitation email
+
+The marketing site's `/beta/` form posts to the app Worker's public `POST /api/waitlist` (`apps/cloudflare/src/waitlist-route.ts`), routed before sessions and admission because the people it is for cannot sign in yet. It takes an email and an optional one-line "first job they'd hand off", and answers with a redirect to `/beta/thanks/` on the brand's homepage, whether the address joined, was already there, or the list is full, so the page says nothing about whose address is on it. A hidden `website` field is a honeypot: filled, it is thanked and kept nowhere. An unusable address goes back to the form.
+
+Entries live in the authority beside invitations, one per address, with a count so the list stops keeping new entries at 20,000. Someone leaves the list when admission activates their account, and deleting an account forgets its entry.
+
+Every invitation, from the portal's single address or a waitlist batch, sends one "you're in" email from `frockbot@<email domain>` through the deployment's `send_email` binding, with the deployment's origin to sign in at. The authority's claim is the idempotency key: it is written as `sending` before the send and never released, so a retry, a repeated invite or an eviction mid-send never sends a second email for one invitation. The outcome (`sent`, `unavailable` or `unknown`) is recorded against the claim and shown on the portal's Waitlist. A deployment with no sender or no origin claims nothing, and the invitation still works by signing in. Nothing the form collected is written into the email, because anyone can put any address on the list. Redeeming the invitation removes its email record with it.
+
+Redemption UI, trial credit and onboarding are not built. They build on these operations rather than beside them.
 
 ## Release: retiring the signups switch
 

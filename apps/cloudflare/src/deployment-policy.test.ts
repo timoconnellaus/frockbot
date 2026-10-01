@@ -44,6 +44,11 @@ class MemoryStorage {
       this.values.set(key, structuredClone(value));
     },
     delete: (key: string): boolean => this.values.delete(key),
+    list: <T>({ prefix }: { prefix: string }): Iterable<[string, T]> =>
+      [...this.values.entries()]
+        .filter(([key]) => key.startsWith(prefix))
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, value]) => [key, structuredClone(value) as T]),
   };
 
   transactionSync<T>(callback: () => T): T {
@@ -581,5 +586,152 @@ describe("email usernames", () => {
         }),
       ).rejects.toThrow();
     }
+  });
+});
+
+describe("the beta waitlist", () => {
+  const join = (
+    policy: InstanceType<typeof DeploymentPolicy>,
+    email: string,
+    firstJob?: string,
+  ) =>
+    policy.joinWaitlist({
+      schemaVersion: 1,
+      email,
+      ...(firstJob === undefined ? {} : { firstJob }),
+    });
+
+  test("keeps the first entry for an address and answers a full list without keeping", async () => {
+    const { policy, storage } = authority();
+    expect(await join(policy, "a@example.com", "Watch flight prices")).toEqual({
+      schemaVersion: 1,
+      status: "joined",
+    });
+    expect(await join(policy, "a@example.com", "Something else")).toEqual({
+      schemaVersion: 1,
+      status: "already-joined",
+    });
+    const view = await policy.readWaitlist({ schemaVersion: 1 });
+    expect(view.total).toBe(1);
+    expect(view.rows[0]?.entry.firstJob).toBe("Watch flight prices");
+
+    storage.values.set("waitlist:size:v1", 20_000);
+    expect(await join(policy, "b@example.com")).toEqual({
+      schemaVersion: 1,
+      status: "full",
+    });
+    expect(storage.values.has("waitlist:entry:v1:b@example.com")).toBe(false);
+  });
+
+  test("invites the longest-waiting first and lists the waiting before the invited", async () => {
+    const { policy } = authority();
+    for (const email of ["a@example.com", "b@example.com", "c@example.com"]) {
+      await join(policy, email);
+    }
+    const batch = await policy.inviteWaitlist({
+      schemaVersion: 1,
+      count: 2,
+      invitedBy: "owner-id",
+    });
+    expect(batch.invitations.map((invitation) => invitation.email)).toEqual([
+      "a@example.com",
+      "b@example.com",
+    ]);
+    const next = await policy.inviteWaitlist({
+      schemaVersion: 1,
+      count: 5,
+      invitedBy: "owner-id",
+    });
+    expect(next.invitations.map((invitation) => invitation.email)).toEqual([
+      "c@example.com",
+    ]);
+    const view = await policy.readWaitlist({ schemaVersion: 1 });
+    expect(view).toMatchObject({ total: 3, waiting: 0 });
+    expect(view.rows.every((row) => row.invitation !== undefined)).toBe(true);
+  });
+
+  test("an invitation's email is claimed once, and only a claim still sending is answered", async () => {
+    const { policy } = authority();
+    const claim = () =>
+      policy.claimInvitationNotice({
+        schemaVersion: 1,
+        email: "a@example.com",
+      });
+    // No invitation, nothing to send.
+    expect((await claim()).claimed).toBe(false);
+    await join(policy, "a@example.com");
+    await policy.inviteWaitlist({
+      schemaVersion: 1,
+      count: 1,
+      invitedBy: "owner-id",
+    });
+    expect((await claim()).claimed).toBe(true);
+    expect((await claim()).claimed).toBe(false);
+
+    await policy.recordInvitationNotice({
+      schemaVersion: 1,
+      email: "a@example.com",
+      status: "sent",
+    });
+    await policy.recordInvitationNotice({
+      schemaVersion: 1,
+      email: "a@example.com",
+      status: "unavailable",
+      detail: "late answer",
+    });
+    const view = await policy.readWaitlist({ schemaVersion: 1 });
+    expect(view.rows[0]?.notice?.status).toBe("sent");
+  });
+
+  test("signing in with the invitation takes the person off the list and spends its email", async () => {
+    const { policy, storage } = authority();
+    await setMode(policy, "invite-only");
+    await join(policy, "friend@example.com");
+    await join(policy, "other@example.com");
+    await policy.inviteWaitlist({
+      schemaVersion: 1,
+      count: 1,
+      invitedBy: "owner-id",
+    });
+    await policy.claimInvitationNotice({
+      schemaVersion: 1,
+      email: "friend@example.com",
+    });
+
+    const admitted = await policy.admitAccount(
+      member("friend", { email: "friend@example.com" }),
+    );
+    expect(admitted).toMatchObject({ admitted: true, basis: "invitation" });
+    const view = await policy.readWaitlist({ schemaVersion: 1 });
+    expect(view.rows.map((row) => row.entry.email)).toEqual([
+      "other@example.com",
+    ]);
+    expect(storage.values.get("waitlist:size:v1")).toBe(1);
+    expect(storage.values.has("invitation:notice:v1:friend@example.com")).toBe(
+      false,
+    );
+  });
+
+  test("deleting an account forgets its waitlist entry and invitation email", async () => {
+    const { policy, storage } = authority();
+    await join(policy, "gone@example.com");
+    await policy.inviteWaitlist({
+      schemaVersion: 1,
+      count: 1,
+      invitedBy: "owner-id",
+    });
+    await policy.claimInvitationNotice({
+      schemaVersion: 1,
+      email: "gone@example.com",
+    });
+    await policy.forgetAccount({
+      schemaVersion: 1,
+      userId: "gone",
+      email: "gone@example.com",
+    });
+    expect(
+      [...storage.values.keys()].filter((key) => key.includes("gone@")),
+    ).toEqual([]);
+    expect(storage.values.get("waitlist:size:v1")).toBe(0);
   });
 });

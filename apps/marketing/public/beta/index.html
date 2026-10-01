@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="FrockBot is in beta. Save your place and we'll invite you in a small batch."
+    />
+    <meta name="theme-color" content="#d3266d" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="The FrockBot beta" />
+    <meta
+      property="og:description"
+      content="Early, a little rough, and all yours. Save your place."
+    />
+    <meta property="og:image" content="https://frockbot.com/assets/hero.png" />
+    <meta property="og:url" content="https://frockbot.com/beta/" />
+    <link rel="canonical" href="https://frockbot.com/beta/" />
+    <link rel="icon" href="/assets/favicon.png" />
+    <link rel="apple-touch-icon" href="/assets/app-icon.png" />
+    <link rel="stylesheet" href="/styles.css" />
+    <title>The FrockBot beta</title>
+  </head>
+  <body class="legal-page beta-page">
+    <a class="skip-link" href="#join">Skip to the form</a>
+    <header class="site-header legal-header">
+      <div class="container nav-shell">
+        <a class="brand" href="/" aria-label="FrockBot home, in beta">
+          <img src="/assets/app-icon.png" alt="" width="48" height="48" />
+          <span class="brand-name"
+            >Frock<span class="brand-accent">Bot</span></span
+          >
+          <span class="beta-tag" aria-hidden="true">Beta</span>
+        </a>
+        <nav class="legal-nav" aria-label="Beta navigation">
+          <a href="/">Home</a>
+          <a href="https://bot.frockbot.com">Open app</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="legal-hero beta-hero" aria-labelledby="beta-title">
+        <div class="container legal-hero-shell">
+          <div class="beta-hero-copy">
+            <p class="section-label">The FrockBot beta</p>
+            <h1 id="beta-title">
+              Early, a little rough,<br />and <em>all yours.</em>
+            </h1>
+            <p class="legal-intro">
+              FrockBot works today. It also has rough edges, so we're letting
+              people in a few at a time and smoothing them out with you.
+            </p>
+            <form
+              id="join"
+              class="beta-form"
+              method="post"
+              action="https://bot.frockbot.com/api/waitlist"
+            >
+              <div class="beta-field">
+                <label for="beta-email">Your email</label>
+                <input
+                  id="beta-email"
+                  type="email"
+                  name="email"
+                  required
+                  maxlength="320"
+                  autocomplete="email"
+                  placeholder="you@example.com"
+                />
+              </div>
+              <div class="beta-field">
+                <label for="beta-job"
+                  >What's the first job you'd hand off?
+                  <span>Optional</span></label
+                >
+                <input
+                  id="beta-job"
+                  type="text"
+                  name="firstJob"
+                  maxlength="200"
+                  autocomplete="off"
+                  placeholder="Watch flight prices for our July trip"
+                />
+              </div>
+              <div class="beta-trap" aria-hidden="true">
+                <label for="beta-website">Leave this empty</label>
+                <input
+                  id="beta-website"
+                  type="text"
+                  name="website"
+                  tabindex="-1"
+                  autocomplete="off"
+                />
+              </div>
+              <div class="beta-submit">
+                <button class="button" type="submit">
+                  Save my place <span aria-hidden="true">→</span>
+                </button>
+                <p>
+                  We only use your email to invite you.
+                  <a href="/privacy/#waitlist">Privacy</a>
+                </p>
+              </div>
+            </form>
+          </div>
+          <img
+            class="beta-hero-character"
+            src="/assets/characters/guardian.png"
+            alt=""
+            width="320"
+            height="380"
+          />
+        </div>
+      </section>
+
+      <section class="section beta-section" aria-labelledby="beta-means">
+        <div class="container">
+          <p class="section-label">What beta means</p>
+          <h2 id="beta-means">Real work, <em>honest edges.</em></h2>
+          <div class="beta-cards">
+            <article class="beta-card">
+              <h3>It works</h3>
+              <p>
+                Your bots do real jobs today: comparing quotes, watching for a
+                sale, filling in the same form again.
+              </p>
+            </article>
+            <article class="beta-card">
+              <h3>It's rough in places</h3>
+              <p>
+                Some things will break. When they do, tell us. We read every
+                message.
+              </p>
+            </article>
+            <article class="beta-card">
+              <h3>It's straight about money</h3>
+              <p>
+                You see what each bot uses. When credit runs out, work pauses.
+                There's never a surprise bill.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section beta-section" aria-labelledby="beta-invites">
+        <div class="container">
+          <p class="section-label">How invites work</p>
+          <h2 id="beta-invites">Three steps, <em>no forms after.</em></h2>
+          <ol class="beta-steps">
+            <li>
+              <span class="beta-step-number" aria-hidden="true">01</span>
+              <h3>Save your place</h3>
+              <p>Your email, and the first job you'd hand off if you like.</p>
+            </li>
+            <li>
+              <span class="beta-step-number" aria-hidden="true">02</span>
+              <h3>We invite in small batches</h3>
+              <p>
+                Longest-waiting first. We grow only as fast as we can look after
+                people.
+              </p>
+            </li>
+            <li>
+              <span class="beta-step-number" aria-hidden="true">03</span>
+              <h3>You get an email</h3>
+              <p>
+                Sign in with Google using that address and your first bot is
+                waiting.
+              </p>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="beta-tinker" aria-labelledby="beta-tinker-title">
+        <div class="container beta-tinker-shell">
+          <div>
+            <p class="section-label">For the tinkerers</p>
+            <h2 id="beta-tinker-title">Can't wait? <em>Run your own.</em></h2>
+            <p>
+              FrockBot is MIT licensed. Set it up in your own Cloudflare account
+              today, with the same code the hosted beta runs.
+            </p>
+          </div>
+          <a class="button button-white" href="/open/#run"
+            >Read the install guide <span aria-hidden="true">→</span></a
+          >
+        </div>
+      </section>
+
+      <section class="section beta-section" aria-labelledby="beta-questions">
+        <div class="container">
+          <p class="section-label">Questions</p>
+          <h2 id="beta-questions" class="sr-only">Questions</h2>
+          <div class="beta-cards">
+            <article class="beta-card">
+              <h3>Does it cost anything to wait?</h3>
+              <p>No. You choose a plan once you're in.</p>
+            </article>
+            <article class="beta-card">
+              <h3>What happens to my email?</h3>
+              <p>We use it to invite you, and nothing else.</p>
+            </article>
+            <article class="beta-card">
+              <h3>I signed in and it said I don't have beta access.</h3>
+              <p>
+                That's the beta's door. Save your place here with the same
+                address, and you'll get in once your invite arrives.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container footer-shell">
+        <a class="brand" href="/" aria-label="FrockBot home">
+          <img src="/assets/app-icon.png" alt="" width="44" height="44" />
+          <span class="brand-name"
+            >Frock<span class="brand-accent">Bot</span></span
+          >
+        </a>
+        <div class="footer-links">
+          <span>© 2026 FrockBot</span>
+          <a href="mailto:hello@frockbot.com">Contact</a>
+          <a href="/privacy/">Privacy</a>
+          <a href="/terms/">Terms</a>
+          <a href="/open/">Open source</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

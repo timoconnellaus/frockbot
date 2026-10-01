@@ -13,6 +13,10 @@ import {
   decodeHostedModelRatesViewV1,
   ModelRatesConflictError,
 } from "@frockbot/app/billing/rates";
+import {
+  decodeInviteWaitlistResultV1,
+  decodeWaitlistViewV1,
+} from "@frockbot/app/admin/waitlist";
 import { rpcJsonSnapshotV1 } from "./durable-rpc.js";
 
 interface DeploymentPolicyAdminRpc {
@@ -21,6 +25,8 @@ interface DeploymentPolicyAdminRpc {
   readAccountAccess(input: unknown): Promise<unknown>;
   setAccountAccess(input: unknown): Promise<unknown>;
   inviteEmail(input: unknown): Promise<unknown>;
+  readWaitlist(input: unknown): Promise<unknown>;
+  inviteWaitlist(input: unknown): Promise<unknown>;
   readModelRatesView(input: unknown): Promise<unknown>;
   saveModelRates(input: unknown): Promise<unknown>;
 }
@@ -53,6 +59,8 @@ export function createDeploymentPolicyAdminHost(
   | "readAccountAccess"
   | "setAccountAccess"
   | "inviteEmail"
+  | "readWaitlist"
+  | "inviteWaitlist"
   | "readModelRates"
   | "saveModelRates"
 > {
@@ -100,6 +108,20 @@ export function createDeploymentPolicyAdminHost(
           }),
         ),
       ),
+    readWaitlist: async () =>
+      decodeWaitlistViewV1(
+        rpcJsonSnapshotV1(await authority().readWaitlist({ schemaVersion: 1 })),
+      ),
+    inviteWaitlist: async (count, invitedBy) =>
+      decodeInviteWaitlistResultV1(
+        rpcJsonSnapshotV1(
+          await authority().inviteWaitlist({
+            schemaVersion: 1,
+            count,
+            invitedBy,
+          }),
+        ),
+      ).invitations,
     readModelRates: async () =>
       decodeHostedModelRatesViewV1(
         rpcJsonSnapshotV1(

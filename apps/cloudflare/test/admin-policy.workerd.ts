@@ -120,6 +120,7 @@ function operations(
         suspended: false,
       }),
     grantUserCredit: () => Promise.reject(new Error("not under test")),
+    sendInvitationNotice: () => Promise.resolve(),
   };
   return createAdminOperationsV1(host);
 }

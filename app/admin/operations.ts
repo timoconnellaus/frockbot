@@ -41,6 +41,11 @@ import {
   type SaveHostedModelRatesCommandV1,
 } from "@frockbot/app/billing/rates";
 import { isRpcIdentifier } from "@frockbot/core/configuration";
+import {
+  decodeInviteWaitlistRequestV1,
+  type InviteWaitlistResultV1,
+  type WaitlistViewV1,
+} from "./waitlist.js";
 
 /** One account the identity store knows, before what it holds is read. */
 export interface AdminListedUserV1 {
@@ -72,6 +77,18 @@ export interface AdminOperationsHostV1 {
     command: InviteEmailCommandV1,
     invitedBy: string,
   ): Promise<EmailInvitationV1>;
+  readWaitlist(): Promise<WaitlistViewV1>;
+  /** Invites the longest-waiting entries; answers the invitations it made. */
+  inviteWaitlist(
+    count: number,
+    invitedBy: string,
+  ): Promise<EmailInvitationV1[]>;
+  /**
+   * Sends one invitation's "you're in" email, at most once per invitation.
+   * Answers without sending when the deployment has no sender, or when this
+   * invitation's email was already claimed.
+   */
+  sendInvitationNotice(email: string): Promise<void>;
   /** Every account the identity store holds, newest first. */
   listUsers(): Promise<AdminListedUserV1[]>;
   readUserFeatures(userId: string): Promise<UserFeaturesV1>;
@@ -105,12 +122,37 @@ export interface AdminOperationsV1 {
     input: unknown,
   ): Promise<AdminWriteResultV1<AccountAccessV1>>;
   inviteEmail(input: unknown): Promise<EmailInvitationV1>;
+  readWaitlist(): Promise<WaitlistViewV1>;
+  inviteWaitlist(input: unknown): Promise<InviteWaitlistResultV1>;
   setAccountFeatures(input: unknown): Promise<UserFeaturesV1>;
   grantCredit(input: unknown): Promise<AdminUserBillingV1>;
   readModelRates(): Promise<HostedModelRatesViewV1>;
   saveModelRates(
     input: unknown,
   ): Promise<AdminWriteResultV1<HostedModelRatesV1>>;
+}
+
+/**
+ * Each invitation's email, after the invitations are recorded. A send that
+ * fails leaves its invitation standing and its outcome on the waitlist, so one
+ * bad address never undoes the rest of a batch.
+ */
+async function sendNotices(
+  host: AdminOperationsHostV1,
+  invitations: readonly EmailInvitationV1[],
+): Promise<void> {
+  for (const invitation of invitations) {
+    try {
+      await host.sendInvitationNotice(invitation.email);
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          event: "invitation-notice-failed",
+          error: error instanceof Error ? error.name : "unknown",
+        }),
+      );
+    }
+  }
 }
 
 function accountId(value: string, label: string): string {
@@ -242,7 +284,24 @@ export function createAdminOperationsV1(
 
     async inviteEmail(input) {
       const request = decodeInviteEmailRequestV1(input);
-      return host.inviteEmail(request.command, request.invitedBy);
+      const invitation = await host.inviteEmail(
+        request.command,
+        request.invitedBy,
+      );
+      await sendNotices(host, [invitation]);
+      return invitation;
+    },
+
+    readWaitlist: () => host.readWaitlist(),
+
+    async inviteWaitlist(input) {
+      const request = decodeInviteWaitlistRequestV1(input);
+      const invitations = await host.inviteWaitlist(
+        request.count,
+        request.invitedBy,
+      );
+      await sendNotices(host, invitations);
+      return { schemaVersion: 1, invitations };
     },
 
     async setAccountFeatures(input) {
