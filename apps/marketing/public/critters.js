@@ -1,4 +1,4 @@
-// The flock on the homepage. Each character starts as its PNG and becomes its
+// The flock on the marketing pages. Each character starts as its PNG and becomes its
 // Rive rig (the same file the apps use) once it scrolls into view, so its eyes
 // can follow the pointer. Poke one and it ducks; each has its own way of
 // arriving; a few have something to say. Without script, wasm or motion, the
@@ -6,7 +6,7 @@
 (() => {
   const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const images = document.querySelectorAll(
-    "img.peek, img.follow, img.romp, img.feature-character, img.use-character",
+    "img.peek, img.follow, img.romp, img.feature-character, img.use-character, img.beta-hero-character",
   );
   if (!images.length) return;
 
@@ -18,6 +18,7 @@
     "why-nudge": "I'll remind you. Then again.",
     "how-cat": "I'd have knocked Approve off the table.",
     "pricing-chill": "Extra bots are free. So are naps.",
+    cheer: "I'll nudge you when it's ready.",
   };
   const FED_UP = ["…fine.", "Rude.", "I was busy.", "Okay, okay."];
 
@@ -48,11 +49,18 @@
       hero: element.classList.contains("peek"),
       edge: element.classList.contains("follow-edge"),
       romp: element.classList.contains("romp"),
+      // Beside a beta page's copy: it greets the visitor once and watches.
+      host: element.classList.contains("beta-hero-character"),
+      cheer: element.classList.contains("cheer"),
       // On a card: it idles, watches the pointer and greets the card's hover.
       card: element.matches(".feature-character, .use-character")
         ? element.closest(".feature-card, .use-card")
         : null,
-      line: spot ? LINES[spot] : undefined,
+      line: spot
+        ? LINES[spot]
+        : element.classList.contains("cheer")
+          ? LINES.cheer
+          : undefined,
       said: false,
       visible: false,
       rig: null,
@@ -99,7 +107,9 @@
         ".hero-stage .demo-window, .hero-stage .demo-phone",
       );
     if (critter.romp) return document.querySelectorAll(".app-count");
-    return critter.edge || critter.card ? [] : [critter.element.parentElement];
+    return critter.edge || critter.card || critter.host
+      ? []
+      : [critter.element.parentElement];
   };
   const inside = (rect, x, y) =>
     x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
@@ -183,7 +193,7 @@
       say(critter, critter.pokes >= 3 ? FED_UP[0] : "Hi.", 1800);
       return;
     }
-    if (critter.romp || critter.card) {
+    if (critter.romp || critter.card || critter.host) {
       startle(critter);
       return;
     }
@@ -450,7 +460,7 @@
         set(critter, "boolean", "hovered", false),
       );
     }
-    if (critter.romp || critter.card) continue;
+    if (critter.romp || critter.card || critter.host) continue;
     // script.js marks a character is-peeking as its card arrives.
     new MutationObserver(() => {
       const out = critter.element.classList.contains("is-peeking");
@@ -598,6 +608,78 @@
       };
       setTimeout(play, between(300, 2600));
     }
+  }
+
+  // A beta page's character says hello once its rig is up. On the thanks
+  // page it celebrates; beside the form it watches you fill it in.
+  const celebrate = (critter, ms = 2600) => {
+    set(critter, "number", "activity", 4);
+    feel(critter, EMOTION.excited, ms);
+    setTimeout(() => set(critter, "number", "activity", 0), ms);
+    if (still) return;
+    bounce(critter, 12);
+    setTimeout(() => bounce(critter, 20), 600);
+  };
+  const welcome = (critter) => {
+    if (critter.said) return;
+    critter.said = true;
+    if (!critter.cheer) return arrive(critter, 300);
+    setTimeout(() => celebrate(critter), 300);
+    if (critter.line) setTimeout(() => say(critter, critter.line, 3600), 1100);
+  };
+  // Eyes on an element, in the character's own frame.
+  const toward = (critter, element) => {
+    const rect = element.getBoundingClientRect();
+    const f = frame(critter);
+    const [lx, ly] = f.local(
+      rect.left + rect.width / 2 - f.cx,
+      rect.top + rect.height / 2 - f.cy,
+    );
+    const distance = Math.hypot(lx, ly) || 1;
+    return { x: lx / distance, y: (ly / distance) * 0.8 };
+  };
+  const nod = (critter) =>
+    critter.body.animate(
+      [
+        { transform: "rotate(0) translateY(0)" },
+        { transform: "rotate(-3deg) translateY(1.5%)", offset: 0.4 },
+        { transform: "rotate(0) translateY(0)" },
+      ],
+      { duration: 360, easing: "ease-in-out" },
+    );
+  for (const critter of critters) {
+    const form = critter.host
+      ? critter.element.parentElement?.querySelector("form")
+      : null;
+    if (!form) continue;
+    let nodded = 0;
+    let happy = false;
+    form.addEventListener("focusin", (event) => {
+      if (!(event.target instanceof HTMLInputElement)) return;
+      glanceAt(critter, toward(critter, event.target));
+      feel(critter, EMOTION.curious, 1600);
+    });
+    form.addEventListener("focusout", (event) => {
+      if (!form.contains(event.relatedTarget)) glanceAt(critter, null);
+    });
+    form.addEventListener("input", (event) => {
+      const field = event.target;
+      if (!(field instanceof HTMLInputElement) || still) return;
+      const now = performance.now();
+      if (now - nodded > 450) {
+        nodded = now;
+        nod(critter);
+      }
+      // A real-looking email gets a little hop, once.
+      if (field.type === "email" && field.validity.valid && field.value) {
+        if (!happy) {
+          happy = true;
+          feel(critter, EMOTION.excited, 1400);
+          bounce(critter, 10);
+        }
+      } else if (field.type === "email") happy = false;
+    });
+    form.addEventListener("submit", () => celebrate(critter));
   }
 
   // Pointer: eyes follow it, hovering greets, a click or tap pokes.
@@ -755,9 +837,10 @@
               instance.advanceAndReportChanges(Math.min(0.25, t));
           if (!critter.visible) instance.stopRendering();
           requestAnimationFrame(() =>
-            requestAnimationFrame(() =>
-              critter.element.classList.add("is-live"),
-            ),
+            requestAnimationFrame(() => {
+              critter.element.classList.add("is-live");
+              if (critter.host) welcome(critter);
+            }),
           );
           schedule();
         },

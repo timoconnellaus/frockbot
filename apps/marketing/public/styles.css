@@ -3644,3 +3644,7 @@ html.is-over-critter body {
   width: calc(72px * 0.743);
   margin-inline: calc((64px - 72px * 0.743) / 2);
 }
+.critter.beta-hero-character {
+  position: relative;
+  aspect-ratio: 457 / 615;
+}
