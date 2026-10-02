@@ -90,7 +90,8 @@ token, and nothing here reaches the account after the access token lapses.
 - **Session.** The cookie is `<cloudflare user id>.<secret>`, and only the
   secret's hash is stored. The session lasts twelve hours so the pages can
   show installs and results. Anything that needs Cloudflare after the grant
-  ends sends the person to sign in again.
+  ends, or with under ten minutes left on it (a deploy must finish on that
+  one token), sends the person to sign in again.
 - **Running deploy.** A deploy runs on its session's grant, which outlives
   signing out while the deploy runs. A finished deploy revokes the grant at
   once, even with the page still open. A failed one keeps it so "Try again"
