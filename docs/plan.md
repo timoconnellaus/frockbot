@@ -123,6 +123,10 @@ The flip served the Flutter web build at `/` and took the Vue client out in the 
 
 A second deployment profile anyone installs into their own Cloudflare account from a release's prebuilt deploy bundle ([`deploy-bundles.md`](deploy-bundles.md)): Cloudflare Access sign-in, no billing, no release ceremony, the Computer included. The hosted deployment is unchanged. The decisions and the staged plan are [ADR 0028](adr/0028-open-deployment.md).
 
+## Planned: enthusiast setup
+
+Every part of FrockBot can be FrockBot's or yours: the app (self-hosted with a Deploy button), the Computer (your Sprites, server or Mac), model providers per job, Jev on Workers AI, voice, search, image and connected apps. A US$5 BYO plan, a setup chooser on the marketing site, and FrockBot for Teams for organisations. Decided, with open questions: [`enthusiast-setup-plan.md`](enthusiast-setup-plan.md).
+
 ## Startup and Memory implementation handoff
 
 The walkthrough decisions below now have [prescriptive implementation packets](startup-implementation/README.md), written for agents that do not have this conversation. Use the task order, prerequisites, source entry points, record shapes, transaction/retry instructions and acceptance cases there when assigning work. The packets distinguish agreed behavior, selected engineering defaults and the remaining product decisions. Preparing this handoff does not implement the changes or authorize a release.
