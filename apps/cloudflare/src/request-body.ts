@@ -26,7 +26,7 @@ export const TURN_TEXT_MAX_CHARACTERS_V1 = 32_000;
  */
 export const TURN_BODY_MAX_BYTES_V1 = TURN_TEXT_MAX_CHARACTERS_V1 * 2;
 
-export const TURN_SEND_PATH_V1 = /^\/api\/bots\/[^/]+\/turns$/;
+const TURN_SEND_PATH_V1 = /^\/api\/bots\/[^/]+\/turns$/;
 
 /**
  * What the composer shows when a send is refused for size.

@@ -94,7 +94,7 @@ export function createR2ObjectBucketV1(bucket: R2Bucket): ObjectBucketV1 {
 }
 
 /** The bucket binding that backs durable roots. Optional: absence is a state. */
-export interface WorkspaceStoreEnv {
+interface WorkspaceStoreEnv {
   MEMORY_FILES?: R2Bucket;
 }
 

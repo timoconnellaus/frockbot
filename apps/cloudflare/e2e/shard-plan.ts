@@ -37,7 +37,7 @@ export interface SpecWeight {
 }
 
 /** A spec file with the cost the packer will use for it. */
-export interface SpecCost {
+interface SpecCost {
   readonly file: string;
   readonly tests: number;
   readonly cost: number;

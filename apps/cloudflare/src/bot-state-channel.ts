@@ -45,9 +45,9 @@ export const BOT_STATE_CHANNEL_RETENTION = PUBLICATION_REPLAY_MAX_EVENTS_V1;
  * The shortest gap between two Computer invalidations. Conversation frames
  * are not coalesced: a committed send is worth an immediate observer write.
  */
-export const BOT_STATE_RUNS_NOTICE_INTERVAL_MS = 250;
+const BOT_STATE_RUNS_NOTICE_INTERVAL_MS = 250;
 
-export interface BotStateChannelOptionsV1 {
+interface BotStateChannelOptionsV1 {
   /** Overridden only by tests, which cannot wait a real quarter of a second. */
   runsNoticeIntervalMs?: number;
 }
@@ -76,7 +76,7 @@ interface ChannelAttachmentV1 {
  * The first client protocol that knows a `look` update. An older client
  * decodes every frame against a schema without it and would drop its socket.
  */
-export const LOOK_NOTICE_PROTOCOL_V1 = 4;
+const LOOK_NOTICE_PROTOCOL_V1 = 4;
 
 /** Whether a socket is sent a Run's files, or a Run without them. */
 function currentProtocol(attachment: ChannelAttachmentV1): boolean {
@@ -180,7 +180,7 @@ function framesFor(frame: CursoredFrameV1): string[] {
   return parts;
 }
 
-export type HandshakeReasonV1 =
+type HandshakeReasonV1 =
   "initial" | "gap" | "cursor-ahead" | "epoch" | "replay";
 
 /** Which handshake to send for a presented epoch/cursor. */

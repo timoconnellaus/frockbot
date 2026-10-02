@@ -66,7 +66,7 @@ export interface PushUpdate {
   body?: string;
   notify?: boolean;
 }
-export interface PushRegistration {
+interface PushRegistration {
   deviceId: string;
   token?: string;
   platform?: PushPlatformV1;

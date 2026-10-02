@@ -134,7 +134,7 @@ function botIdOf(segment: string): string | undefined {
   }
 }
 
-export type StoredUploadOutcomeV1 =
+type StoredUploadOutcomeV1 =
   | { status: "stored"; upload: StoredUploadV1 }
   | { status: "refused"; httpStatus: number; reason: string };
 
@@ -348,7 +348,7 @@ export function uploadRoutes(
 }
 
 /** The bindings teardown needs to take a Bot's uploads with it. */
-export interface UploadTeardownEnvV1 {
+interface UploadTeardownEnvV1 {
   MEMORY_FILES?: {
     list(options: {
       prefix: string;
@@ -393,7 +393,7 @@ export async function deleteBotUploadsV1(
 }
 
 /** The bindings a Bot needs to keep and delete files of its own. */
-export interface BotFileEnvV1 {
+interface BotFileEnvV1 {
   MEMORY_FILES: {
     put(
       key: string,

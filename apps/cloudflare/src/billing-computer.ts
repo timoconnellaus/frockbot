@@ -158,7 +158,7 @@ async function responseWithSettlement(
  * the person at the Computer, whatever the Bot is doing meanwhile; anything
  * else is the Turn the Bot is running, when it is running one.
  */
-export type ComputerSpendV1 = (
+type ComputerSpendV1 = (
   botId: string,
   personal: boolean,
 ) => Promise<UsageAttributionV1 | undefined>;

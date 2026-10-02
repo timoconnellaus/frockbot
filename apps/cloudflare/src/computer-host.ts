@@ -37,7 +37,7 @@ export const COMPUTER_HOST_FRAME_ORIGINS_V1: readonly string[] = [
  * call, which would surface as a 401 on each Turn rather than as a Computer
  * that is not configured.
  */
-export interface ComputerHostBindingV1 {
+interface ComputerHostBindingV1 {
   fetcher: { fetch(request: Request): Promise<Response> };
   hostToken: string;
 }

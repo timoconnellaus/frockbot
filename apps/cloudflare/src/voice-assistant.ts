@@ -241,7 +241,7 @@ function voiceReplyTextOfRunV1(run: ClientRunV1): string | undefined {
 }
 
 /** What `debugSnapshot` returns: the ledger plus the memory jobs owed. */
-export interface VoiceAssistantDebugSnapshotV1 extends VoiceLedgerDebugSnapshotV1 {
+interface VoiceAssistantDebugSnapshotV1 extends VoiceLedgerDebugSnapshotV1 {
   capturedAt: string;
   memoryJobs: VoiceMemoryJobV1[];
 }
@@ -273,7 +273,7 @@ export const VOICE_ASSISTANT_USER_HEADER = "x-frockbot-user-id";
 export const VOICE_ASSISTANT_DEVICE_HEADER = "x-frockbot-voice-device";
 
 /** How far back the User Memory log is read at call start. */
-export const VOICE_ASSISTANT_MEMORY_LOG_DAYS = 30;
+const VOICE_ASSISTANT_MEMORY_LOG_DAYS = 30;
 /**
  * How long a model turn may produce no audio before the person is told.
  *
@@ -291,7 +291,7 @@ const DELEGATION_MAX_CHECK_SECONDS = 5 * 60;
 /** How long a settled answer waits for the session to be there to tell it to. */
 const ANSWER_RETRY_SECONDS = 5;
 
-export interface VoiceAssistantEnv {
+interface VoiceAssistantEnv {
   /** Product events (app/analytics/events.ts); absent writes none. */
   ANALYTICS?: AnalyticsEngineDataset;
   AI?: Ai;

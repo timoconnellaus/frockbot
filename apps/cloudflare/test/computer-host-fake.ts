@@ -213,7 +213,7 @@ function ndjsonBody(
   });
 }
 
-export interface ComputerHostFake {
+interface ComputerHostFake {
   fetch(request: Request): Promise<Response>;
   reset(): void;
 }

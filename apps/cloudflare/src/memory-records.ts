@@ -11,10 +11,7 @@ import {
   type MemoryDrainResultV1,
   type MemoryProcessingAdaptersV1,
 } from "@frockbot/app/memory/processing";
-import {
-  MemoryRecordsV1,
-  type MemoryRemoteOwnerV1,
-} from "@frockbot/app/memory/owner";
+import type { MemoryRemoteOwnerV1 } from "@frockbot/app/memory/owner";
 import type {
   MemoryBrowseRequestV1,
   MemoryBrowseResultV1,
@@ -36,7 +33,7 @@ import type {
 } from "@frockbot/app/memory/types";
 import { remoteCallV1 } from "@frockbot/core/contracts";
 
-export interface DurableMemoryStorageV1 {
+interface DurableMemoryStorageV1 {
   sql: MemorySqlStorageV1["sql"];
   transactionSync<T>(callback: () => T): T;
 }
@@ -51,7 +48,7 @@ export function durableObjectHasSqlV1(
   );
 }
 
-export function createDurableMemoryStorageV1(
+function createDurableMemoryStorageV1(
   storage: DurableMemoryStorageV1,
 ): MemorySqlStorageV1 {
   return {
@@ -85,7 +82,7 @@ export function createUserMemoryEngineV1(
 export type MemoryOperateActionV1 =
   "write" | "forget" | "recall" | "expand" | "browse" | "preparedCore";
 
-export interface UserMemoryRecordsRpc {
+interface UserMemoryRecordsRpc {
   operateMemory(input: unknown): Promise<unknown>;
 }
 
@@ -115,17 +112,6 @@ export function createUserMemoryRecordsRemoteV1(
     preparedCore: (request) =>
       call<MemoryPreparedCoreResultV1>("preparedCore", request),
   };
-}
-
-export function createBotMemoryRecordsV1(
-  storage: DurableMemoryStorageV1,
-  remote: MemoryRemoteOwnerV1,
-): MemoryRecordsV1 {
-  return new MemoryRecordsV1({
-    owner: "bot",
-    engine: createBotMemoryEngineV1(storage),
-    remote,
-  });
 }
 
 export function dispatchMemoryOperateV1(
@@ -162,7 +148,7 @@ export function dispatchMemoryOperateV1(
   }
 }
 
-export interface DurableMemoryIndexBindingsV1 {
+interface DurableMemoryIndexBindingsV1 {
   vectors?: MemoryVectorIndex;
   ai?: MemoryAiBinding;
   /** What a Turn's words hold worth remembering; absent, extraction waits. */

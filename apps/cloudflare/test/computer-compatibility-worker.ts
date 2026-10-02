@@ -72,7 +72,7 @@ interface ComputerCompatibilityEnv {
   COMPUTER_HOST_TOKEN: string;
 }
 
-export interface ComputerMountResult {
+interface ComputerMountResult {
   providerId: string;
   generation: number;
 }
@@ -88,7 +88,7 @@ export { FlyHostTransportProbeV1 } from "./computer-host-probe.ts";
  * A write outcome flattened for the RPC seam: the fields a test asserts on,
  * as plain strings, so nothing here depends on how the union is narrowed.
  */
-export interface WorkspaceProbeOutcome {
+interface WorkspaceProbeOutcome {
   status: string;
   reason?: string;
   generationId?: string;
@@ -127,7 +127,7 @@ function probeOutcome(outcome: WorkspaceWriteOutcomeV1): WorkspaceProbeOutcome {
  * knows (`bindSurfaces`), and a store built without one would refuse nothing,
  * so a probe that omitted it would prove less than the deployed path does.
  */
-export interface WorkspaceProbeWrite {
+interface WorkspaceProbeWrite {
   userId: string;
   root: WorkspaceRootV1;
   path: string;

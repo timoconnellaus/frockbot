@@ -223,7 +223,6 @@ import {
   decodeUpdateAvatarCommandV1,
   decodeUpdateVoiceCommandV1,
   decodeUpdateLookCommandV1,
-  decodeLookIdentityViewV1,
   type BotLifecycleCommandV1,
   type BotRegistrationV1,
 } from "@frockbot/app/flock/shared";
@@ -272,7 +271,6 @@ import type {
   WorkspaceFilesV1,
   WorkspaceGenerationsV1,
   WorkspacePathV1,
-  WorkspaceRootV1,
   WorkspaceSyncEffectsV1,
 } from "@frockbot/core/contracts";
 import { decodeWorkspacePathV1 } from "@frockbot/core/contracts";
@@ -459,7 +457,7 @@ import {
   holdThemePickV1,
   themeAssembleDeadlineV1,
 } from "@frockbot/app/theme/owed";
-import { decodeThemeDocumentV1, decodeBotLookV1 } from "@frockbot/core/theme";
+import { decodeThemeDocumentV1 } from "@frockbot/core/theme";
 
 function isFrockAiGatewayBindingV1(
   value: BotStateEnv["AI"],
@@ -499,7 +497,7 @@ export const MEMORY_VECTOR_DELETE_BATCH_SIZE_V1 = 1_000;
  * a queue this long already means something upstream is stuck; the bound is
  * there to keep one pass from being unbounded, not because it is ever reached.
  */
-export const VOICE_REPLY_DRAIN_LIMIT_V1 = 32;
+const VOICE_REPLY_DRAIN_LIMIT_V1 = 32;
 const MEMORY_VECTOR_PURGE_JOURNAL_KEY_V1 = "memory:vector-purge:v1";
 const MEMORY_VECTOR_PURGE_RETRY_DELAY_MS_V1 = 1_000;
 
@@ -552,7 +550,7 @@ function decodeMemoryVectorPurgeJournalV1(
 
 export type { BotStateEnv, OwnedBotTurnCommand };
 
-export interface BotStateDependencies {
+interface BotStateDependencies {
   outboundFetch?: typeof fetch;
   /** A test's stand-in for Turn supervision; production builds it from env. */
   turnSupervisor?: TurnSupervisor;

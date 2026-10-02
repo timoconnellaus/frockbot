@@ -74,7 +74,7 @@ export function paymentsPathsV1(payments: PaymentsPackageV1): Set<string> {
 }
 
 /** The account as the payments Package reads it, from a ledger snapshot. */
-export function paymentsAccountV1(snapshot: {
+function paymentsAccountV1(snapshot: {
   subscription: PaymentsAccountV1["subscription"];
   paidAccess: PaymentsAccountV1["paidPeriod"];
   subscribed: boolean;
@@ -148,7 +148,7 @@ export interface BillingAccountRpc {
  * the Spending page. Each dimension may also be a filter, named by the key a
  * grouping by it returned.
  */
-export function decodeSpendingQueryV1(url: URL): {
+function decodeSpendingQueryV1(url: URL): {
   period: SpendPeriodV1;
   groupBy: SpendDimensionV1;
   filters: Partial<Record<SpendDimensionV1, string>>;
@@ -190,7 +190,7 @@ function failure(error: unknown) {
  * above the rate listed for the one it asked for. A pre-rename `@flock/` id is
  * the same model under its old name, so it is listed once.
  */
-export function customerModelRatesV1(table: HostedModelRatesV1 | undefined) {
+function customerModelRatesV1(table: HostedModelRatesV1 | undefined) {
   const routes = table?.routes ?? {};
   return Object.fromEntries(
     Object.entries(routes)

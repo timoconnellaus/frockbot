@@ -32,7 +32,7 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createServer as createHttpServer, type Server } from "node:http";
 import { createWriteStream, mkdirSync, type WriteStream } from "node:fs";
-import { mkdir, readFile, rm } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,12 +56,9 @@ const cloudflareRoot = fileURLToPath(new URL("..", import.meta.url));
 /** The key the fake server accepts for inference. */
 export const E2E_OLLAMA_GOOD_API_KEY = "e2e-test-key";
 
-/** Anything else is rejected by `POST /api/chat`, exactly as production is. */
-export const E2E_OLLAMA_BAD_API_KEY = "e2e-not-a-key";
-
 /** The model a spec selects; `gpt-oss:20b` is the Package's probe model. */
 export const E2E_MODEL_ID = "gpt-oss:20b";
-export const E2E_SECOND_MODEL_ID = "glm-5.3-flash:cloud";
+const E2E_SECOND_MODEL_ID = "glm-5.3-flash:cloud";
 
 /** The deterministic assistant reply, in Markdown so the renderer is proved. */
 export const E2E_ASSISTANT_REPLY = "Reply from the **local Ollama stub**.";
@@ -74,7 +71,7 @@ export const E2E_ASSISTANT_REPLY = "Reply from the **local Ollama stub**.";
  * rather than imported because that module is loaded by Vitest configs and
  * this one by the Playwright config.
  */
-export const E2E_CREDENTIAL_KEYRING = JSON.stringify({
+const E2E_CREDENTIAL_KEYRING = JSON.stringify({
   schemaVersion: 1,
   currentKeyId: "primary",
   keys: { primary: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY" },
@@ -94,12 +91,9 @@ export const E2E_CREDENTIAL_KEYRING = JSON.stringify({
 export type FakeOllamaChatMode = "ok" | "unauthorized" | "slow" | "streaming";
 
 /** How long `slow` holds a chat completion before it answers. */
-export const E2E_SLOW_CHAT_DELAY_MS = 10_000;
+const E2E_SLOW_CHAT_DELAY_MS = 10_000;
 
-/** The first delta `streaming` sends, and the gap before the rest follows. */
-export const E2E_STREAMED_REPLY_HEAD = "Reply from the ";
-export const E2E_STREAMED_REPLY_TAIL = "**local Ollama stub**.";
-export const E2E_STREAM_GAP_MS = 8_000;
+const E2E_STREAM_GAP_MS = 8_000;
 
 const READY_TIMEOUT_MS = 120_000;
 /**
@@ -137,7 +131,7 @@ function unauthorized(): { status: number; body: string } {
  * it belongs to. A tool result falls through to prose, or the loop would call
  * the same tool until it exhausted its step budget.
  */
-export const E2E_TOOL_CALL_TRIGGER = "frockbot-e2e-tool-call:";
+const E2E_TOOL_CALL_TRIGGER = "frockbot-e2e-tool-call:";
 
 export function e2eToolCallPrompt(name: string, input: unknown = {}): string {
   return `${E2E_TOOL_CALL_TRIGGER}${name}:${JSON.stringify(input)}`;
@@ -219,7 +213,7 @@ export function e2eOllamaEndpointV1(serverUrl: string, scope: string): string {
   return `${serverUrl.replace(/\/+$/, "")}/s/${encodeURIComponent(scope)}`;
 }
 
-export function startFakeOllama(port: number): Promise<{
+function startFakeOllama(port: number): Promise<{
   url: string;
   close(): Promise<void>;
 }> {
@@ -521,7 +515,7 @@ export async function stopProcessTree(child: ChildProcess): Promise<void> {
  * the machine's free memory — for the crash report of a `wrangler dev` whose
  * parent has already gone. Linux only; elsewhere it says so and moves on.
  */
-export function describeProcessGroup(pid: number | undefined): string {
+function describeProcessGroup(pid: number | undefined): string {
   if (pid === undefined) return "No pid to describe.";
   const run = (command: string, args: string[]): string => {
     const result = spawnSync(command, args, {
@@ -579,15 +573,15 @@ export function workerLogLevel(): "debug" | "warn" {
 export const E2E_DEBUG_TOKEN = "e2e-debug-token";
 
 /** The `--persist-to` directory of the run listening on `port`. */
-export function e2ePersistDirectory(port: number): string {
+function e2ePersistDirectory(port: number): string {
   return join(tmpdir(), `frockbot-e2e-${port}`);
 }
 
 /** The shared secret the app Worker and the build service present each other. */
-export const E2E_APPLET_BUILD_TOKEN = "e2e-applet-build-token";
+const E2E_APPLET_BUILD_TOKEN = "e2e-applet-build-token";
 
 /** The shared secret the app Worker presents the Computer host. */
-export const E2E_COMPUTER_HOST_TOKEN = "e2e-computer-host-token";
+const E2E_COMPUTER_HOST_TOKEN = "e2e-computer-host-token";
 
 /**
  * Whether this run's deployment has a Computer at all.
@@ -627,7 +621,7 @@ export function appletBuildAvailableV1(): boolean {
   );
 }
 
-export interface HarnessOptions {
+interface HarnessOptions {
   /** The port `wrangler dev` listens on. */
   port: number;
   /** The port the fake Ollama server listens on. */
@@ -638,7 +632,7 @@ export interface HarnessOptions {
   appletBuildPort: number;
 }
 
-export interface RunningHarness {
+interface RunningHarness {
   baseUrl: string;
   ollamaUrl: string;
   frockAiUrl: string;
@@ -660,7 +654,7 @@ export interface RunningHarness {
  * `[WebServer]` prefix in the job log is cut off at the point a shard fails. A
  * file inside the workspace is addressable by both.
  */
-export function harnessLogDirectory(): string {
+function harnessLogDirectory(): string {
   return resolve(cloudflareRoot, "e2e/wrangler-logs");
 }
 

@@ -50,7 +50,7 @@ import { AUTH_PACKAGE_V1 } from "#auth-package";
 import { PAYMENTS_PACKAGE_V1 } from "#payments";
 
 /** One setting the deploy hands the Worker. */
-export interface ProductionSecretV1 {
+interface ProductionSecretV1 {
   readonly name: string;
   /** What it is for, in one line, for the operator reading a failed deploy. */
   readonly why: string;
@@ -77,7 +77,7 @@ export interface ProductionSecretV1 {
  * what its profile names, since this module cannot import a chooser it was
  * not built with.
  */
-export interface ProductionAuthPackageV1 {
+interface ProductionAuthPackageV1 {
   readonly id: AuthPackageIdV1;
   readonly required: readonly AuthPackageSettingV1[];
 }
@@ -86,7 +86,7 @@ export interface ProductionAuthPackageV1 {
  * The payments Package a deploy is checked for: the build's own chooser by
  * default, or what a white-label's profile names.
  */
-export interface ProductionPaymentsPackageV1 {
+interface ProductionPaymentsPackageV1 {
   readonly id: PaymentsPackageIdV1;
   readonly required: readonly PaymentsPackageSettingV1[];
 }
@@ -111,13 +111,13 @@ function belongsToBuildV1(
 }
 
 /** One setting the deploy may omit, and what the product loses when it does. */
-export interface OptionalProductionSecretV1 extends ProductionSecretV1 {
+interface OptionalProductionSecretV1 extends ProductionSecretV1 {
   /** What stops working while it is unset, said plainly. */
   readonly degraded: string;
 }
 
 /** One setting the deploy never carries as a secret. */
-export interface NonSecretWorkerSettingV1 extends ProductionSecretV1 {
+interface NonSecretWorkerSettingV1 extends ProductionSecretV1 {
   /**
    * Set on a door that must never be open in production: what it would let
    * through if the live Worker held it as a secret. The deploy is additive
@@ -469,7 +469,7 @@ export function missingOptionalSecretsV1(
  * The deploy will not close it, so the gate refuses to ship over the top of
  * it.
  */
-export interface LiveSecretPlanV1 {
+interface LiveSecretPlanV1 {
   readonly added: string[];
   readonly updated: string[];
   readonly leftInPlace: string[];

@@ -5,7 +5,7 @@ import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-export const A_STRING_HZ = 110 * 2 ** (-12 / 1200);
+const A_STRING_HZ = 110 * 2 ** (-12 / 1200);
 
 /** A sustained string as 16-bit mono WAV, whole cycles so its loop is seamless. */
 function stringRecording(frequency: number): string {

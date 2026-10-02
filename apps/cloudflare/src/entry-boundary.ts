@@ -51,10 +51,7 @@ export function entryFailureStatusV1(error: unknown): number {
   return ENTRY_STATUS_BY_ERROR_NAME_V1.get(errorName(error) ?? "") ?? 500;
 }
 
-export function entryFailureResponseV1(
-  error: unknown,
-  fallback: string,
-): Response {
+function entryFailureResponseV1(error: unknown, fallback: string): Response {
   const status = entryFailureStatusV1(error);
   const message =
     error instanceof Error && error.message ? error.message : fallback;
