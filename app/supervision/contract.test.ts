@@ -895,7 +895,11 @@ describe("the hosted chooser", () => {
     const AI: JevAiBindingV1 = {
       async run(model, input) {
         seen.push({ model, input });
-        return { ...fakeJevAnswersV1(input), model: "jev-1.13.0" };
+        // The binding's real shape: Jev's answer inside a job envelope.
+        return {
+          state: "Completed",
+          result: { ...fakeJevAnswersV1(input), model: "jev-1.13.0" },
+        };
       },
     };
     const directive = await createHostedTurnSupervisorV1(
@@ -960,8 +964,45 @@ describe("the hosted chooser", () => {
     });
   });
 
-  test("an answer in the wrong shape is not a judgment", async () => {
+  test("an answer in the wrong shape is not a judgment, and says what came", async () => {
     const AI: JevAiBindingV1 = { run: async () => ({ response: "yes" }) };
+    const supervisor = createJevTurnSupervisorV1({
+      client: createWorkersAiJevClientV1(AI),
+      productName: "FrockBot",
+      budget: { retry: { maxRetries: 0 }, timeout: 1_000 },
+    });
+    const failure = await supervisor.startTurn(startEvidence).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(failure).toMatchObject({ kind: "unavailable" });
+    expect(String((failure as Error).message)).toContain(
+      "an object with response",
+    );
+  });
+
+  test("reads the bare answer the model page documents", async () => {
+    const AI: JevAiBindingV1 = {
+      async run(_model, input) {
+        return { ...fakeJevAnswersV1(input), model: "jev-1.13.0" };
+      },
+    };
+    const directive = await createHostedTurnSupervisorV1(
+      { AI },
+      "FrockBot",
+    ).startTurn(startEvidence);
+    expect(directive.model).toBe(`workers-ai:${RESPONSE_REVIEW_MODEL_V1}`);
+  });
+
+  test("a job envelope that has not completed is not a judgment", async () => {
+    const AI: JevAiBindingV1 = {
+      async run(_model, input) {
+        return {
+          state: "Running",
+          result: { ...fakeJevAnswersV1(input), model: "jev-1.13.0" },
+        };
+      },
+    };
     const supervisor = createJevTurnSupervisorV1({
       client: createWorkersAiJevClientV1(AI),
       productName: "FrockBot",

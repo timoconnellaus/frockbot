@@ -441,18 +441,55 @@ export function workersAiJevFetchV1(ai: JevAiBindingV1): Fetch {
       if (refused) return refused;
       throw error;
     }
-    if (
-      !isRecord(answer) ||
-      !isRecord(answer.answers) ||
-      typeof answer.model !== "string"
-    ) {
-      throw new TypeError("Workers AI answered Jev in an unexpected shape.");
-    }
+    const judged = workersAiJevAnswerV1(answer);
     return Response.json({
-      ...answer,
-      model: `${WORKERS_AI_JEV_TRANSPORT_V1}:${answer.model}`,
+      ...judged,
+      model: `${WORKERS_AI_JEV_TRANSPORT_V1}:${judged.model}`,
     });
   };
+}
+
+function isJevAnswer(
+  value: unknown,
+): value is Record<string, unknown> & { answers: object; model: string } {
+  return (
+    isRecord(value) &&
+    isRecord(value.answers) &&
+    typeof value.model === "string"
+  );
+}
+
+/**
+ * Jev's answer out of what the binding returned. Workers AI wraps it in a
+ * job envelope, `{ state: "Completed", result: { model, answers, usage } }`,
+ * though its model page shows the bare answer, so both are read.
+ */
+function workersAiJevAnswerV1(
+  value: unknown,
+): Record<string, unknown> & { answers: object; model: string } {
+  if (isJevAnswer(value)) return value;
+  if (
+    isRecord(value) &&
+    value.state === "Completed" &&
+    isJevAnswer(value.result)
+  ) {
+    return value.result;
+  }
+  throw new TypeError(
+    `Workers AI answered Jev in an unexpected shape: ${describeShapeV1(value)}.`,
+  );
+}
+
+function describeShapeV1(value: unknown): string {
+  if (!isRecord(value)) {
+    return Array.isArray(value) ? "an array" : `a ${typeof value}`;
+  }
+  const keys = Object.keys(value).join(", ") || "no keys";
+  const state = typeof value.state === "string" ? `, state ${value.state}` : "";
+  const inner = isRecord(value.result)
+    ? `, result keys ${Object.keys(value.result).join(", ") || "none"}`
+    : "";
+  return `an object with ${keys}${state}${inner}`;
 }
 
 /**
