@@ -327,7 +327,7 @@ describe("the door", () => {
     const body = await response.text();
 
     expect(response.headers.get("x-frame-options")).toBe("DENY");
-    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(response.headers.get("referrer-policy")).toBe("same-origin");
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("strict-transport-security")).toBe(
       "max-age=31536000; includeSubDomains",
@@ -678,6 +678,17 @@ describe("a write", () => {
 
     expect(response.status).toBe(400);
     expect(await response.text()).toContain("Nothing was written");
+  });
+
+  test("refuses a form whose origin the browser withheld", async () => {
+    const binding = app();
+    const response = await post(
+      environment({ APP: binding.binding }),
+      { action: "admission-mode", mode: "open", revision: "3" },
+      { origin: "null" },
+    );
+
+    expect(response.status).toBe(403);
   });
 
   test("refuses a form submitted from another site", async () => {
