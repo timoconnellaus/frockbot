@@ -25,6 +25,18 @@ computers → This Mac** removes the Keychain entry and keeps this Mac unpaired
 until **Run modules on this Mac** is pressed; revoking the machine in the list
 invalidates its token everywhere.
 
+## Dictation on this Mac
+
+Your computers › This Mac › Dictation can transcribe the composer's dictation
+on the Mac itself with NVIDIA Parakeet through FluidAudio
+(`Runner/LocalDictation.swift`), so no audio leaves the Mac. The ~483 MB model
+is downloaded on request into
+`~/Library/Application Support/FrockBot/dictation/` and removed from the same
+card. It needs Apple silicon, and FluidAudio sets the app's minimum to macOS 14. Adding or changing the Swift package is a native change: it ships in a
+full release, never a Shorebird patch. Details in
+[`docs/voice.md`](../../../docs/voice.md#dictation-on-this-mac); licences in
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+
 ## Build and qualification
 
 Use the pinned Flutter and Bun versions. Run `bun run typecheck`, `bun test`,

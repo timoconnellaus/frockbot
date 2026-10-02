@@ -3,11 +3,13 @@
 Two voice features, two transports, one credential rule: provider keys never
 leave the Worker.
 
-| Feature                                 | Route                                | Server                                                                    | Provider                                                                                                                              |
-| --------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Composer dictation (one Bot's composer) | `GET /api/voice/dictation` WebSocket | Worker-level relay, `apps/cloudflare/src/voice-dictation.ts`              | OpenAI Realtime transcription, model `gpt-live-transcribe`                                                                            |
-| Continuous voice session (one Bot)      | `GET /api/voice/assistant` WebSocket | `VoiceAssistant` Durable Object, `apps/cloudflare/src/voice-assistant.ts` | Gemini Live (`gemini-3.8-live`) or OpenAI Realtime (`gpt-realtime-2.1`), chosen by the deployment: one bidirectional session per call |
-| Capability probe                        | `GET /api/voice/capabilities`        | Gateway                                                                   | —                                                                                                                                     |
+| Feature                                 | Route                                 | Server                                                                    | Provider                                                                                                                              |
+| --------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Composer dictation (one Bot's composer) | `GET /api/voice/dictation` WebSocket  | Worker-level relay, `apps/cloudflare/src/voice-dictation.ts`              | OpenAI Realtime transcription, model `gpt-live-transcribe`                                                                            |
+| Continuous voice session (one Bot)      | `GET /api/voice/assistant` WebSocket  | `VoiceAssistant` Durable Object, `apps/cloudflare/src/voice-assistant.ts` | Gemini Live (`gemini-3.8-live`) or OpenAI Realtime (`gpt-realtime-2.1`), chosen by the deployment: one bidirectional session per call |
+| Capability probe                        | `GET /api/voice/capabilities`         | Gateway                                                                   | —                                                                                                                                     |
+| Dictation on this Mac                   | none — `com.frockbot/local-dictation` | `apps/native/macos/Runner/LocalDictation.swift`                           | NVIDIA Parakeet TDT 0.6B v3 on Core ML (FluidAudio), on the device                                                                    |
+| Tidy-up of on-device text               | `POST /api/voice/dictation/cleanup`   | Gateway, the relay's own cleanup                                          | Groq `llama-3.1-8b-instant`, reviewed by Jev                                                                                          |
 
 Since [ADR 0031](adr/0031-voice-gemini-live.md) the continuous session is one
 `bidiGenerateContent` socket and nothing else. The cascade it replaced — ears,
@@ -390,6 +392,63 @@ half a second — and the relay maps
 `…completed` → `segment`, `error` → `error`. The upstream URL is
 `wss://api.openai.com/v1/realtime?intent=transcription` with
 `Authorization: Bearer $OPENAI_API_KEY`.
+
+## Dictation on this Mac
+
+The Mac app can transcribe composer dictation itself. Your computers › This
+Mac › Dictation chooses between FrockBot's (the relay above) and On this Mac.
+The choice is the Mac's own, in its local store under
+`voice.dictation.source.v1` (`frockbot` or `this-mac`), because the model it
+needs is on that Mac; the setup app's per-job Dictation row takes over that
+key when it lands. The phone and the web have no such choice.
+
+On this Mac, no audio leaves the machine, nothing is metered and it works
+offline. `LocalDictationSocket` (`lib/voice/local_dictation.dart`) speaks
+the server half of the dictation protocol on the device, so the composer's
+`DictationController` is the same one the relay drives: the same pill,
+clock, stop, draft range and five-minute cap. It answers `start` with
+`ready`, holds the audio, and at `stop` hands the whole capture — the same
+PCM16 at 24 kHz — to the native engine over `com.frockbot/local-dictation`,
+then answers `segment` and `final`. There are no live deltas, which costs
+nothing: the composer never shows them. Stop waits up to 60 s for the transcript rather than
+the relay's 6 s, because the first capture after launch may also be loading
+the model.
+
+The tidy-up still applies. When the transcript is worth tidying (24 to
+12,000 characters) the socket sends `cleaning` and posts the text — never
+audio — to `POST /api/voice/dictation/cleanup`
+(`{schemaVersion:1,text}` → `{schemaVersion:1,text:string|null}`), which runs
+the relay's own `tidyVoiceDictationTranscriptV1`: the same Groq call booked
+against the same daily count, the same cheap checks and the same Jev review.
+`null` means the person's words stand. Offline, the request fails and the raw
+transcript stands, exactly as on the relay.
+
+Choosing On this Mac never falls back to the cloud. If the model is not on
+the Mac yet, pressing the microphone says so and offers Download; the
+capture does not open the relay.
+
+**The model.** NVIDIA Parakeet TDT 0.6B v3, int8 Core ML
+(`FluidInference/parakeet-tdt-0.6b-v3-coreml`, about 483 MB), run through
+[FluidAudio](https://github.com/FluidInference/FluidAudio) 0.17.4. It is not
+in the app: Download fetches it from Hugging Face into
+`~/Library/Application Support/FrockBot/dictation/`, with progress read from
+the bytes on disk, and Remove deletes that folder. The engine loads it once,
+ahead of a capture, because compiling for the Neural Engine can take seconds
+the first time. It needs Apple silicon; on an Intel Mac the option is shown
+disabled. FluidAudio requires macOS 14, which is the app's minimum.
+
+Why Parakeet rather than whisper.cpp with Metal: for short English dictation
+Parakeet TDT is both more accurate (about 6% average WER on the Open ASR
+Leaderboard for v2/v3, against about 7.8% for Whisper large-v3-turbo) and far
+faster on Apple silicon (FluidAudio reports roughly 120–190× real time on
+the Neural Engine, where large-v3-turbo on Metal is a few tens), and it runs
+on the Neural Engine rather than competing with the app for the GPU. v3 is
+multilingual across 25 European languages, which covers what Whisper would
+have given most people. Those are published figures, not ones measured on
+our own hardware; the on-Mac comparison is still owed.
+
+Licences are recorded in
+[`apps/native/macos/THIRD_PARTY_NOTICES.md`](../apps/native/macos/THIRD_PARTY_NOTICES.md).
 
 ## Assistant protocol (v1)
 

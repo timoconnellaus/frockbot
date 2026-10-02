@@ -33,6 +33,8 @@
 		F1A0C0012E6B5A0000D0E001 /* DesktopUpdater.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0C0022E6B5A0000D0E001 /* DesktopUpdater.swift */; };
 		D7E1C0A12F1B3A0000D0E101 /* DeviceHostBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7E1C0A12F1B3A0000D0E102 /* DeviceHostBridge.swift */; };
 		F1A0C0032E6B5A0000D0E001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = F1A0C0042E6B5A0000D0E001 /* Sparkle */; };
+		E4D1C7A12F9B3A0000D0E201 /* LocalDictation.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4D1C7A12F9B3A0000D0E202 /* LocalDictation.swift */; };
+		E4D1C7A32F9B3A0000D0E201 /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = E4D1C7A42F9B3A0000D0E201 /* FluidAudio */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -79,6 +81,7 @@
 		33CC11122044BFA00003C045 /* MainFlutterWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainFlutterWindow.swift; sourceTree = "<group>"; };
 		F1A0C0022E6B5A0000D0E001 /* DesktopUpdater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesktopUpdater.swift; sourceTree = "<group>"; };
 		D7E1C0A12F1B3A0000D0E102 /* DeviceHostBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceHostBridge.swift; sourceTree = "<group>"; };
+		E4D1C7A12F9B3A0000D0E202 /* LocalDictation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalDictation.swift; sourceTree = "<group>"; };
 		33CEB47222A05771004F2AC0 /* Flutter-Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = "Flutter-Debug.xcconfig"; sourceTree = "<group>"; };
 		33CEB47422A05771004F2AC0 /* Flutter-Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = "Flutter-Release.xcconfig"; sourceTree = "<group>"; };
 		33CEB47722A0578A004F2AC0 /* Flutter-Generated.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = "Flutter-Generated.xcconfig"; path = "ephemeral/Flutter-Generated.xcconfig"; sourceTree = "<group>"; };
@@ -112,6 +115,7 @@
 			files = (
 				78A318202AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage in Frameworks */,
 				F1A0C0032E6B5A0000D0E001 /* Sparkle in Frameworks */,
+				E4D1C7A32F9B3A0000D0E201 /* FluidAudio in Frameworks */,
 				68AFA791355F25FC0A6BE7BF /* Pods_Runner.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -189,6 +193,7 @@
 				33CC11122044BFA00003C045 /* MainFlutterWindow.swift */,
 				F1A0C0022E6B5A0000D0E001 /* DesktopUpdater.swift */,
 				D7E1C0A12F1B3A0000D0E102 /* DeviceHostBridge.swift */,
+				E4D1C7A12F9B3A0000D0E202 /* LocalDictation.swift */,
 				33E51913231747F40026EE4D /* DebugProfile.entitlements */,
 				33E51914231749380026EE4D /* Release.entitlements */,
 				33CC11242044D66E0003C045 /* Resources */,
@@ -262,6 +267,7 @@
 			packageProductDependencies = (
 				78A3181F2AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage */,
 				F1A0C0042E6B5A0000D0E001 /* Sparkle */,
+				E4D1C7A42F9B3A0000D0E201 /* FluidAudio */,
 			);
 			productName = Runner;
 			productReference = 33CC10ED2044A3C60003C045 /* frockbot_native.app */;
@@ -310,6 +316,7 @@
 			packageReferences = (
 				781AD8BC2B33823900A9FFBB /* XCLocalSwiftPackageReference "FlutterGeneratedPluginSwiftPackage" */,
 				F1A0C0052E6B5A0000D0E001 /* XCRemoteSwiftPackageReference "Sparkle" */,
+				E4D1C7A52F9B3A0000D0E201 /* XCRemoteSwiftPackageReference "FluidAudio" */,
 			);
 			productRefGroup = 33CC10EE2044A3C60003C045 /* Products */;
 			projectDirPath = "";
@@ -443,6 +450,7 @@
 				33CC10F12044A3C60003C045 /* AppDelegate.swift in Sources */,
 				F1A0C0012E6B5A0000D0E001 /* DesktopUpdater.swift in Sources */,
 				D7E1C0A12F1B3A0000D0E101 /* DeviceHostBridge.swift in Sources */,
+				E4D1C7A12F9B3A0000D0E201 /* LocalDictation.swift in Sources */,
 				335BBD1B22A9A15E00E9071D /* GeneratedPluginRegistrant.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -561,7 +569,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 13.4;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
@@ -643,7 +651,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 13.4;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = macosx;
@@ -693,7 +701,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 13.4;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
@@ -819,6 +827,14 @@
 				version = 2.8.1;
 			};
 		};
+		E4D1C7A52F9B3A0000D0E201 /* XCRemoteSwiftPackageReference "FluidAudio" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/FluidInference/FluidAudio";
+			requirement = {
+				kind = exactVersion;
+				version = 0.17.4;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -830,6 +846,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = F1A0C0052E6B5A0000D0E001 /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
+		};
+		E4D1C7A42F9B3A0000D0E201 /* FluidAudio */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E4D1C7A52F9B3A0000D0E201 /* XCRemoteSwiftPackageReference "FluidAudio" */;
+			productName = FluidAudio;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -3515,6 +3515,12 @@ describe("voice gateway routes", () => {
       calls.push(`dictation:${userId}`);
       return Promise.resolve(Response.json({ opened: "dictation" }));
     },
+    cleanDictation: (userId, text) => {
+      calls.push(`cleanup:${userId}:${text}`);
+      return Promise.resolve(
+        text.includes("um") ? text.replace("um, ", "") : undefined,
+      );
+    },
     openAssistant: (userId, deviceKey, _request, context) => {
       calls.push(`assistant:${userId}:${deviceKey}:${context.authMode}`);
       return Promise.resolve(Response.json({ opened: "assistant" }));
@@ -3611,6 +3617,57 @@ describe("voice gateway routes", () => {
       "assistant:alice:phone.1:development",
       "assistant:alice:unknown:development",
     ]);
+  });
+
+  test("tidies text the Mac transcribed itself, for the signed-in User only", async () => {
+    const calls: string[] = [];
+    const { gateway } = createTestGateway(
+      undefined,
+      undefined,
+      true,
+      undefined,
+      undefined,
+      undefined,
+      voice(calls),
+    );
+    const post = (text: unknown) =>
+      gateway(
+        request("/api/voice/dictation/cleanup", "alice", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ schemaVersion: 1, text }),
+        }),
+      );
+    const tidied = await post("so um, send it on Friday");
+    expect(tidied.status).toBe(200);
+    expect((await tidied.json()) as unknown).toEqual({
+      schemaVersion: 1,
+      text: "so send it on Friday",
+    });
+    const kept = await post("send it on Friday");
+    expect((await kept.json()) as unknown).toEqual({
+      schemaVersion: 1,
+      text: null,
+    });
+    expect((await post(42)).status).toBe(400);
+    expect(
+      (await gateway(request("/api/voice/dictation/cleanup", "alice"))).status,
+    ).toBe(405);
+    expect(calls).toEqual([
+      "cleanup:alice:so um, send it on Friday",
+      "cleanup:alice:send it on Friday",
+    ]);
+    const { gateway: without } = createTestGateway();
+    const nothing = await without(
+      request("/api/voice/dictation/cleanup", "alice", {
+        method: "POST",
+        body: JSON.stringify({ schemaVersion: 1, text: "so um, send it" }),
+      }),
+    );
+    expect((await nothing.json()) as unknown).toEqual({
+      schemaVersion: 1,
+      text: null,
+    });
   });
 
   test("a plain GET on a voice socket path is told to upgrade; no voice means 503", async () => {
