@@ -374,10 +374,7 @@ export class DeployAccount extends DurableObject<DeployEnvV1> {
     version: string,
   ): Promise<StartResultV1> {
     const record = await this.session(secret);
-    if (
-      !record ||
-      !(await this.liveGrant(record.secretHash, DEPLOY_RUNWAY_MS))
-    )
+    if (!record || !(await this.liveGrant(record.secretHash, DEPLOY_RUNWAY_MS)))
       return { ok: false, problem: SIGNED_OUT_PROBLEM };
     const install = (await this.installs())[key];
     if (!install)
@@ -405,10 +402,7 @@ export class DeployAccount extends DurableObject<DeployEnvV1> {
   private async retryNow(secret: string): Promise<StartResultV1> {
     const record = await this.session(secret);
     const job = await this.job();
-    if (
-      !record ||
-      !(await this.liveGrant(record.secretHash, DEPLOY_RUNWAY_MS))
-    )
+    if (!record || !(await this.liveGrant(record.secretHash, DEPLOY_RUNWAY_MS)))
       return { ok: false, problem: SIGNED_OUT_PROBLEM };
     if (!job || job.state !== "failed")
       return { ok: false, problem: "There's nothing to try again." };
