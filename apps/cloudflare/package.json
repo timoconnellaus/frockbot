@@ -33,13 +33,13 @@
     "@frockbot/providers": "workspace:*",
     "@rive-app/flutter-native-wasm": "44.0.0",
     "agents": "0.24.0",
-    "ai": "^7.0.107",
+    "ai": "^7.0.113",
     "ajv": "8.20.0",
     "json-schema-to-ts": "^3.1.1"
   },
   "devDependencies": {
-    "@cloudflare/vitest-plugin": "^1.1.10",
-    "@cloudflare/workers-types": "5.20260920.1",
+    "@cloudflare/vitest-plugin": "^1.2.5",
+    "@cloudflare/workers-types": "5.20260924.1",
     "@playwright/test": "1.63.0",
     "@types/bun": "1.4.2",
     "preact": "10",
