@@ -314,8 +314,6 @@ describe("foundation application", () => {
           active: 0,
           tasks: [],
         }),
-      createMachinePairing: () =>
-        Promise.reject(new Error("not used while composing")),
       enrollMachine: () =>
         Promise.reject(new Error("not used while composing")),
       openMachineSocket: () =>

@@ -6,7 +6,6 @@ export * from "./device.js";
 export * from "./device-runner.js";
 export * from "./intent.js";
 export * from "./module-calls.js";
-export * from "./pairing.js";
 export * from "./storage-keys.js";
 export * from "./store.js";
 export * from "./target.js";

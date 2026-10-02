@@ -201,7 +201,7 @@ export const REQUIRED_PRODUCTION_SECRETS_V1: readonly ProductionSecretV1[] = [
   },
   {
     name: "MACHINE_TOKEN_SECRET",
-    why: "Signs machine tokens and pairing codes. Absent, no machine can pair.",
+    why: "Signs machine tokens. Absent, no machine can enroll.",
   },
   {
     name: "APPLET_BUILD_TOKEN",

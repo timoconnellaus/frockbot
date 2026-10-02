@@ -24,7 +24,7 @@ import {
 } from "@frockbot/core/durable";
 import {
   machineRoutePathV1,
-  type MachinePairingOfferV1,
+  type MachineEnrollmentReceiptV1,
 } from "@frockbot/core/machine-protocol";
 import { fetchUpgradeMachineWebSocketV1 } from "@frockbot/app/machine/device";
 import { MachineAgentDriverV1 } from "@frockbot/app/machine/testing";
@@ -55,7 +55,7 @@ interface UserRpc {
   ): Promise<{ current: { generationId: string } }>;
   proposeComposition(input: unknown): Promise<void>;
   setFeatures(input: unknown): Promise<unknown>;
-  createMachinePairing(input: unknown): Promise<MachinePairingOfferV1>;
+  enrollMachine(input: unknown): Promise<MachineEnrollmentReceiptV1>;
 }
 
 function user(userId: string): UserRpc {
@@ -263,10 +263,11 @@ describe("a Plugin's device modules", () => {
       label: "Modules-Mac.local",
       platform: "macos",
     });
-    await desktop.enroll(
-      await user(identity.userId).createMachinePairing({
+    desktop.adopt(
+      await user(identity.userId).enrollMachine({
         schemaVersion: 1,
         userId: identity.userId,
+        enrollment: desktop.enrollment(),
       }),
     );
 
@@ -400,10 +401,11 @@ describe("a device module's event", () => {
       label: "Events-Mac.local",
       platform: "macos",
     });
-    await desktop.enroll(
-      await user(identity.userId).createMachinePairing({
+    desktop.adopt(
+      await user(identity.userId).enrollMachine({
         schemaVersion: 1,
         userId: identity.userId,
+        enrollment: desktop.enrollment(),
       }),
     );
     expect(await desktop.next()).toEqual([]);

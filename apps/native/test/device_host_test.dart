@@ -32,6 +32,15 @@ void main() {
     'declined': declined,
     'modules': const [],
     'error': '',
+    'label': 'Studio Mac',
+    'version': '1.2.3',
+  };
+
+  Map<String, Object?> receipt(Object? body) => {
+    'schemaVersion': 1,
+    'machineId': (body as Map)['machineId'],
+    'token': 'machine-token',
+    'keyVersion': 1,
   };
 
   test('an account on another server never reaches the host', () async {
@@ -54,28 +63,57 @@ void main() {
     controller.dispose();
   });
 
-  test('a Mac the host reports unpaired pairs itself once', () async {
+  test('a Mac the host reports unpaired enrolls itself once', () async {
     final calls = <MethodCall>[];
     messenger.setMockMethodCallHandler(DeviceHostController.channel, (
       call,
     ) async {
       calls.add(call);
-      return status(call.arguments, enrolled: call.method == 'pair');
+      return status(call.arguments, enrolled: call.method == 'adopt');
     });
-    final paths = <String>[];
-    final api = SettingsApi(MemoryStore(), (path, _) async {
-      paths.add(path);
-      return {'code': 'pairing-code'};
+    final posted = <(String, Object?)>[];
+    final api = SettingsApi(MemoryStore(), (path, body) async {
+      posted.add((path, body));
+      return receipt(body);
     });
     final controller = DeviceHostController();
     await controller.configure('alice', api);
     await pumpEventQueue();
-    expect(paths, ['/api/machines/pair']);
-    expect(calls.map((call) => call.method), ['configure', 'pair']);
-    expect(calls.last.arguments['code'], 'pairing-code');
+    expect(posted.map((entry) => entry.$1), ['/api/machines/enroll']);
+    final body = posted.single.$2 as Map;
+    expect(body['label'], 'Studio Mac');
+    expect(body['agentVersion'], '1.2.3');
+    expect(body['platform'], 'macos');
+    expect(body['capabilities'], isEmpty);
+    expect(body.containsKey('code'), false);
+    expect(calls.map((call) => call.method), ['configure', 'adopt']);
+    expect(calls.last.arguments['receipt'], receipt(body));
     expect(calls.last.arguments['userId'], 'alice');
     expect(controller.enrolled, true);
     expect(controller.enrolling, false);
+    controller.dispose();
+  });
+
+  test('a retry after a lost answer names the same machine', () async {
+    messenger.setMockMethodCallHandler(DeviceHostController.channel, (
+      call,
+    ) async {
+      return status(call.arguments, enrolled: call.method == 'adopt');
+    });
+    final machineIds = <Object?>[];
+    final api = SettingsApi(MemoryStore(), (path, body) async {
+      machineIds.add((body as Map)['machineId']);
+      if (machineIds.length == 1) throw const RequestFailure('offline');
+      return receipt(body);
+    });
+    final controller = DeviceHostController();
+    await controller.configure('alice', api);
+    await pumpEventQueue();
+    expect(controller.error, isNotEmpty);
+    await controller.enrol();
+    expect(machineIds, hasLength(2));
+    expect(machineIds.last, machineIds.first);
+    expect(controller.enrolled, true);
     controller.dispose();
   });
 
@@ -96,9 +134,9 @@ void main() {
         );
       });
       final paths = <String>[];
-      final api = SettingsApi(MemoryStore(), (path, _) async {
+      final api = SettingsApi(MemoryStore(), (path, body) async {
         paths.add(path);
-        return {'code': 'pairing-code'};
+        return receipt(body);
       });
       final controller = DeviceHostController();
       await controller.configure('alice', api);

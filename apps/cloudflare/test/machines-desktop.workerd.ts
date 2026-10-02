@@ -20,10 +20,11 @@ import {
   decodeMachineClaimReceiptV1,
   decodeMachineEnrollmentReceiptV1,
   decodeMachineListViewV1,
-  decodeMachinePairingOfferV1,
   decodeMachineResultReceiptV1,
   machineRoutePathV1,
   type MachineCommandV1,
+  type MachineEnrollmentReceiptV1,
+  type MachineEnrollmentV1,
 } from "@frockbot/core/machine-protocol";
 import {
   createMachineBackendContribution,
@@ -41,7 +42,6 @@ import { internalMachineSocketRequestV1 } from "../src/machine-socket.ts";
 const ORIGIN = "https://bot.frockbot.com";
 
 interface MachineRpc {
-  createMachinePairing(input: unknown): Promise<unknown>;
   enrollMachine(input: unknown): Promise<unknown>;
   claimMachineCommand(input: unknown): Promise<unknown>;
   recordMachineResult(input: unknown): Promise<unknown>;
@@ -69,23 +69,13 @@ function gateway(userId: string): MachineBackendRouteContribution {
   return createMachineBackendContribution({
     brand: { productName: "FrockBot" },
     machineTokenSecret: env.MACHINE_TOKEN_SECRET as string,
-    createMachinePairing: async (owner) =>
-      decodeMachinePairingOfferV1(
-        snapshot(
-          await rpc.createMachinePairing({
-            schemaVersion: 1,
-            userId: owner,
-          }),
-        ),
-      ),
-    enrollMachine: async (owner, input) =>
+    enrollMachine: async (owner, enrollment) =>
       decodeMachineEnrollmentReceiptV1(
         snapshot(
           await rpc.enrollMachine({
             schemaVersion: 1,
             userId: owner,
-            machineId: input.machineId,
-            enrollment: input.enrollment,
+            enrollment,
           }),
         ),
       ),
@@ -172,23 +162,25 @@ function machineFetch(
   };
 }
 
-function pair(
+/** The signed-in app enrolling its own agent, through the session's door. */
+async function enroll(
   contribution: MachineBackendRouteContribution,
   userId: string,
-): Promise<Response> {
-  const path = machineRoutePathV1("pair");
+  enrollment: MachineEnrollmentV1,
+): Promise<MachineEnrollmentReceiptV1> {
+  const path = machineRoutePathV1("enroll");
   const url = new URL(`${ORIGIN}${path}`);
-  return contribution
-    .route(
-      new Request(url, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({}),
-      }),
-      url,
-      { userId, client: "browser" },
-    )
-    .then((response) => response ?? new Response("not found", { status: 404 }));
+  const response = await contribution.route(
+    new Request(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(enrollment),
+    }),
+    url,
+    { userId, client: "desktop" },
+  );
+  expect(response?.status).toBe(200);
+  return decodeMachineEnrollmentReceiptV1(await response!.json());
 }
 
 /** Presence, as the settings surface reads it. */
@@ -262,9 +254,6 @@ describe("the desktop device agent against the real machine routes", () => {
     const desktopGateway = gateway(desktopUser);
     const desktopCalls: string[] = [];
     const desktopFetch = machineFetch(desktopGateway, desktopCalls);
-    const offer = decodeMachinePairingOfferV1(
-      await (await pair(desktopGateway, desktopUser)).json(),
-    );
     const laptop = fakeHost(stdout);
     const agent = new MachineDeviceAgentV1({
       origin: ORIGIN,
@@ -280,7 +269,12 @@ describe("the desktop device agent against the real machine routes", () => {
       agentVersion: "0.0.1",
       capabilities: ["exec", "files"],
     });
-    await agent.pair(offer.code);
+    const offer = await enroll(
+      desktopGateway,
+      desktopUser,
+      agent.enrollmentRequest(crypto.randomUUID()),
+    );
+    await agent.adopt(offer);
     // The first frame finds nothing queued and the second lists no modules;
     // the third is the dispatch, pushed down the socket the agent holds.
     const session = agent.connectOnce({ frames: 3 });
@@ -304,9 +298,6 @@ describe("the desktop device agent against the real machine routes", () => {
     const stubUser = `machines-stub-${crypto.randomUUID()}`;
     const stubGateway = gateway(stubUser);
     const stubCalls: string[] = [];
-    const stubOffer = decodeMachinePairingOfferV1(
-      await (await pair(stubGateway, stubUser)).json(),
-    );
     const stubFetch = machineFetch(stubGateway, stubCalls);
     const stub = new MachineAgentDriverV1({
       origin: ORIGIN,
@@ -329,7 +320,8 @@ describe("the desktop device agent against the real machine routes", () => {
           },
         }),
     });
-    await stub.enroll(stubOffer);
+    const stubOffer = await enroll(stubGateway, stubUser, stub.enrollment());
+    stub.adopt(stubOffer);
     await stub.runOnce();
     await machines(stubUser).dispatchMachineCommand({
       schemaVersion: 1,
@@ -382,9 +374,6 @@ describe("the desktop device agent against the real machine routes", () => {
     const userId = `machines-revoked-${crypto.randomUUID()}`;
     const contribution = gateway(userId);
     const secrets = createMemoryMachineSecretStoreV1();
-    const offer = decodeMachinePairingOfferV1(
-      await (await pair(contribution, userId)).json(),
-    );
     const laptop = fakeHost("");
     const doomedFetch = machineFetch(contribution, []);
     const agent = new MachineDeviceAgentV1({
@@ -401,7 +390,12 @@ describe("the desktop device agent against the real machine routes", () => {
       agentVersion: "0.0.1",
       capabilities: ["exec", "files"],
     });
-    await agent.pair(offer.code);
+    const offer = await enroll(
+      contribution,
+      userId,
+      agent.enrollmentRequest(crypto.randomUUID()),
+    );
+    await agent.adopt(offer);
     expect(await secrets.read()).toBeDefined();
 
     await machines(userId).revokeMachine({
@@ -420,9 +414,6 @@ describe("the desktop device agent against the real machine routes", () => {
     const userId = `machines-closed-${crypto.randomUUID()}`;
     const contribution = gateway(userId);
     const secrets = createMemoryMachineSecretStoreV1();
-    const offer = decodeMachinePairingOfferV1(
-      await (await pair(contribution, userId)).json(),
-    );
     const closedFetch = machineFetch(contribution, []);
     const agent = new MachineDeviceAgentV1({
       origin: ORIGIN,
@@ -438,7 +429,12 @@ describe("the desktop device agent against the real machine routes", () => {
       agentVersion: "0.0.1",
       capabilities: ["exec", "files"],
     });
-    await agent.pair(offer.code);
+    const offer = await enroll(
+      contribution,
+      userId,
+      agent.enrollmentRequest(crypto.randomUUID()),
+    );
+    await agent.adopt(offer);
     const session = agent.connectOnce();
     await eventuallyConnected(userId);
 
@@ -456,16 +452,14 @@ describe("the desktop device agent against the real machine routes", () => {
   test("the socket door refuses a missing token, and a plain GET is told to upgrade", async () => {
     const userId = `machines-door-${crypto.randomUUID()}`;
     const contribution = gateway(userId);
-    const offer = decodeMachinePairingOfferV1(
-      await (await pair(contribution, userId)).json(),
-    );
     const doorFetch = machineFetch(contribution, []);
     const stub = new MachineAgentDriverV1({
       origin: ORIGIN,
       fetch: doorFetch,
       webSocket: fetchUpgradeMachineWebSocketV1(doorFetch),
     });
-    const token = await stub.enroll(offer);
+    const offer = await enroll(contribution, userId, stub.enrollment());
+    const token = stub.adopt(offer);
     const path = machineRoutePathV1("socket", { machineId: offer.machineId });
     expect(
       await stub.attempt(path, { headers: { upgrade: "websocket" } }),

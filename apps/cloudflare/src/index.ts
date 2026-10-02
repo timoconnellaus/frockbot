@@ -130,14 +130,12 @@ import {
 } from "@frockbot/app/subagents/shared";
 import {
   decodeMachineClaimReceiptV1,
-  MachineTokenError,
   decodeMachineEnrollmentReceiptV1,
   decodeMachineListViewV1,
   decodeMachineModuleCallClaimReceiptV1,
   decodeMachineModuleCallResultReceiptV1,
   decodeMachineModuleEventsReceiptV1,
   decodeMachineModuleReportsReceiptV1,
-  decodeMachinePairingOfferV1,
   decodeMachineResultReceiptV1,
 } from "@frockbot/core/machine-protocol";
 import {
@@ -393,9 +391,9 @@ interface Env {
   /** The platform's web search key. Absent, a Bot has no `web_search`. */
   BRAVE_SEARCH_API_KEY?: string;
   /**
-   * Signs every machine token and pairing code. Absent closes the registered
-   * machine door: pairing, enrollment and every machine route answer 503
-   * rather than admitting a caller nothing could verify.
+   * Signs every machine token. Absent closes the registered machine door:
+   * enrollment and every machine route answer 503 rather than admitting a
+   * caller nothing could verify.
    */
   MACHINE_TOKEN_SECRET?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
@@ -1061,7 +1059,6 @@ interface UserSearchRpc {
  * business growing a method for somebody's laptop.
  */
 interface UserMachineRpc {
-  createMachinePairing(input: unknown): Promise<unknown>;
   enrollMachine(input: unknown): Promise<unknown>;
   claimMachineCommand(input: unknown): Promise<unknown>;
   recordMachineResult(input: unknown): Promise<unknown>;
@@ -2353,36 +2350,23 @@ const createGatewayBackendContributions = (env: Env) =>
           command,
         }),
       ),
-    // The secret the gateway verifies a presented machine token or pairing
-    // code against, before any Durable Object is addressed. It never leaves
+    // The secret the gateway verifies a presented machine token against,
+    // before any Durable Object is addressed. It never leaves
     // the Worker: what crosses to the User object is the token's claims and
     // its digest, never the token.
     ...(typeof env.MACHINE_TOKEN_SECRET === "string"
       ? { machineTokenSecret: env.MACHINE_TOKEN_SECRET }
       : {}),
-    createMachinePairing: async (userId) =>
-      decodeMachinePairingOfferV1(
-        rpcJsonSnapshotV1(
-          await userMachineStub(env, userId).createMachinePairing({
-            schemaVersion: 1,
-            userId,
-          }),
-        ),
-      ),
-    enrollMachine: async (userId, input) => {
-      const refusal = await externalAccountRefusal(env, userId);
-      if (refusal) throw new MachineTokenError(refusal.status, refusal.message);
-      return decodeMachineEnrollmentReceiptV1(
+    enrollMachine: async (userId, enrollment) =>
+      decodeMachineEnrollmentReceiptV1(
         rpcJsonSnapshotV1(
           await userMachineStub(env, userId).enrollMachine({
             schemaVersion: 1,
             userId,
-            machineId: input.machineId,
-            enrollment: input.enrollment,
+            enrollment,
           }),
         ),
-      );
-    },
+      ),
     // An upgrade cannot cross RPC, so the socket goes to the object's `fetch`.
     openMachineSocket: (userId, call, request) =>
       env.USER_CONFIGURATIONS.get(

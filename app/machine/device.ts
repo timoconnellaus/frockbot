@@ -36,6 +36,7 @@ import {
   MachineDecodeError,
   decodeMachineClaimReceiptV1,
   decodeMachineEnrollmentReceiptV1,
+  decodeMachineEnrollmentV1,
   decodeMachineIdV1,
   decodeMachineResultReceiptV1,
   decodeMachineSocketFrameV1,
@@ -44,6 +45,7 @@ import {
   type MachineCapabilityV1,
   type MachineCommandResultV1,
   type MachineCommandV1,
+  type MachineEnrollmentV1,
   type MachineModuleCallFrameV1,
   type MachineModuleV1,
   type MachinePlatformV1,
@@ -650,36 +652,21 @@ export class MachineDeviceAgentV1 {
   }
 
   /**
-   * Present a pairing code and become a registered machine.
+   * Hold the token the signed-in app enrolled this machine for.
    *
-   * The code is the only secret that crosses from the browser to the laptop,
-   * it is one-time, and it is never stored: what is stored is the token the
-   * enrollment answered with.
+   * The app's session registers the machine and hands the token over locally;
+   * this agent never presents a session, and the session never presents the
+   * token. What is stored is the token, never how it arrived.
    */
-  async pair(code: string): Promise<MachineDeviceAgentStatusV1> {
-    const presented = text(
-      code.trim(),
-      MACHINE_LIMITS_V1.pairingCode,
-      "pairing code",
-    );
-    const receipt = decodeMachineEnrollmentReceiptV1(
-      await this.call(machineRoutePathV1("enroll"), {
-        method: "POST",
-        token: presented,
-        body: JSON.stringify({
-          schemaVersion: 1,
-          code: presented,
-          label: this.options.label,
-          platform: this.options.platform,
-          agentVersion: this.options.agentVersion,
-          capabilities: this.options.capabilities,
-        }),
-      }),
+  async adopt(receipt: unknown): Promise<MachineDeviceAgentStatusV1> {
+    const { machineId, token } = decodeMachineEnrollmentReceiptV1(
+      receipt,
+      "adopted enrollment",
     );
     const state: MachineEnrollmentStateV1 = {
       schemaVersion: 1,
-      machineId: receipt.machineId,
-      token: receipt.token,
+      machineId,
+      token,
       origin: this.options.origin,
       label: this.options.label,
       enrolledAt: new Date(this.now()).toISOString(),
@@ -691,6 +678,21 @@ export class MachineDeviceAgentV1 {
     this.lastError = undefined;
     this.announce();
     return this.status();
+  }
+
+  /**
+   * What the app posts to enroll this machine: the agent describes itself, and
+   * the session that enrolls it names the machine.
+   */
+  enrollmentRequest(machineId: string): MachineEnrollmentV1 {
+    return decodeMachineEnrollmentV1({
+      schemaVersion: 1,
+      machineId,
+      label: this.options.label,
+      platform: this.options.platform,
+      agentVersion: this.options.agentVersion,
+      capabilities: this.options.capabilities,
+    });
   }
 
   /** Forget the token on this laptop. The registry row is the browser's to revoke. */

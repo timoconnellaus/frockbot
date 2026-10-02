@@ -260,7 +260,7 @@ describe("the reader credential", () => {
       "/api/billing/reconcile",
       "/api/plugins/other/connections",
       "/api/settings/application",
-      "/api/machines/pair",
+      "/api/machines/enroll",
       "/api/machines/mac-1/revoke",
     ])
       expect(setupReaderPathV1(path)).toBe(false);

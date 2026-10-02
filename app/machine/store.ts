@@ -44,7 +44,6 @@ import {
 import {
   MACHINE_PREFIX,
   machineKeyV1,
-  machinePairingKeyV1,
   machineQueueKeyV1,
   machineQueuePrefixV1,
   machineRequeueKeyV1,
@@ -80,57 +79,8 @@ export class MachineRegistryError extends Error {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Pairing
-// ---------------------------------------------------------------------------
-
-/**
- * One unspent pairing offer.
- *
- * The code itself is absent by construction: only `SHA-256(code)` is kept, so
- * a dump of this object's storage hands nobody a machine.
- */
-export interface MachinePairingRecordV1 {
-  schemaVersion: 1;
-  machineId: string;
-  userId: string;
-  codeDigest: string;
-  createdAt: string;
-  expiresAt: string;
-}
-
 function iso(now: number | Date): string {
   return new Date(now).toISOString();
-}
-
-export async function writeMachinePairingV1(
-  storage: MachineStorageV1,
-  input: {
-    userId: string;
-    machineId: string;
-    codeDigest: string;
-    now: number | Date;
-    ttlMs?: number;
-  },
-): Promise<MachinePairingRecordV1> {
-  const ttl = input.ttlMs ?? MACHINE_LIMITS_V1.pairingTtlMs;
-  const record: MachinePairingRecordV1 = {
-    schemaVersion: 1,
-    machineId: input.machineId,
-    userId: input.userId,
-    codeDigest: input.codeDigest,
-    createdAt: iso(input.now),
-    expiresAt: iso(new Date(input.now).getTime() + ttl),
-  };
-  await storage.put(machinePairingKeyV1(input.machineId), record);
-  return record;
-}
-
-export async function readMachinePairingV1(
-  storage: MachineStorageWritesV1,
-  machineId: string,
-): Promise<MachinePairingRecordV1 | undefined> {
-  return storage.get<MachinePairingRecordV1>(machinePairingKeyV1(machineId));
 }
 
 // ---------------------------------------------------------------------------
@@ -186,38 +136,38 @@ export function machineListViewV1(
 }
 
 /**
- * Enrollment: the pairing offer is spent and the registry row is written, in
- * one transaction.
+ * Enrollment: the registry row is written before the token that proves it is
+ * handed back, so a session that reads the response is holding a key to a
+ * record that already exists.
  *
- * "Admit input durably before acknowledging" — the machine is registered
- * before the token it will present is handed back, so an agent that reads the
- * response is holding a key to a record that already exists.
+ * Idempotent on `machineId`. A retried enrollment finds the row it already
+ * wrote and answers it, never a second machine; a revoked row is refused,
+ * because answering it would hand back a key to a door that was closed.
  */
 export async function enrollMachineV1(
   storage: MachineStorageV1,
   input: {
     userId: string;
-    machineId: string;
     enrollment: MachineEnrollmentV1;
-    codeDigest: string;
     tokenDigest: string;
     now: number | Date;
   },
 ): Promise<MachineRecordV1> {
+  const { machineId } = input.enrollment;
   return storage.transaction(async (transaction) => {
-    const pairing = await readMachinePairingV1(transaction, input.machineId);
-    // Missing, spent, expired, for another User, or for another code: one
-    // answer, because telling them apart tells a prober which it was.
-    if (
-      !pairing ||
-      pairing.userId !== input.userId ||
-      pairing.codeDigest !== input.codeDigest ||
-      Date.parse(pairing.expiresAt) <= new Date(input.now).getTime()
-    ) {
-      throw new MachineRegistryError(
-        401,
-        "machine pairing code is invalid or has expired",
-      );
+    const existing = await readMachineRecordV1(transaction, machineId);
+    if (existing) {
+      if (
+        existing.userId !== input.userId ||
+        existing.revokedAt !== undefined ||
+        existing.tokenDigest !== input.tokenDigest
+      ) {
+        throw new MachineRegistryError(
+          409,
+          "this machine cannot be enrolled again; enroll a new one",
+        );
+      }
+      return existing;
     }
     const registered = await listMachineRecordsV1(transaction);
     const quota = checkMachineQuotaV1({
@@ -232,7 +182,7 @@ export async function enrollMachineV1(
     const record: MachineRecordV1 = decodeMachineRecordV1(
       {
         schemaVersion: 1,
-        machineId: input.machineId,
+        machineId,
         userId: input.userId,
         label: input.enrollment.label,
         platform: input.enrollment.platform,
@@ -246,8 +196,6 @@ export async function enrollMachineV1(
       "machine record",
     );
     await transaction.put(machineKeyV1(record.machineId), record);
-    // One-time: the offer is gone whether or not the agent ever connects.
-    await transaction.delete(machinePairingKeyV1(input.machineId));
     return record;
   });
 }

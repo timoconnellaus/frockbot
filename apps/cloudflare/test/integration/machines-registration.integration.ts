@@ -1,9 +1,10 @@
 // Registering a machine, as the product does it end to end.
 //
-// The app half is a session: `POST /api/machines/pair` through the
-// gateway's authenticated door. The machine half is not a session at all — the
-// stub device agent enrols and opens its socket through `SELF.fetch` with a
-// bearer token and nothing else, over the gateway's pre-authentication `publicRoute` seam.
+// The app half is a session: `POST /api/machines/enroll` through the
+// gateway's authenticated door, answered with the machine's token for the app
+// to hand its agent. The machine half is not a session at all — the stub
+// device agent opens its socket through `SELF.fetch` with that bearer token
+// and nothing else, over the gateway's pre-authentication `publicRoute` seam.
 //
 // `MachineAgentDriverV1` is the whole device agent minus `child_process`: it
 // speaks the real protocol, decodes every answer with the shipped decoders,
@@ -12,7 +13,7 @@
 import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import {
-  MACHINE_LIMITS_V1,
+  decodeMachineEnrollmentReceiptV1,
   machineRoutePathV1,
 } from "@frockbot/core/machine-protocol";
 import { MachineAgentDriverV1 } from "@frockbot/app/machine/testing";
@@ -54,6 +55,25 @@ function agent(label: string): MachineAgentDriverV1 {
   });
 }
 
+/** The signed-in app enrolling `device`, and handing it the token. */
+async function enroll(
+  userId: string,
+  device: MachineAgentDriverV1,
+  machineId?: string,
+): Promise<string> {
+  return device.adopt(
+    decodeMachineEnrollmentReceiptV1(
+      await expectOkJson(
+        await postAsUser(
+          userId,
+          machineRoutePathV1("enroll"),
+          device.enrollment(machineId),
+        ),
+      ),
+    ),
+  );
+}
+
 /** A socket close reaches the User Durable Object asynchronously. */
 async function eventually(
   userId: string,
@@ -70,22 +90,14 @@ async function eventually(
 }
 
 describe("registering a machine", () => {
-  it("pairs from a session, enrols anonymously, reports presence, and dies on revocation", async () => {
+  it("enrols from a session, connects anonymously, reports presence, and dies on revocation", async () => {
     const userId = freshUserId("machines");
 
-    // 1. The signed-in app asks for a code. It is the only secret a session
-    //    holds for a machine, and it is one-time and five minutes old at most.
-    const offer = (await expectOkJson(
-      await postAsUser(userId, machineRoutePathV1("pair"), {}),
-    )) as { code: string; machineId: string; expiresAt: string };
-    expect(Date.parse(offer.expiresAt) - Date.now()).toBeLessThanOrEqual(
-      MACHINE_LIMITS_V1.pairingTtlMs,
-    );
-
-    // 2. The machine enrols with it — no session, no cookie, no user header.
+    // 1-2. The signed-in app enrolls its agent and hands it the token. From
+    //      here the machine speaks with no session, no cookie, no user header.
     const device = agent("Tims-M5-MacBook-Pro.local");
-    const token = await device.enroll(offer.code);
-    expect(device.machineId).toBe(offer.machineId);
+    const token = await enroll(userId, device);
+    const offer = { machineId: device.machineId! };
 
     // 3. The registry is the `ListMachines` projection. Registered is not
     //    connected: presence is an open socket.
@@ -158,45 +170,39 @@ describe("registering a machine", () => {
     }
   });
 
-  it("refuses a code that was already spent, and one nobody minted", async () => {
-    const userId = freshUserId("machines-code");
-    const offer = (await expectOkJson(
-      await postAsUser(userId, machineRoutePathV1("pair"), {}),
-    )) as { code: string; machineId: string };
-    await agent("First.local").enroll(offer.code);
-    // The offer is spent, so the same code registers nothing a second time.
-    await expect(agent("Second.local").enroll(offer.code)).rejects.toThrow(
-      /401/,
-    );
-    // …and a code nobody signed never reaches a Durable Object at all.
-    const forged = await SELF.fetch(
+  it("answers a retried enrollment with the same machine, and never enrols without a session", async () => {
+    const userId = freshUserId("machines-retry");
+    const first = await enroll(userId, agent("First.local"), "mac-retried");
+    const second = await enroll(userId, agent("First.local"), "mac-retried");
+    expect(second).toBe(first);
+    expect(
+      (
+        (await expectOkJson(
+          await asUser(userId, machineRoutePathV1("list")),
+        )) as MachineListProbe
+      ).machines,
+    ).toHaveLength(1);
+    // A program with no session cannot register a machine at all.
+    const anonymous = await SELF.fetch(
       `${ORIGIN}${machineRoutePathV1("enroll")}`,
       {
         method: "POST",
         headers: {
-          authorization: "Bearer not-a-pairing-code",
+          authorization: "Bearer not-a-session",
           "content-type": "application/json",
         },
-        body: JSON.stringify({
-          schemaVersion: 1,
-          code: "not-a-pairing-code",
-          label: "Forged.local",
-          platform: "macos",
-          agentVersion: "0.4.1",
-          capabilities: ["exec"],
-        }),
+        body: JSON.stringify(agent("Forged.local").enrollment()),
       },
     );
-    expect(forged.status).toBe(401);
+    expect(anonymous.status).toBe(401);
   });
 
   it("keeps one User's machines out of another's registry", async () => {
     const mine = freshUserId("machines-mine");
     const theirs = freshUserId("machines-theirs");
-    const offer = (await expectOkJson(
-      await postAsUser(mine, machineRoutePathV1("pair"), {}),
-    )) as { code: string; machineId: string };
-    await agent("Mine.local").enroll(offer.code);
+    const device = agent("Mine.local");
+    await enroll(mine, device);
+    const offer = { machineId: device.machineId! };
     expect(
       (
         (await expectOkJson(

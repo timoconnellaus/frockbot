@@ -2,8 +2,8 @@
 //
 // `MachineAgentDriverV1` is the honest half of "no native binary in slice R".
 // It is not a mock of the protocol: it speaks the real wire, over an injected
-// `fetch` and an injected socket, against the real routes — pair, enroll,
-// socket, claim, result — and decodes every answer and frame with the same
+// `fetch` and an injected socket, against the real routes — socket, claim,
+// result — and decodes every answer and frame with the same
 // decoders the desktop agent does. What it
 // does *not* do is shell out. So the untested surface is `child_process` and
 // nothing else, and the day a real agent lands it can be checked byte for byte
@@ -22,7 +22,6 @@ import {
   decodeMachineModuleCallResultReceiptV1,
   decodeMachineModuleEventsReceiptV1,
   decodeMachineModuleReportsReceiptV1,
-  decodeMachinePairingOfferV1,
   decodeMachineResultReceiptV1,
   decodeMachineSocketFrameV1,
   machineRoutePathV1,
@@ -40,7 +39,8 @@ import {
   type MachineModuleReportV1,
   type MachineModuleReportsReceiptV1,
   type MachineModuleV1,
-  type MachinePairingOfferV1,
+  type MachineEnrollmentReceiptV1,
+  type MachineEnrollmentV1,
   type MachinePlatformV1,
   type MachineResultReceiptV1,
   type MachineSocketFrameV1,
@@ -243,23 +243,23 @@ export class MachineAgentDriverV1 {
     return response.status;
   }
 
-  /** Present a pairing code and become a registered machine. */
-  async enroll(offer: MachinePairingOfferV1 | string): Promise<string> {
-    const code = typeof offer === "string" ? offer : offer.code;
-    const receipt = decodeMachineEnrollmentReceiptV1(
-      await this.call(machineRoutePathV1("enroll"), {
-        method: "POST",
-        token: code,
-        body: JSON.stringify({
-          schemaVersion: 1,
-          code,
-          label: this.options.label ?? "Stub-Machine.local",
-          platform: this.options.platform ?? "macos",
-          agentVersion: this.options.agentVersion ?? "0.0.1",
-          capabilities: this.options.capabilities ?? ["exec", "files"],
-        }),
-      }),
-    );
+  /**
+   * What a session posts to enroll this agent. The machine id is the
+   * enrollment's idempotency key; a fresh one unless the test names it.
+   */
+  enrollment(machineId: string = crypto.randomUUID()): MachineEnrollmentV1 {
+    return {
+      schemaVersion: 1,
+      machineId,
+      label: this.options.label ?? "Stub-Machine.local",
+      platform: this.options.platform ?? "macos",
+      agentVersion: this.options.agentVersion ?? "0.0.1",
+      capabilities: this.options.capabilities ?? ["exec", "files"],
+    };
+  }
+
+  /** Hold the token a session enrolled this agent for, as the desktop does. */
+  adopt(receipt: MachineEnrollmentReceiptV1): string {
     this.machineId = receipt.machineId;
     this.token = receipt.token;
     return receipt.token;
@@ -517,11 +517,11 @@ export class MachineAgentDriverV1 {
   }
 }
 
-/** The pairing offer a browser fetch answered with, decoded. */
-export async function readMachinePairingOfferV1(
+/** The enrollment receipt a session's fetch answered with, decoded. */
+export async function readMachineEnrollmentReceiptV1(
   response: Response,
-): Promise<MachinePairingOfferV1> {
+): Promise<MachineEnrollmentReceiptV1> {
   const text = await response.text();
   if (!response.ok) throw new MachineAgentError(response.status, text);
-  return decodeMachinePairingOfferV1(JSON.parse(text) as unknown);
+  return decodeMachineEnrollmentReceiptV1(JSON.parse(text) as unknown);
 }

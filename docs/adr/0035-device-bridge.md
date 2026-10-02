@@ -92,8 +92,9 @@ last reported, the push token, and presence.
 
 The push device record and the machine record become this one record, and a
 native sign-in session names the Device it belongs to. A desktop's device
-agent enrols through its own signed-in app rather than a pairing code typed
-into a browser; the machine token becomes the Device's command credential.
+agent is enrolled by its own signed-in app rather than with a pairing code
+typed into a browser; the machine token becomes the Device's command
+credential.
 Revoking a Device ends its session, its token and its push registration
 together.
 
@@ -370,7 +371,17 @@ folds into Device, and its terms go.
 > its own agent, so no code reaches a person. The manual "Get a pairing code"
 > control and the name field on the pairing request are gone; the signed code,
 > the enrol route and the machine token stay until the Device record replaces
-> them. "Your computers" stays as this Mac's module host plus the account's
+> them.
+>
+> Amended 2026-09-30. The one-time code is gone too. The signed-in app calls
+> `POST /api/machines/enroll` with its own session, naming the machine with an
+> id it chose, which is the enrollment's idempotency key: a retried call is
+> answered with the same machine and token, and a revoked machine is refused.
+> The app hands the token to its agent locally, so the agent still holds a
+> narrow, revocable per-machine credential and never the session. Nothing is
+> enrolled before gateway authentication any more, and the unspent pairing
+> records are deleted by a one-time cleanup. A headless machine with no app to
+> enroll it would add a code-based door when it is built. "Your computers" stays as this Mac's module host plus the account's
 > computers, each with Revoke. With [ADR 0037](0037-plugin-device-modules.md)
 > step 3 it becomes the account's **Devices** page, reached from the You
 > page's Account group. It lists every signed-in device — desktop, phone and

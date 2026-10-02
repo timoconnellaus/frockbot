@@ -1,13 +1,15 @@
 /// This Mac as a machine that runs the account's device modules (ADR 0037).
 ///
 /// The module host runs beside the app on macOS (`DeviceHostBridge.swift`).
-/// Signing in starts it; if this Mac is not paired, the controller pairs it
-/// through the signed-in session, so there is no code to copy. Forget unpairs
+/// Signing in starts it; if this Mac is not paired, the controller enrolls it
+/// with the signed-in session and hands the machine token to the host locally,
+/// so the host holds a revocable token of its own and never the session. Forget unpairs
 /// it and keeps it unpaired until the person asks again. Elsewhere this is a
 /// no-op.
 library;
 
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -36,6 +38,8 @@ class DeviceHostController extends ChangeNotifier {
   bool enrolling = false;
   List<DeviceModuleState> modules = const [];
   String error = '';
+  String _label = '';
+  String _version = '';
 
   String? _userId;
   NativeApi? _api;
@@ -54,6 +58,10 @@ class DeviceHostController extends ChangeNotifier {
   /// merely signed in to must not be able to pair this Mac by itself.
   static bool hostsFor(String origin) => origin == hostedOrigin;
 
+  /// The enrollment's idempotency key: kept until it is answered, so a retry
+  /// whose first answer was lost names the same machine instead of a second.
+  String? _machineId;
+
   Future<void> configure(String userId, NativeApi api) async {
     if (!supported || !hostsFor(api.origin)) return;
     _generation++;
@@ -61,6 +69,7 @@ class DeviceHostController extends ChangeNotifier {
     _api = api;
     _origin = api.origin;
     _attempted = false;
+    _machineId = null;
     _reset();
     channel.setMethodCallHandler((call) async {
       if (call.method == 'status') _adopt(call.arguments);
@@ -91,6 +100,8 @@ class DeviceHostController extends ChangeNotifier {
     connected = value['connected'] == true;
     declined = value['declined'] == true;
     error = value['error'] as String? ?? '';
+    _label = value['label'] as String? ?? '';
+    _version = value['version'] as String? ?? '';
     modules = [
       for (final entry in (value['modules'] as List?) ?? const [])
         if (entry is Map)
@@ -127,7 +138,8 @@ class DeviceHostController extends ChangeNotifier {
     }
   }
 
-  /// Pair this Mac through the signed-in session.
+  /// Enroll this Mac with the signed-in session and hand its token to the
+  /// host. No pairing code: the session is the proof of whose Mac it is.
   Future<void> enrol() async {
     final api = _api;
     if (!supported || api == null || enrolling) return;
@@ -136,22 +148,43 @@ class DeviceHostController extends ChangeNotifier {
     error = '';
     notifyListeners();
     try {
-      final offer = await api.request(
-        '/api/machines/pair',
-        body: <String, Object?>{},
+      final machineId = _machineId ??= _newMachineId();
+      final receipt = await api.request(
+        '/api/machines/enroll',
+        body: <String, Object?>{
+          'schemaVersion': 1,
+          'machineId': machineId,
+          'label': _label.isEmpty ? 'Mac' : _label,
+          'platform': 'macos',
+          'agentVersion': _version.isEmpty ? '0.0.0' : _version,
+          // The host runs device modules and offers no command capability.
+          'capabilities': const <String>[],
+        },
       );
       if (generation != _generation) return;
-      final code = (offer as Map)['code'];
-      if (code is! String || code.isEmpty) {
-        throw const FormatException('Missing pairing code');
+      if (receipt is! Map ||
+          receipt['machineId'] != machineId ||
+          receipt['token'] is! String) {
+        throw const FormatException('Malformed enrollment receipt');
       }
-      await _command('pair', {'code': code});
-    } catch (_) {
+      _machineId = null;
+      await _command('adopt', {'receipt': receipt});
+    } catch (failure) {
       if (generation != _generation) return;
+      // Refused is answered: a revoked machine is never enrolled again.
+      if (failure is RequestFailure && failure.refused) _machineId = null;
       error = 'Couldn’t pair this Mac. Check your connection and try again.';
       enrolling = false;
       notifyListeners();
     }
+  }
+
+  static String _newMachineId() {
+    final random = Random.secure();
+    return [
+      for (var i = 0; i < 16; i++)
+        random.nextInt(256).toRadixString(16).padLeft(2, '0'),
+    ].join();
   }
 
   Future<void> forget() => _command('forget');

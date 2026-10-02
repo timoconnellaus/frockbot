@@ -1,17 +1,16 @@
-// The registered-machine gateway Contribution: ten routes, on two doors.
+// The registered-machine gateway Contribution: eleven routes, on two doors.
 //
 // Three are ordinary authenticated routes beside `/api/settings` — the
-// signed-in desktop app asks for a pairing code to hand its own agent, and the
-// app reads the registry and revokes a machine:
+// signed-in desktop app enrolls its own agent and hands it the token locally,
+// and the app reads the registry and revokes a machine:
 //
-//   POST /api/machines/pair          mint a one-time, five-minute code
+//   POST /api/machines/enroll        register a machine; answer its token
 //   GET  /api/machines               the `ListMachines` projection
 //   POST /api/machines/:id/revoke    kill every token this machine holds
 //
-// Nine are not authenticated at all, because the caller is a program on
-// somebody's laptop and has no session:
+// Eight are not authenticated by a session, because the caller is a program on
+// somebody's laptop and has none:
 //
-//   POST /api/machines/enroll                             bearer: pairing code
 //   GET  /api/machines/:id/socket                         bearer: machine token
 //   POST /api/machines/:id/commands/:commandId/claim      bearer: machine token
 //   POST /api/machines/:id/commands/:commandId/result     bearer: machine token
@@ -21,7 +20,7 @@
 //   POST /api/machines/:id/module-calls/:callId/claim     bearer: machine token
 //   POST /api/machines/:id/module-calls/:callId/result    bearer: machine token
 //
-// Those nine are `publicRoute`s: they run at the seam in
+// Those eight are `publicRoute`s: they run at the seam in
 // `apps/cloudflare/src/gateway.ts` that executes *before* session
 // authentication, exactly where `plugin-routines`' webhook runs. Public means
 // "no session", never "no authority" — and the order of the checks is the
@@ -57,8 +56,6 @@ import {
   decodeMachineModuleEventsV1,
   decodeMachineModuleReportsReceiptV1,
   decodeMachineModuleReportsV1,
-  decodeMachinePairingOfferV1,
-  decodeMachinePairingRequestV1,
   decodeMachineResultReceiptV1,
   machineBearerTokenV1,
   machineTokenDigestV1,
@@ -72,12 +69,10 @@ import {
   type MachineModuleEventsV1,
   type MachineModuleReportsReceiptV1,
   type MachineModuleReportsV1,
-  type MachinePairingOfferV1,
   type MachineResultReceiptV1,
   type MachineTokenClaimsV1,
 } from "@frockbot/core/machine-protocol";
 import { sha256HexBytesV1 } from "@frockbot/core/crypto";
-import { verifyMachinePairingCodeV1 } from "./pairing.js";
 import { machinesDocumentV1 } from "./machines-document.js";
 import { defineGatewayContribution } from "@frockbot/core/contracts/contributions";
 
@@ -97,15 +92,14 @@ export interface MachineGatewayHostV1 {
   /** Whose desktop app the Machines page tells a person to open. */
   brand: { productName: string };
   /**
-   * The HMAC secret every machine token and pairing code is signed with, or
-   * nothing. Absent means the door is closed: enrollment and every machine
-   * route answer 503 rather than admitting an unverified caller.
+   * The HMAC secret every machine token is signed with, or nothing. Absent
+   * means the door is closed: every machine route answers 503 rather than
+   * admitting an unverified caller.
    */
   machineTokenSecret?: string;
-  createMachinePairing(userId: string): Promise<MachinePairingOfferV1>;
   enrollMachine(
     userId: string,
-    input: { machineId: string; enrollment: unknown },
+    enrollment: unknown,
   ): Promise<MachineEnrollmentReceiptV1>;
   /**
    * Hand a verified socket upgrade to the User Durable Object. The answer is
@@ -168,7 +162,6 @@ export interface MachineBackendRouteContribution {
   ): Promise<Response | undefined>;
 }
 
-const PAIR = new RegExp(`^${MACHINE_ROUTE_PREFIX_V1}/pair$`);
 const ENROLL = new RegExp(`^${MACHINE_ROUTE_PREFIX_V1}/enroll$`);
 const LIST = new RegExp(`^${MACHINE_ROUTE_PREFIX_V1}$`);
 const REVOKE = new RegExp(`^${MACHINE_ROUTE_PREFIX_V1}/([^/]+)/revoke$`);
@@ -297,9 +290,9 @@ export function createMachineBackendContribution(
       if (!context.userId) return undefined;
       const userId = context.userId;
       const revoke = REVOKE.exec(url.pathname);
-      const isPair = PAIR.test(url.pathname);
+      const isEnroll = ENROLL.test(url.pathname);
       const isList = LIST.test(url.pathname);
-      if (!revoke && !isPair && !isList) return undefined;
+      if (!revoke && !isEnroll && !isList) return undefined;
       // One parameter, on one route: `as=document` asks the registry read for
       // the same machines in the vocabulary the host renders every view in.
       const asDocument =
@@ -310,14 +303,16 @@ export function createMachineBackendContribution(
         return jsonError(400, "machine routes take no query parameters");
       }
       try {
-        if (isPair) {
+        if (isEnroll) {
           if (request.method !== "POST") {
             return jsonError(405, "method not allowed");
           }
-          decodeMachinePairingRequestV1(await readJsonBody(request));
+          // The session enrolls on its agent's behalf: the token goes back
+          // to the app, which hands it to the agent on this machine, and the
+          // agent never holds the session.
           return Response.json(
-            decodeMachinePairingOfferV1(
-              await host.createMachinePairing(userId),
+            decodeMachineEnrollmentReceiptV1(
+              await host.enrollMachine(userId, await readJsonBody(request)),
             ),
           );
         }
@@ -348,7 +343,6 @@ export function createMachineBackendContribution(
   };
 
   contribution.publicRoute = async (request, url) => {
-    const enroll = ENROLL.test(url.pathname);
     const socket = SOCKET.exec(url.pathname);
     const claim = CLAIM.exec(url.pathname);
     const result = RESULT.exec(url.pathname);
@@ -357,7 +351,6 @@ export function createMachineBackendContribution(
     const moduleCall = MODULE_CALL.exec(url.pathname);
     const moduleEvents = MODULE_EVENTS.exec(url.pathname);
     if (
-      !enroll &&
       !socket &&
       !claim &&
       !result &&
@@ -370,29 +363,6 @@ export function createMachineBackendContribution(
     }
     try {
       const secret = secretOrRefuse();
-      if (enroll) {
-        if (request.method !== "POST") {
-          return jsonError(405, "method not allowed");
-        }
-        // The pairing code is both the bearer and a field of the body: the
-        // header is what the edge verifies, and the body is what the authority
-        // hashes against the offer it stored. They must be the same code.
-        const code = bearer(request);
-        const claims = await verifyMachinePairingCodeV1(secret, code);
-        const body = await readJsonBody(request);
-        const presented = (body as { code?: unknown }).code;
-        if (presented !== code) {
-          throw new MachineTokenError(401, "machine pairing code is invalid");
-        }
-        return Response.json(
-          decodeMachineEnrollmentReceiptV1(
-            await host.enrollMachine(claims.userId, {
-              machineId: claims.machineId,
-              enrollment: body,
-            }),
-          ),
-        );
-      }
       if (socket) {
         if (request.method !== "GET") {
           return jsonError(405, "method not allowed");

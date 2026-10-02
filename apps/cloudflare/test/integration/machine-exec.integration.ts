@@ -17,7 +17,10 @@
 //      command itself absent and a digest in its place.
 import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { machineRoutePathV1 } from "@frockbot/core/machine-protocol";
+import {
+  decodeMachineEnrollmentReceiptV1,
+  machineRoutePathV1,
+} from "@frockbot/core/machine-protocol";
 import { MachineAgentDriverV1 } from "@frockbot/app/machine/testing";
 import { fetchUpgradeMachineWebSocketV1 } from "@frockbot/app/machine/device";
 import type { AuditEntryV1 } from "@frockbot/app/audit";
@@ -96,11 +99,7 @@ describe("running a command on a registered machine", () => {
     const botId = "machine-exec-bot";
     await provisionThroughGateway({ userId, botId });
 
-    // The signed-in app asks for a one-time code, and the agent on the Mac
-    // enrols with it.
-    const offer = (await expectOkJson(
-      await postAsUser(userId, machineRoutePathV1("pair"), {}),
-    )) as { code: string; machineId: string };
+    // The signed-in app enrolls the agent on the Mac and hands it the token.
     const device = new MachineAgentDriverV1({
       origin: ORIGIN,
       fetch: (input, init) => SELF.fetch(input, init),
@@ -122,7 +121,16 @@ describe("running a command on a registered machine", () => {
         },
       }),
     });
-    await device.enroll(offer.code);
+    const enrolled = decodeMachineEnrollmentReceiptV1(
+      await expectOkJson(
+        await postAsUser(
+          userId,
+          machineRoutePathV1("enroll"),
+          device.enrollment(),
+        ),
+      ),
+    );
+    device.adopt(enrolled);
     // The agent connects; a machine with no socket is not asked about.
     expect(await device.next()).toEqual([]);
 
@@ -132,7 +140,7 @@ describe("running a command on a registered machine", () => {
       botId,
       "machine-exec-ask",
       frockbotToolCallPrompt("machine_exec", {
-        machineId: offer.machineId,
+        machineId: enrolled.machineId,
         command: COMMAND,
       }),
     );
@@ -193,7 +201,7 @@ describe("running a command on a registered machine", () => {
       texts.some(
         (text) =>
           text.includes(`Command "${approvalId}"`) &&
-          text.includes(`machine ${offer.machineId}`) &&
+          text.includes(`machine ${enrolled.machineId}`) &&
           text.includes("finished ok"),
       ),
     ).toBe(true);
@@ -210,14 +218,14 @@ describe("running a command on a registered machine", () => {
     //    a redacted preview; the argument list itself is never stored, which
     //    is the landed rule for `computer_exec` and is unchanged here.
     const audited = (await expectOkJson(
-      await asUser(userId, `/api/audit?target=machine:${offer.machineId}`),
+      await asUser(userId, `/api/audit?target=machine:${enrolled.machineId}`),
     )) as AuditPage;
     expect(audited.total).toBe(1);
     const row = audited.entries[0]!;
     expect(row).toMatchObject({
       kind: "shell",
       toolName: "machine_exec",
-      target: `machine:${offer.machineId}`,
+      target: `machine:${enrolled.machineId}`,
     });
     expect(row.argumentDigest).toMatch(/^[0-9a-f]{64}$/);
     expect(Object.hasOwn(row, "arguments")).toBe(false);
@@ -229,9 +237,6 @@ describe("running a command on a registered machine", () => {
     const botId = "machine-deny-bot";
     await provisionThroughGateway({ userId, botId });
 
-    const offer = (await expectOkJson(
-      await postAsUser(userId, machineRoutePathV1("pair"), {}),
-    )) as { code: string; machineId: string };
     const device = new MachineAgentDriverV1({
       origin: ORIGIN,
       fetch: (input, init) => SELF.fetch(input, init),
@@ -243,7 +248,16 @@ describe("running a command on a registered machine", () => {
       agentVersion: "0.4.1",
       capabilities: ["exec", "files"],
     });
-    await device.enroll(offer.code);
+    const enrolled = decodeMachineEnrollmentReceiptV1(
+      await expectOkJson(
+        await postAsUser(
+          userId,
+          machineRoutePathV1("enroll"),
+          device.enrollment(),
+        ),
+      ),
+    );
+    device.adopt(enrolled);
     expect(await device.next()).toEqual([]);
 
     const asked = await turn(
@@ -251,7 +265,7 @@ describe("running a command on a registered machine", () => {
       botId,
       "machine-deny-ask",
       frockbotToolCallPrompt("machine_exec", {
-        machineId: offer.machineId,
+        machineId: enrolled.machineId,
         command: "rm -rf /",
       }),
     );
