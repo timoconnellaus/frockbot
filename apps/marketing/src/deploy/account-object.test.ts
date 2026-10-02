@@ -71,7 +71,15 @@ afterEach(() => {
 function world() {
   const cf = new FakeCloudflareV1();
   const revoked: string[] = [];
-  const fetcher = async (input: RequestInfo | URL, init?: RequestInit) => {
+  // Like workerd's global fetch, refuses to be called as another object's method.
+  const fetcher = async function (
+    this: unknown,
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ) {
+    if (this !== undefined && this !== globalThis) {
+      throw new TypeError("Illegal invocation");
+    }
     const url = String(input instanceof Request ? input.url : input);
     if (url === CLOUDFLARE_REVOKE_URL_V1) {
       revoked.push(new URLSearchParams(String(init?.body)).get("token")!);

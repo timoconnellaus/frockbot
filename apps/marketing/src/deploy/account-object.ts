@@ -492,7 +492,7 @@ export class DeployAccount extends DurableObject<DeployEnvV1> {
           token,
           manifest,
           bundles: this.env.DEPLOY_BUNDLES,
-          fetcher: fetch,
+          fetcher: fetch.bind(globalThis),
           now: () => new Date(),
         },
         install,
