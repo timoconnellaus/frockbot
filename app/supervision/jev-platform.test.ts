@@ -165,9 +165,12 @@ describe("Turn supervision's Jev", () => {
       async run() {
         runs += 1;
         return {
-          model: "jev-1.13.0",
-          answers: { pick: { type: "choice", choice: "a" } },
-          usage: { input_tokens: 100, output_tokens: 0 },
+          state: "Completed",
+          result: {
+            model: "jev-1.13.0",
+            answers: { pick: { type: "choice", choice: "a" } },
+            usage: { input_tokens: 100, output_tokens: 0 },
+          },
         };
       },
     };
