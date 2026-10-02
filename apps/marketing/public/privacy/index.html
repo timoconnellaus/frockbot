@@ -44,7 +44,7 @@
               needed, and the choices available to you.
             </p>
             <p class="effective-date">
-              <strong>Effective:</strong> 28 August 2026
+              <strong>Effective:</strong> 2 October 2026
             </p>
           </div>
           <img
@@ -183,6 +183,32 @@
               These hosted stores are separate from data held by an optional
               desktop integration. Using the website alone does not give
               FrockBot access to arbitrary files on your computer.
+            </p>
+          </section>
+
+          <section id="deploy">
+            <h2>4a. Deploying FrockBot to your own Cloudflare account</h2>
+            <p>
+              If you use frockbot.com/deploy, you sign in with Cloudflare and
+              choose to install FrockBot in your own Cloudflare account. With
+              your permission, the page uses Cloudflare’s API to check that the
+              account can run FrockBot (briefly creating, then deleting, a test
+              Worker named frockbot-plan-check) and to create the install: its
+              Workers and container, R2 buckets, a search index, a workers.dev
+              address, a Zero Trust team if you don’t have one, and Cloudflare
+              Access applications that let only your email sign in. Your bots
+              and their data then live in your account, not ours.
+            </p>
+            <p>
+              Your Cloudflare sign-in token is kept on our servers, never in
+              your browser, only while you are signed in to the page (at most
+              twelve hours) or while a deploy you started is running. After that
+              it is deleted and revoked. To show your installs and update them
+              later, we keep a short record of each one: its name, the
+              Cloudflare account’s ID and name, its workers.dev address, your
+              email, the release it runs, its Access team and audience, and when
+              it was created and updated. We keep no secret from your install.
+              Ask us to remove those records at any time.
             </p>
           </section>
 
