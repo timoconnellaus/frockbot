@@ -49,7 +49,7 @@ import {
   type WorkspaceFilesV1,
   type WorkspaceRootV1,
 } from "@frockbot/core/contracts";
-import { shellQuote } from "./fly/shell.js";
+import { shellQuote } from "./linux-runtime/shell.js";
 import {
   BROWSER_TASK_DEFAULT_STEPS_V1,
   BROWSER_TASK_MAX_STEPS_V1,

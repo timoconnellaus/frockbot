@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { shellQuote } from "./shell.ts";
 
-describe("Fly shell quoting", () => {
+describe("shell quoting", () => {
   test("quotes empty, whitespace, and shell metacharacters as one word", () => {
     expect(shellQuote("")).toBe("''");
     expect(shellQuote("a path; rm -rf /\n")).toBe("'a path; rm -rf /\n'");

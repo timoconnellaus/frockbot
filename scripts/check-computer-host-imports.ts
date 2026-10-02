@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 
 // ADR 0004's "the SDK is loaded in exactly one place" rule, enforced
 // mechanically. `@fly/sprites` speaks a HTTP exec protocol that depends on
@@ -7,7 +7,7 @@ import { dirname, resolve } from "node:path";
 // the Node container app; every other package reaches the Computer through the
 // `COMPUTER_HOST` service binding and `computer/host-protocol`.
 //
-// Four rules, in the order they were added:
+// Five rules, in the order they were added:
 //
 // 1. No source file outside the host imports `@fly/sprites`, and no manifest
 //    outside the host declares it as a dependency (a manifest entry is how the
@@ -18,13 +18,16 @@ import { dirname, resolve } from "node:path";
 //    rigs that prove the implementation may. Everything else reaches the
 //    Computer through `@frockbot/computer/core/host` and the tools above it.
 // 3. No source outside the implementation and the host app may *name* a Fly
-//    Sprite or its desktop stack, in code or in prose. An import gate stops
-//    the dependency; this stops the vocabulary, which is what teaches the next
+//    Sprite, in code or in prose, and none outside those and the Linux runtime
+//    may name the desktop stack a Computer runs. An import gate stops the
+//    dependency; this stops the vocabulary, which is what teaches the next
 //    reader that Fly is the model. `SPRITES_TOKEN` is the one exception: it is
 //    the production secret name and renaming it would rotate a live
 //    deployment's credential for a word.
 // 4. `computer/fake/**` imports `computer/core` only. A second host that
 //    reached into the first would be that host's double, not a substitution.
+// 5. `computer/linux-runtime/**` is what every host runs, so Fly imports it and
+//    it imports only itself, the egress route table and Node.
 
 const repoRoot = resolve(import.meta.dirname, "..");
 const forbiddenPackage = "@fly/sprites";
@@ -130,14 +133,15 @@ for (const path of scan(
   }
 }
 
-// Rule 3: the vocabulary. A Sprite, its desktop stack and its viewer origin
-// are Fly's, and naming one outside the implementation — in an identifier, a
-// string, or a comment — is how the next reader learns that Fly is the model.
-// `SPRITES_TOKEN` is admitted exactly: it is the production secret name, and
-// renaming it would rotate a live deployment's credential for a word.
-const flyVocabulary =
-  /sprite|sprites\.app|novnc|x11vnc|xvfb|fluxbox|websockify/i;
+// Rule 3: the vocabulary. A Sprite and its viewer origin are Fly's, and the
+// desktop stack is the Linux runtime's; naming one outside its owners — in an
+// identifier, a string, or a comment — is how the next reader learns that one
+// host is the model. `SPRITES_TOKEN` is admitted exactly: it is the production
+// secret name, and renaming it would rotate a live deployment's credential for
+// a word.
+const flyVocabulary = /sprite|novnc|x11vnc|xvfb|fluxbox|websockify/i;
 const SECRET_NAME = "SPRITES_TOKEN";
+const linuxRuntimeRoot = "computer/linux-runtime/";
 const vocabularyOwners = [
   "computer/fly/",
   "apps/computer-host/",
@@ -149,6 +153,9 @@ const vocabularyOwners = [
   // be spelled the same.
   "apps/marketing/",
 ];
+
+// The Linux runtime's own words may name the desktop stack but never its host.
+const linuxRuntimeVocabulary = /sprite|fly/i;
 
 function ownsVocabulary(path: string): boolean {
   return vocabularyOwners.some((allowed) =>
@@ -162,19 +169,49 @@ for (const path of scan(
 )) {
   if (ownsVocabulary(path)) continue;
   vocabularyChecked += 1;
+  // The Linux runtime owns the desktop stack, and must not name Fly at all.
+  const inLinuxRuntime = path.startsWith(linuxRuntimeRoot);
+  const vocabulary = inLinuxRuntime ? linuxRuntimeVocabulary : flyVocabulary;
   const source = readFileSync(resolve(repoRoot, path), "utf8");
-  if (!flyVocabulary.test(source)) continue;
+  if (!vocabulary.test(source)) continue;
   source.split("\n").forEach((line, index) => {
     // The secret name is the one admitted occurrence, so it is removed before
     // the line is judged rather than exempting the whole line.
     const remainder = line.replaceAll(SECRET_NAME, "");
-    if (!flyVocabulary.test(remainder)) return;
+    if (!vocabulary.test(remainder)) return;
+    const word = vocabulary.exec(remainder)?.[0] ?? "";
     failures.push(
-      `${path}:${index + 1}: names a Fly Sprite or its desktop stack ("${
-        flyVocabulary.exec(remainder)?.[0] ?? ""
-      }"); that vocabulary lives only in computer/fly/** and apps/computer-host/** — say "Computer" or "host" instead (${SECRET_NAME} is the one exception)`,
+      inLinuxRuntime
+        ? `${path}:${index + 1}: names Fly ("${word}"); ${linuxRuntimeRoot}** is what every host runs, so a host's own part belongs in that host's directory and reaches the runtime through LinuxRuntimeHostV1`
+        : `${path}:${index + 1}: names a Fly Sprite or the Computer's desktop stack ("${word}"); that vocabulary lives only in computer/fly/**, apps/computer-host/** and, for the desktop stack, ${linuxRuntimeRoot}** — say "Computer" or "host" instead (${SECRET_NAME} is the one exception)`,
     );
   });
+}
+
+// Rule 5: the Linux runtime imports itself and the egress route table, and
+// nothing else of the repository — the files a host's container copies beside
+// it. That rules out a host as surely as it rules out a module the container
+// lacks. Only a relative path or a scoped package is judged: the rendered
+// scripts carry their own `import`s (`node:`, `playwright-core`), which run on
+// the machine, not here.
+const linuxRuntimeAdmits = (target: string) =>
+  target.startsWith(linuxRuntimeRoot) ||
+  target === "computer/egress.js" ||
+  target === "computer/egress.ts";
+
+for (const path of scan(`${linuxRuntimeRoot}**/*.{ts,tsx,mts,cts}`)) {
+  if (path.endsWith(".test.ts")) continue;
+  const source = readFileSync(resolve(repoRoot, path), "utf8");
+  for (const { specifier, line } of specifiersOf(source)) {
+    if (!specifier.startsWith(".") && !specifier.startsWith("@")) continue;
+    const target = specifier.startsWith(".")
+      ? relative(repoRoot, resolve(repoRoot, dirname(path), specifier))
+      : specifier;
+    if (linuxRuntimeAdmits(target)) continue;
+    failures.push(
+      `${path}:${line}: imports "${specifier}"; ${linuxRuntimeRoot}** imports only itself and computer/egress.ts — it is what every host's container runs, and Fly imports it, never the other way round`,
+    );
+  }
 }
 
 // Rule 4: the in-memory host depends on the interface and on nothing else in

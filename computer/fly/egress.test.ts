@@ -16,8 +16,8 @@ import {
   EGRESS_ROOT,
   EGRESS_RUNTIME_ROOT,
   egressProxySource,
-  flyEgressShellPreludeV1,
-} from "./egress.js";
+  egressShellPreludeV1,
+} from "../linux-runtime/egress.js";
 import {
   COMPUTER_RUNTIME_FILES,
   PROVISION_PHASES,
@@ -38,7 +38,7 @@ describe("the Sprite's connected-account proxy", () => {
   });
 
   test("a command with no connected account signs in for Jev alone and sets no GitHub placeholder", () => {
-    const prelude = flyEgressShellPreludeV1("payload.signature", {
+    const prelude = egressShellPreludeV1("payload.signature", {
       accounts: false,
     });
     expect(prelude).toContain("http://frockbot-jev:payload.signature@");
@@ -46,7 +46,7 @@ describe("the Sprite's connected-account proxy", () => {
   });
 
   test("a command's prelude points every client at the proxy only when it is up", () => {
-    const prelude = flyEgressShellPreludeV1("payload.signature");
+    const prelude = egressShellPreludeV1("payload.signature");
     expect(prelude.split("\n")[0]).toBe(
       `if '${EGRESS_ENSURE_SCRIPT}' >/dev/null 2>&1; then`,
     );

@@ -64,7 +64,7 @@ import {
   DEMONSTRATION_NONE_MARKER,
   DEMONSTRATION_NOT_HOLDER_MARKER,
   DEMONSTRATION_STARTED_MARKER,
-} from "./demonstration.js";
+} from "../linux-runtime/demonstration.js";
 import type {
   ComputerHostCallOptions,
   ComputerHostExecCommandV1,

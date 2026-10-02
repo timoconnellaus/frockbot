@@ -23,17 +23,18 @@ The SDK puts a command's argv **and** its environment into the request URL, and 
 
 ## Layout
 
-| Path                                                                   | What it is                                                                                                                                         |
-| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/router.ts`                                                        | Token check, decode, shard, forward. Decoding here means a malformed body never starts a container.                                                |
-| `src/index.ts`                                                         | The Container Durable Object and the Worker entrypoint.                                                                                            |
-| `container/computer.ts`                                                | The whole protocol over one Sprites client: open, exec, files, control, viewer, services, cancel, teardown, checkpoints, replacement, sign-ins.    |
-| `container/server.ts`                                                  | Node HTTP glue. Owns cancellation: `req.on("close")` aborts the effect.                                                                            |
-| `container/fake-sprites.ts`                                            | The fake `SpritesClient` the tests drive, including chunk-split output.                                                                            |
-| [`@frockbot/computer/host-protocol`](../../computer/host-protocol)     | The v1 DTOs and decoders both sides import.                                                                                                        |
-| [`@frockbot/computer/fly/runtime`](../../computer/fly/runtime.ts)      | The Computer's on-Sprite layout and shell scripts, shared with the rest of `computer/fly`.                                                         |
-| [`computer/fly/demonstration.ts`](../../computer/fly/demonstration.ts) | The demonstration recorder `runtime.ts` installs; the Dockerfile copies and strips it beside `shell.ts`.                                           |
-| [`computer/fly/egress.ts`](../../computer/fly/egress.ts)               | The connected-account proxy `runtime.ts` installs, with the route table it reads from `computer/egress.ts`; the Dockerfile copies and strips both. |
+| Path                                                                                       | What it is                                                                                                                                        |
+| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/router.ts`                                                                            | Token check, decode, shard, forward. Decoding here means a malformed body never starts a container.                                               |
+| `src/index.ts`                                                                             | The Container Durable Object and the Worker entrypoint.                                                                                           |
+| `container/computer.ts`                                                                    | The whole protocol over one Sprites client: open, exec, files, control, viewer, services, cancel, teardown, checkpoints, replacement, sign-ins.   |
+| `container/server.ts`                                                                      | Node HTTP glue. Owns cancellation: `req.on("close")` aborts the effect.                                                                           |
+| `container/fake-sprites.ts`                                                                | The fake `SpritesClient` the tests drive, including chunk-split output.                                                                           |
+| [`@frockbot/computer/host-protocol`](../../computer/host-protocol)                         | The v1 DTOs and decoders both sides import.                                                                                                       |
+| [`@frockbot/computer/fly/runtime`](../../computer/fly/runtime.ts)                          | The Computer's runtime bound to a Sprite: the Linux runtime below with the Sprite's hold, checks and name.                                        |
+| [`computer/linux-runtime/runtime.ts`](../../computer/linux-runtime/runtime.ts)             | The host-neutral layout and shell scripts that make a Linux machine a Computer; the Dockerfile copies and strips it.                              |
+| [`computer/linux-runtime/demonstration.ts`](../../computer/linux-runtime/demonstration.ts) | The demonstration recorder the runtime installs; the Dockerfile copies and strips it beside `shell.ts`.                                           |
+| [`computer/linux-runtime/egress.ts`](../../computer/linux-runtime/egress.ts)               | The connected-account proxy the runtime installs, with the route table it reads from `computer/egress.ts`; the Dockerfile copies and strips both. |
 
 ## Checks
 

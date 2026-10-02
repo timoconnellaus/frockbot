@@ -114,7 +114,7 @@ import {
   workspaceChunkOffsetsV1,
   workspaceStagingNameV1,
 } from "./workspace.js";
-import { shellQuote } from "./shell.js";
+import { shellQuote } from "../linux-runtime/shell.js";
 import { stageFlyWorkspaceBytesV1 } from "./staging.js";
 
 /** Where the sync keeps notes that are not scoped to one root. */

@@ -20,7 +20,7 @@ import {
   DEMONSTRATION_MARKER,
   demonstrationPageScriptV1,
   demonstrationRecorderV1,
-} from "./demonstration.ts";
+} from "../linux-runtime/demonstration.ts";
 import { decodeFlyDemonstrationV1 } from "./computer.ts";
 import {
   BOTS_ROOT,
