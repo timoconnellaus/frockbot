@@ -17,13 +17,14 @@ export const CLOUDFLARE_REVOKE_URL_V1 =
   "https://dash.cloudflare.com/oauth2/revoke";
 
 /**
- * What a deploy needs, and no more. The same list is the client's registered
- * scopes: a scope asked for here that the registration lacks fails the whole
- * consent. There is no billing scope because Cloudflare cannot grant one to a
- * third party; the Workers plan is read by trying what only Paid allows.
+ * What a deploy needs, and no more. A scope asked for here that the client's
+ * registration lacks fails the whole consent. There is no billing scope
+ * because Cloudflare cannot grant one to a third party; the Workers plan is
+ * read by trying what only Paid allows. There is no `offline_access` either:
+ * without a refresh token, nothing here can reach the account once the access
+ * token lapses, which is what lets the start page promise we keep no access.
  */
 export const DEPLOY_SCOPES_V1 = [
-  "offline_access",
   "user-details.read",
   "account-settings.read",
   "workers-scripts.write",
@@ -48,7 +49,6 @@ export interface OAuthClientV1 {
 
 export interface OAuthTokensV1 {
   readonly accessToken: string;
-  readonly refreshToken?: string;
   /** Epoch milliseconds. */
   readonly expiresAt: number;
   readonly scope?: string;
@@ -132,9 +132,6 @@ async function tokenRequest(
     typeof payload.expires_in === "number" ? payload.expires_in : 3600;
   return {
     accessToken: payload.access_token,
-    ...(typeof payload.refresh_token === "string"
-      ? { refreshToken: payload.refresh_token }
-      : {}),
     // A minute early, so a call is never made with a token about to lapse.
     expiresAt: now + Math.max(60, expiresIn - 60) * 1000,
     ...(typeof payload.scope === "string" ? { scope: payload.scope } : {}),
@@ -159,29 +156,6 @@ export function exchangeCodeV1(
     fetcher,
     now,
   );
-}
-
-/**
- * A fresh access token. Cloudflare rotates the refresh token on use, so the
- * answer's replaces the one given, and an old one is never redeemed twice.
- */
-export async function refreshTokensV1(
-  client: OAuthClientV1,
-  tokens: OAuthTokensV1,
-  fetcher: typeof fetch = fetch,
-  now = Date.now(),
-): Promise<OAuthTokensV1> {
-  if (!tokens.refreshToken)
-    throw new Error("Your Cloudflare sign-in has expired");
-  const fresh = await tokenRequest(
-    client,
-    { grant_type: "refresh_token", refresh_token: tokens.refreshToken },
-    fetcher,
-    now,
-  );
-  return fresh.refreshToken
-    ? fresh
-    : { ...fresh, refreshToken: tokens.refreshToken };
 }
 
 /** Best effort: the token lapses by itself if Cloudflare doesn't answer. */

@@ -418,13 +418,15 @@ describe("pages and routes", () => {
     expect(await response.text()).toContain("Use the repository");
   });
 
-  test("the start page signs in with Cloudflare", async () => {
+  test("the start page explains the sign-in before it signs in with Cloudflare", async () => {
     const response = await handleDeployRequestV1(
       new Request("https://frockbot.com/deploy"),
       env(true),
     );
     const body = await response.text();
     expect(body).toContain('href="/deploy/sign-in"');
+    expect(body).toContain("When you sign in");
+    expect(body).toContain("We don’t keep access.");
     expect(body).not.toContain("<script>");
   });
 
@@ -441,9 +443,10 @@ describe("pages and routes", () => {
     expect(location.searchParams.get("redirect_uri")).toBe(
       "https://frockbot.com/deploy/callback",
     );
-    expect(location.searchParams.get("scope")).toContain(
-      "workers-scripts.write",
-    );
+    const scopes = location.searchParams.get("scope")!.split(" ");
+    expect(scopes).toContain("workers-scripts.write");
+    // No refresh token: access ends when the access token does.
+    expect(scopes).not.toContain("offline_access");
     expect(response.headers.get("set-cookie")).toContain("HttpOnly");
   });
 

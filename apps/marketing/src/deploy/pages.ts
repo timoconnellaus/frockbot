@@ -240,9 +240,32 @@ export function startPageV1(problem?: string): Response {
             <li>
               Jev and Workers AI from your account, with nothing to set up.
             </li>
-            <li>Updates when you choose, one click from this page.</li>
+            <li>Updates when you choose, from this page.</li>
             <li>The FrockBot apps, pointed at your install.</li>
           </ul>
+        </div>
+        <div class="deploy-box">
+          <h2 class="deploy-h3">When you sign in</h2>
+          <ol class="deploy-list">
+            <li>
+              <strong>You approve access on Cloudflare.</strong>
+              Cloudflare lists what FrockBot may change in the account you
+              choose: Workers, storage, Workers AI and Zero Trust sign-in.
+            </li>
+            <li>
+              <strong>We set up FrockBot for you.</strong>
+              Its Workers, storage and search index, with Zero Trust in front so
+              only you can open it. It’s the same open-source release the
+              repository installs. Workers AI use bills to your Cloudflare
+              account.
+            </li>
+            <li>
+              <strong>We don’t keep access.</strong>
+              It ends when the deploy finishes or you sign out. We never ask
+              Cloudflare for a way to renew it, so an update asks you to sign in
+              again.
+            </li>
+          </ol>
         </div>
         <img
           class="deploy-character"
@@ -646,8 +669,9 @@ export function installsPageV1(
                   ${
                     behind
                       ? html`<p class="deploy-small deploy-muted">
-                          Updating keeps your bots, memory and conversations; it
-                          takes about a minute.
+                          Updating starts with a new Cloudflare sign-in, keeps
+                          your bots, memory and conversations, and takes about a
+                          minute.
                         </p>`
                       : ""
                   }

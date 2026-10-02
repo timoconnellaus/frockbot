@@ -15,8 +15,9 @@ The code is `apps/marketing/src/deploy/`, served by the marketing Worker under
 
 ## The flow
 
-1. **Start.** "Sign in with Cloudflare" runs the Authorization Code flow with
-   PKCE against `dash.cloudflare.com/oauth2`. Cloudflare's consent screen is
+1. **Start.** The page says what the sign-in grants, what gets created, and
+   that no access is kept. "Sign in with Cloudflare" runs the Authorization
+   Code flow with PKCE against `dash.cloudflare.com/oauth2`. Cloudflare's consent screen is
    where someone with several accounts picks one. A grant that reaches
    several accounts is sent back to sign in again with one.
 2. **Choose.** The page shows the account, the install name and its
@@ -73,7 +74,8 @@ The code is `apps/marketing/src/deploy/`, served by the marketing Worker under
 4. **Ready.** The address, Open FrockBot, and how to add the install in the
    apps.
 5. **Your installs.** Every install deployed from here, the release it runs,
-   and Update when a newer release has a bundle. An update runs the same
+   and Update when a newer release has a bundle. Update starts with a new
+   sign-in, because the last deploy ended the grant. An update runs the same
    steps over the same record. The bundle's deployer keeps the install's
    names, sends only the Durable Object migrations after the deployed tag,
    refuses an install it would orphan, and keeps every secret already set.
@@ -81,15 +83,18 @@ The code is `apps/marketing/src/deploy/`, served by the marketing Worker under
 ## What is kept, and where
 
 The Cloudflare grant lives only in the person's Durable Object, never in a
-cookie or the page, per "Secrets stay server-side".
+cookie or the page, per "Secrets stay server-side". It is an access token and
+nothing more: the sign-in asks for no `offline_access`, so there is no refresh
+token, and nothing here reaches the account after the access token lapses.
 
 - **Session.** The cookie is `<cloudflare user id>.<secret>`, and only the
-  secret's hash is stored. The grant expires with the session after twelve
-  hours.
-- **Running deploy.** A deploy runs on its session's grant, which outlives the
-  session while the deploy runs and goes when it finishes or fails. There is
-  one grant, not a copy each, because Cloudflare rotates the refresh token on
-  every use, and each copy would invalidate the other.
+  secret's hash is stored. The session lasts twelve hours so the pages can
+  show installs and results. Anything that needs Cloudflare after the grant
+  ends sends the person to sign in again.
+- **Running deploy.** A deploy runs on its session's grant, which outlives
+  signing out while the deploy runs. A finished deploy revokes the grant at
+  once, even with the page still open. A failed one keeps it so "Try again"
+  works, until the person signs out or the token lapses.
 - **Install record.** It holds names and ids so an update redeploys over the
   same ones. It holds no secret: the minted ones are written to the Worker
   and never read back.
@@ -108,8 +113,8 @@ create them:
 
 1. On the frockbot.com account, go to **Manage Account → OAuth clients** (or
    `POST /accounts/{id}/oauth_clients`). Create a client with:
-   - grant types `authorization_code` and `refresh_token`, which is what
-     adds `offline_access` to the registration;
+   - grant type `authorization_code` only. The flow never asks for
+     `offline_access`, so the registration needs no `refresh_token` grant;
    - token endpoint auth `client_secret_basic`;
    - redirect URI `https://frockbot.com/deploy/callback`;
    - the scopes in `DEPLOY_SCOPES_V1` (`oauth.ts`), which are the modern
