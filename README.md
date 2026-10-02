@@ -8,6 +8,17 @@ FrockBot runs persistent conversational Bots. A Bot holds a conversation, calls 
 
 ## Run your own
 
+asdfads
+asdf
+sadf
+asdfsa
+dfas
+dfsa
+dfsad
+dsa
+dfs
+
+
 The **simple deployment profile** is FrockBot in your own Cloudflare account: Cloudflare Access sign-in, no billing, the Computer included, and nothing to customise ([ADR 0028](docs/adr/0028-open-deployment.md)). It is the same code `frockbot.com` runs — see [The hosted deployment](#the-hosted-deployment) for what the other profile adds.
 
 Every release publishes the simple profile as a prebuilt **deploy bundle**: the three Workers, the web client, the application artifact and a manifest, installed through the Cloudflare REST API with no wrangler build, no Docker and no Flutter on your machine ([`docs/deploy-bundles.md`](docs/deploy-bundles.md)).
