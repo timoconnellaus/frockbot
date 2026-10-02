@@ -42,7 +42,9 @@ export interface Env {
 const SECURITY_HEADERS = {
   "cross-origin-opener-policy": "same-origin",
   "permissions-policy": "camera=(), microphone=(), geolocation=()",
-  "referrer-policy": "no-referrer",
+  // Not `no-referrer`: under it a browser sends `Origin: null` with this
+  // page's own form posts, and the same-site check below refuses every save.
+  "referrer-policy": "same-origin",
   "strict-transport-security": "max-age=31536000; includeSubDomains",
   "x-content-type-options": "nosniff",
   "x-frame-options": "DENY",
