@@ -597,7 +597,7 @@ describe("legal policy pages", () => {
     const normalizedPrivacy = privacy.replace(/\s+/g, " ");
 
     for (const content of [
-      "28 August 2026",
+      "2 October 2026",
       "Tim O'Connell",
       "privacy@frockbot.com",
       "Google sign-in",
@@ -611,6 +611,7 @@ describe("legal policy pages", () => {
       "persistent memory files",
       "Fly.io Sprite",
       "Local desktop settings",
+      "frockbot.com/deploy",
     ]) {
       expect(normalizedPrivacy).toContain(content);
     }
