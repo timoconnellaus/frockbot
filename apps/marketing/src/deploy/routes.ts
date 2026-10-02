@@ -140,7 +140,7 @@ async function callback(request: Request, env: DeployEnvV1): Promise<Response> {
         .endSession(previous.secret)
         .catch(() => undefined);
     }
-    return redirect("/deploy/choose", [
+    return redirect(DEPLOY_PATH_V1, [
       clear,
       setCookie(SESSION_COOKIE, `${user.id}.${secret}`, 12 * 60 * 60),
     ]);
@@ -251,6 +251,9 @@ async function handle(request: Request, env: DeployEnvV1): Promise<Response> {
       return new Response("Forbidden", { status: 403 });
     if (!session || !status)
       return redirect(DEPLOY_PATH_V1, [setCookie(SESSION_COOKIE, "", 0)]);
+    // The grant ends with each deploy, so the next one starts with a sign-in.
+    if (path !== "/deploy/sign-out" && !status.signedIn)
+      return redirect("/deploy/sign-in");
     const object = stub(env, session.userId);
     const form = await request.formData();
     switch (path) {
@@ -321,6 +324,7 @@ async function handle(request: Request, env: DeployEnvV1): Promise<Response> {
         status.installs.length > 0 ? "/deploy/installs" : "/deploy/choose",
       );
     case "/deploy/choose":
+      if (!status.signedIn) return redirect("/deploy/sign-in");
       return choose(
         env,
         session,

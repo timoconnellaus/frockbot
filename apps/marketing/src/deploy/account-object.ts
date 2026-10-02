@@ -9,10 +9,11 @@
  * the step it was on, and reopening the page reads the same record.
  *
  * Cloudflare tokens live here and nowhere else — never in a cookie, never in
- * the page. Each sign-in is one grant, which its session and any deploy it
- * started share: Cloudflare rotates the refresh token on every use, so two
- * copies would each invalidate the other. The grant goes when neither needs
- * it — the session ended or lapsed after twelve hours, and no deploy runs on it.
+ * the page. Each sign-in is one grant: an access token with no refresh token,
+ * so it reaches the account only until Cloudflare lets it lapse. A finished
+ * deploy revokes it at once, and so does signing out with no deploy running.
+ * The session outlives it so the page can still show the result, and anything
+ * that needs Cloudflare again asks for a new sign-in.
  */
 import { DurableObject } from "cloudflare:workers";
 import { accountChecksV1 } from "./checks";
@@ -36,19 +37,19 @@ import {
   type AccountCheckV1,
   type DeployStepV1,
 } from "./plan";
-import {
-  randomTokenV1,
-  refreshTokensV1,
-  revokeTokenV1,
-  type OAuthClientV1,
-  type OAuthTokensV1,
-} from "./oauth";
+import { randomTokenV1, revokeTokenV1, type OAuthTokensV1 } from "./oauth";
 import { oauthClientV1, type DeployEnvV1 } from "./env";
 
 export const SESSION_LIFETIME_MS_V1 = 12 * 60 * 60 * 1000;
 /** How long a step that isn't finished yet (a new `workers.dev` name) is waited on. */
 const NOT_YET_LIMIT_MS = 5 * 60 * 1000;
 const TRANSIENT_RETRIES = 4;
+/**
+ * How long a grant has to have left for a deploy to start on it: there's no
+ * refresh, so a deploy (and a `workers.dev` wait) must finish on this token.
+ */
+const DEPLOY_RUNWAY_MS = 10 * 60 * 1000;
+const SIGNED_OUT_PROBLEM = "Your Cloudflare sign-in has ended. Sign in again.";
 
 interface SessionRecordV1 {
   readonly secretHash: string;
@@ -85,6 +86,8 @@ export interface SessionViewV1 {
 
 export interface DeployStatusV1 {
   readonly session: SessionViewV1;
+  /** Whether the session can still reach Cloudflare, or needs a new sign-in. */
+  readonly signedIn: boolean;
   readonly installs: readonly InstallRecordV1[];
   readonly job?: Omit<DeployJobV1, "grantId">;
 }
@@ -107,16 +110,7 @@ function publicJob(job: DeployJobV1): Omit<DeployJobV1, "grantId"> {
 }
 
 export class DeployAccount extends DurableObject<DeployEnvV1> {
-  /** Refreshes in flight, so a page and the deploy never redeem one refresh token twice. */
-  private readonly refreshing = new Map<string, Promise<OAuthTokensV1>>();
   private starting = false;
-
-  private client(): OAuthClientV1 {
-    const client = oauthClientV1(this.env);
-    if (!client)
-      throw new Error("Sign in with Cloudflare isn't configured here");
-    return client;
-  }
 
   private sessionKey(secretHash: string): string {
     return `session:${secretHash}`;
@@ -126,42 +120,40 @@ export class DeployAccount extends DurableObject<DeployEnvV1> {
     return `grant:${grantId}`;
   }
 
-  /** A usable access token for the grant, refreshed once and written back when lapsed. */
-  private async token(grantId: string): Promise<string> {
+  private async liveGrant(
+    grantId: string,
+    runwayMs = 0,
+  ): Promise<OAuthTokensV1 | null> {
     const grant = await this.ctx.storage.get<OAuthTokensV1>(
       this.grantKey(grantId),
     );
-    if (!grant)
-      throw new Error("Your Cloudflare sign-in has ended. Sign in again.");
-    if (grant.expiresAt > Date.now()) return grant.accessToken;
-    let pending = this.refreshing.get(grantId);
-    if (!pending) {
-      pending = (async () => {
-        const tokens = await refreshTokensV1(this.client(), grant);
-        await this.ctx.storage.put(this.grantKey(grantId), tokens);
-        return tokens;
-      })().finally(() => this.refreshing.delete(grantId));
-      this.refreshing.set(grantId, pending);
-    }
-    return (await pending).accessToken;
+    return grant && grant.expiresAt > Date.now() + runwayMs ? grant : null;
   }
 
-  /** Drops the grant once neither a live session nor a running deploy needs it. */
-  private async releaseGrant(grantId: string): Promise<void> {
-    const session = await this.ctx.storage.get<SessionRecordV1>(
-      this.sessionKey(grantId),
-    );
-    if (session && session.expiresAt > Date.now()) return;
+  private async token(grantId: string): Promise<string> {
+    const grant = await this.liveGrant(grantId);
+    if (!grant) throw new Error(SIGNED_OUT_PROBLEM);
+    return grant.accessToken;
+  }
+
+  /**
+   * Drops and revokes the grant once no running deploy needs it, and, unless
+   * `finished`, no live session either: a finished deploy ends Cloudflare
+   * access even while its page is still open.
+   */
+  private async releaseGrant(grantId: string, finished = false): Promise<void> {
+    if (!finished) {
+      const session = await this.ctx.storage.get<SessionRecordV1>(
+        this.sessionKey(grantId),
+      );
+      if (session && session.expiresAt > Date.now()) return;
+    }
     const job = await this.job();
     if (job?.state === "running" && job.grantId === grantId) return;
-    const grant = await this.ctx.storage.get<OAuthTokensV1>(
-      this.grantKey(grantId),
-    );
+    const grant = await this.liveGrant(grantId);
     await this.ctx.storage.delete(this.grantKey(grantId));
     const client = oauthClientV1(this.env);
-    if (client && grant?.refreshToken) {
-      await revokeTokenV1(client, grant.refreshToken);
-    }
+    if (client && grant) await revokeTokenV1(client, grant.accessToken);
   }
 
   private async installs(): Promise<Record<string, InstallRecordV1>> {
@@ -223,6 +215,8 @@ export class DeployAccount extends DurableObject<DeployEnvV1> {
     const job = await this.job();
     return {
       session: { user: record.user, accounts: record.accounts },
+      signedIn:
+        (await this.liveGrant(record.secretHash, DEPLOY_RUNWAY_MS)) !== null,
       installs: Object.values(await this.installs()).sort((a, b) =>
         a.createdAt.localeCompare(b.createdAt),
       ),
@@ -312,11 +306,12 @@ export class DeployAccount extends DurableObject<DeployEnvV1> {
   ): Promise<StartResultV1> {
     const record = await this.session(secret);
     const account = record?.accounts.find((a) => a.id === accountId);
-    if (!record || !account)
-      return {
-        ok: false,
-        problem: "Your Cloudflare sign-in has ended. Sign in again.",
-      };
+    if (
+      !record ||
+      !account ||
+      !(await this.liveGrant(record.secretHash, DEPLOY_RUNWAY_MS))
+    )
+      return { ok: false, problem: SIGNED_OUT_PROBLEM };
     const current = await this.job();
     if (current?.state === "running")
       return { ok: false, problem: "A deploy is already running." };
@@ -379,11 +374,8 @@ export class DeployAccount extends DurableObject<DeployEnvV1> {
     version: string,
   ): Promise<StartResultV1> {
     const record = await this.session(secret);
-    if (!record)
-      return {
-        ok: false,
-        problem: "Your Cloudflare sign-in has ended. Sign in again.",
-      };
+    if (!record || !(await this.liveGrant(record.secretHash, DEPLOY_RUNWAY_MS)))
+      return { ok: false, problem: SIGNED_OUT_PROBLEM };
     const install = (await this.installs())[key];
     if (!install)
       return {
@@ -410,11 +402,8 @@ export class DeployAccount extends DurableObject<DeployEnvV1> {
   private async retryNow(secret: string): Promise<StartResultV1> {
     const record = await this.session(secret);
     const job = await this.job();
-    if (!record)
-      return {
-        ok: false,
-        problem: "Your Cloudflare sign-in has ended. Sign in again.",
-      };
+    if (!record || !(await this.liveGrant(record.secretHash, DEPLOY_RUNWAY_MS)))
+      return { ok: false, problem: SIGNED_OUT_PROBLEM };
     if (!job || job.state !== "failed")
       return { ok: false, problem: "There's nothing to try again." };
     const resumed: DeployJobV1 = {
@@ -497,7 +486,7 @@ export class DeployAccount extends DurableObject<DeployEnvV1> {
           token,
           manifest,
           bundles: this.env.DEPLOY_BUNDLES,
-          fetcher: fetch,
+          fetcher: fetch.bind(globalThis),
           now: () => new Date(),
         },
         install,
@@ -558,7 +547,7 @@ export class DeployAccount extends DurableObject<DeployEnvV1> {
     };
     delete (done as { grantId?: string }).grantId;
     await this.ctx.storage.put("job", done);
-    if (job.grantId) await this.releaseGrant(job.grantId);
+    if (job.grantId) await this.releaseGrant(job.grantId, true);
   }
 
   private async fail(

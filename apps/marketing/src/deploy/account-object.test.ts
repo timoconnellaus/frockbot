@@ -5,7 +5,7 @@ import {
   bufferedDigestSinkV1,
   publishTestBundleV1,
 } from "./fake-cloudflare.test-support";
-import { CLOUDFLARE_REVOKE_URL_V1, CLOUDFLARE_TOKEN_URL_V1 } from "./oauth";
+import { CLOUDFLARE_REVOKE_URL_V1 } from "./oauth";
 
 // The object's base class is the runtime's; a stand-in holding `ctx` and `env`
 // is all the object uses of it.
@@ -67,28 +67,20 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-/** The fake account, plus Cloudflare's token endpoint rotating refresh tokens. */
+/** The fake account, plus Cloudflare's revoke endpoint. */
 function world() {
   const cf = new FakeCloudflareV1();
-  const live = new Set(["refresh-0"]);
-  let issued = 0;
   const revoked: string[] = [];
-  const fetcher = async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input instanceof Request ? input.url : input);
-    if (url === CLOUDFLARE_TOKEN_URL_V1) {
-      const body = new URLSearchParams(String(init?.body));
-      const presented = body.get("refresh_token")!;
-      if (!live.delete(presented)) {
-        return Response.json({ error: "invalid_grant" }, { status: 400 });
-      }
-      issued += 1;
-      live.add(`refresh-${issued}`);
-      return Response.json({
-        access_token: `access-${issued}`,
-        refresh_token: `refresh-${issued}`,
-        expires_in: 3600,
-      });
+  // Like workerd's global fetch, refuses to be called as another object's method.
+  const fetcher = async function (
+    this: unknown,
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ) {
+    if (this !== undefined && this !== globalThis) {
+      throw new TypeError("Illegal invocation");
     }
+    const url = String(input instanceof Request ? input.url : input);
     if (url === CLOUDFLARE_REVOKE_URL_V1) {
       revoked.push(new URLSearchParams(String(init?.body)).get("token")!);
       return new Response(null, { status: 200 });
@@ -103,12 +95,11 @@ function world() {
     CLOUDFLARE_OAUTH_CLIENT_ID: "id",
     CLOUDFLARE_OAUTH_CLIENT_SECRET: "secret",
   });
-  const expired = {
+  const grant = {
     accessToken: "access-0",
-    refreshToken: "refresh-0",
-    expiresAt: 0,
+    expiresAt: Date.now() + 60 * 60 * 1000,
   };
-  return { cf, storage, object, expired, revoked, issued: () => issued };
+  return { cf, storage, object, grant, revoked };
 }
 
 async function publishMinimalRelease(cf: FakeCloudflareV1) {
@@ -128,18 +119,16 @@ async function runAlarms(
 }
 
 describe("DeployAccount", () => {
-  test("a deploy runs by alarm on the session's grant, refreshed once and shared", async () => {
-    const { cf, storage, object, expired, issued } = world();
+  test("a deploy runs by alarm on the session's grant, revoked when it finishes", async () => {
+    const { cf, storage, object, grant, revoked } = world();
     await publishMinimalRelease(cf);
     const secret = await object.startSession(
       { id: "user-1", email: "tim@example.com" },
       [{ id: cf.accountId, name: cf.accountName }],
-      expired,
+      grant,
     );
-    // The checks refresh the lapsed token; the deploy then uses the same grant.
     const checks = await object.checks(secret, cf.accountId);
     expect(checks!.every((c) => c.state === "ok")).toBe(true);
-    expect(issued()).toBe(1);
 
     const started = await object.startDeploy(
       secret,
@@ -162,16 +151,65 @@ describe("DeployAccount", () => {
       name: "tims-frockbot",
       version: "1.0.0",
     });
-    // The session can still act after the deploy: its grant was never invalidated.
-    expect(await object.checks(secret, cf.accountId)).not.toBeNull();
+    // The page can still show the result, but Cloudflare access ended with
+    // the deploy: an update needs a new sign-in.
+    expect(status!.signedIn).toBe(false);
+    expect(revoked).toEqual(["access-0"]);
+    expect([...storage.data.keys()].some((k) => k.startsWith("grant:"))).toBe(
+      false,
+    );
+    expect(
+      await object.startUpdate(
+        secret,
+        `${cf.accountId}/tims-frockbot`,
+        "1.0.0",
+      ),
+    ).toEqual({
+      ok: false,
+      problem: "Your Cloudflare sign-in has ended. Sign in again.",
+    });
   });
 
-  test("reloading Choose reuses the checks; Check again reads the account afresh", async () => {
-    const { cf, object, expired } = world();
+  test("a sign-in whose access token lapsed can't reach the account", async () => {
+    const { cf, object, grant } = world();
     const secret = await object.startSession(
       { id: "user-1", email: "tim@example.com" },
       [{ id: cf.accountId, name: cf.accountName }],
-      expired,
+      { ...grant, expiresAt: Date.now() - 1 },
+    );
+    expect((await object.status(secret))!.signedIn).toBe(false);
+    await expect(object.checks(secret, cf.accountId)).rejects.toThrow(
+      "sign-in has ended",
+    );
+  });
+
+  test("a deploy won't start on an access token too close to lapsing to finish", async () => {
+    const { cf, storage, object, grant } = world();
+    await publishMinimalRelease(cf);
+    const secret = await object.startSession(
+      { id: "user-1", email: "tim@example.com" },
+      [{ id: cf.accountId, name: cf.accountName }],
+      { ...grant, expiresAt: Date.now() + 2 * 60 * 1000 },
+    );
+    const checks = await object.checks(secret, cf.accountId);
+    expect(checks!.every((c) => c.state === "ok")).toBe(true);
+    expect((await object.status(secret))!.signedIn).toBe(false);
+    expect(
+      await object.startDeploy(secret, cf.accountId, "tims-frockbot", "1.0.0"),
+    ).toEqual({
+      ok: false,
+      problem: "Your Cloudflare sign-in has ended. Sign in again.",
+    });
+    expect(await storage.get("job")).toBeUndefined();
+    expect(cf.scripts.size).toBe(0);
+  });
+
+  test("reloading Choose reuses the checks; Check again reads the account afresh", async () => {
+    const { cf, object, grant } = world();
+    const secret = await object.startSession(
+      { id: "user-1", email: "tim@example.com" },
+      [{ id: cf.accountId, name: cf.accountName }],
+      grant,
     );
     cf.zeroTrust = false;
     await object.checks(secret, cf.accountId);
@@ -184,12 +222,12 @@ describe("DeployAccount", () => {
   });
 
   test("a deploy refuses to start before every check passed", async () => {
-    const { cf, object, expired } = world();
+    const { cf, object, grant } = world();
     cf.zeroTrust = false;
     const secret = await object.startSession(
       { id: "user-1", email: "tim@example.com" },
       [{ id: cf.accountId, name: cf.accountName }],
-      expired,
+      grant,
     );
     await object.checks(secret, cf.accountId);
     const started = await object.startDeploy(
@@ -205,12 +243,12 @@ describe("DeployAccount", () => {
   });
 
   test("signing out mid-deploy leaves the deploy its grant, then drops it", async () => {
-    const { cf, storage, object, expired, revoked } = world();
+    const { cf, storage, object, grant, revoked } = world();
     await publishMinimalRelease(cf);
     const secret = await object.startSession(
       { id: "user-1", email: "tim@example.com" },
       [{ id: cf.accountId, name: cf.accountName }],
-      expired,
+      grant,
     );
     await object.checks(secret, cf.accountId);
     await object.startDeploy(secret, cf.accountId, "tims-frockbot", "1.0.0");
@@ -226,12 +264,12 @@ describe("DeployAccount", () => {
   });
 
   test("a failed step can be tried again from where it stopped", async () => {
-    const { cf, storage, object, expired } = world();
+    const { cf, storage, object, grant } = world();
     await publishMinimalRelease(cf);
     const secret = await object.startSession(
       { id: "user-1", email: "tim@example.com" },
       [{ id: cf.accountId, name: cf.accountName }],
-      expired,
+      grant,
     );
     await object.checks(secret, cf.accountId);
     await object.startDeploy(secret, cf.accountId, "tims-frockbot", "1.0.0");
