@@ -194,13 +194,12 @@ describe("DeployAccount", () => {
     const checks = await object.checks(secret, cf.accountId);
     expect(checks!.every((c) => c.state === "ok")).toBe(true);
     expect((await object.status(secret))!.signedIn).toBe(false);
-    const signedOut = {
-      ok: false,
-      problem: "Your Cloudflare sign-in has ended. Sign in again.",
-    };
     expect(
       await object.startDeploy(secret, cf.accountId, "tims-frockbot", "1.0.0"),
-    ).toEqual(signedOut);
+    ).toEqual({
+      ok: false,
+      problem: "Your Cloudflare sign-in has ended. Sign in again.",
+    });
     expect(await storage.get("job")).toBeUndefined();
     expect(cf.scripts.size).toBe(0);
   });
