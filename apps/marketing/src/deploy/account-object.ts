@@ -44,6 +44,11 @@ export const SESSION_LIFETIME_MS_V1 = 12 * 60 * 60 * 1000;
 /** How long a step that isn't finished yet (a new `workers.dev` name) is waited on. */
 const NOT_YET_LIMIT_MS = 5 * 60 * 1000;
 const TRANSIENT_RETRIES = 4;
+/**
+ * How long a grant has to have left for a deploy to start on it: there's no
+ * refresh, so a deploy (and a `workers.dev` wait) must finish on this token.
+ */
+const DEPLOY_RUNWAY_MS = 10 * 60 * 1000;
 const SIGNED_OUT_PROBLEM = "Your Cloudflare sign-in has ended. Sign in again.";
 
 interface SessionRecordV1 {
@@ -115,11 +120,14 @@ export class DeployAccount extends DurableObject<DeployEnvV1> {
     return `grant:${grantId}`;
   }
 
-  private async liveGrant(grantId: string): Promise<OAuthTokensV1 | null> {
+  private async liveGrant(
+    grantId: string,
+    runwayMs = 0,
+  ): Promise<OAuthTokensV1 | null> {
     const grant = await this.ctx.storage.get<OAuthTokensV1>(
       this.grantKey(grantId),
     );
-    return grant && grant.expiresAt > Date.now() ? grant : null;
+    return grant && grant.expiresAt > Date.now() + runwayMs ? grant : null;
   }
 
   private async token(grantId: string): Promise<string> {
@@ -207,7 +215,8 @@ export class DeployAccount extends DurableObject<DeployEnvV1> {
     const job = await this.job();
     return {
       session: { user: record.user, accounts: record.accounts },
-      signedIn: (await this.liveGrant(record.secretHash)) !== null,
+      signedIn:
+        (await this.liveGrant(record.secretHash, DEPLOY_RUNWAY_MS)) !== null,
       installs: Object.values(await this.installs()).sort((a, b) =>
         a.createdAt.localeCompare(b.createdAt),
       ),
@@ -297,7 +306,12 @@ export class DeployAccount extends DurableObject<DeployEnvV1> {
   ): Promise<StartResultV1> {
     const record = await this.session(secret);
     const account = record?.accounts.find((a) => a.id === accountId);
-    if (!record || !account) return { ok: false, problem: SIGNED_OUT_PROBLEM };
+    if (
+      !record ||
+      !account ||
+      !(await this.liveGrant(record.secretHash, DEPLOY_RUNWAY_MS))
+    )
+      return { ok: false, problem: SIGNED_OUT_PROBLEM };
     const current = await this.job();
     if (current?.state === "running")
       return { ok: false, problem: "A deploy is already running." };
@@ -360,7 +374,10 @@ export class DeployAccount extends DurableObject<DeployEnvV1> {
     version: string,
   ): Promise<StartResultV1> {
     const record = await this.session(secret);
-    if (!record || !(await this.liveGrant(record.secretHash)))
+    if (
+      !record ||
+      !(await this.liveGrant(record.secretHash, DEPLOY_RUNWAY_MS))
+    )
       return { ok: false, problem: SIGNED_OUT_PROBLEM };
     const install = (await this.installs())[key];
     if (!install)
@@ -388,7 +405,10 @@ export class DeployAccount extends DurableObject<DeployEnvV1> {
   private async retryNow(secret: string): Promise<StartResultV1> {
     const record = await this.session(secret);
     const job = await this.job();
-    if (!record || !(await this.liveGrant(record.secretHash)))
+    if (
+      !record ||
+      !(await this.liveGrant(record.secretHash, DEPLOY_RUNWAY_MS))
+    )
       return { ok: false, problem: SIGNED_OUT_PROBLEM };
     if (!job || job.state !== "failed")
       return { ok: false, problem: "There's nothing to try again." };
