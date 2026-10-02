@@ -253,13 +253,23 @@ export class DeployAccount extends DurableObject<DeployEnvV1> {
     refresh = false,
   ): Promise<AccountCheckV1[] | null> {
     const record = await this.session(secret);
-    if (!record || !record.accounts.some((a) => a.id === accountId))
-      return null;
+    const account = record?.accounts.find((a) => a.id === accountId);
+    if (!record || !account) return null;
     if (!refresh && record.checks?.accountId === accountId) {
       return [...record.checks.results];
     }
     const api = new CloudflareApiV1(await this.token(record.secretHash));
-    const results = await accountChecksV1(api, accountId);
+    const results = await accountChecksV1(api, accountId, {
+      // The Jev probe answers on workers.dev, so an account without a
+      // subdomain gets the one its first deploy would make.
+      subdomain: async () =>
+        (await api.workersSubdomain(accountId)) ??
+        (await api.createWorkersSubdomain(
+          accountId,
+          suggestedWorkersSubdomainV1(account.name, accountId),
+        )),
+      fetcher: fetch.bind(globalThis),
+    });
     const latest = (await this.session(secret)) ?? record;
     await this.ctx.storage.put(this.sessionKey(record.secretHash), {
       ...latest,

@@ -6,7 +6,7 @@
  * person who just turned something on clicks Check again and is read afresh.
  */
 import { CloudflareApiErrorV1, type CloudflareApiV1 } from "./cloudflare-api";
-import { JEV_MODEL_V1 } from "./deployer";
+import { probeJevV1, type JevProbeOptionsV1 } from "./jev-probe";
 import {
   r2CheckV1,
   workersAiCheckV1,
@@ -79,18 +79,6 @@ async function r2Enabled(
   }
 }
 
-/** Workers AI answers, and serves Jev, which every Turn is supervised by. */
-async function workersAi(
-  api: CloudflareApiV1,
-  accountId: string,
-): Promise<boolean | undefined> {
-  try {
-    return await api.aiModelAvailable(accountId, JEV_MODEL_V1);
-  } catch {
-    return undefined;
-  }
-}
-
 async function readsAsEnabled(
   read: () => Promise<unknown>,
 ): Promise<boolean | undefined> {
@@ -133,11 +121,12 @@ export async function zeroTrustEnabledV1(
 export async function accountChecksV1(
   api: CloudflareApiV1,
   accountId: string,
+  jev: JevProbeOptionsV1,
 ): Promise<AccountCheckV1[]> {
   const [paid, r2, ai, zeroTrust] = await Promise.all([
     probeWorkersPaidV1(api, accountId),
     r2Enabled(api, accountId),
-    workersAi(api, accountId),
+    probeJevV1(api, accountId, jev),
     zeroTrustEnabledV1(api, accountId),
   ]);
   return [

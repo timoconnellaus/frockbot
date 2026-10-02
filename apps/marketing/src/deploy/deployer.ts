@@ -40,10 +40,8 @@ import {
   type DigestSinkV1,
   type StagingBucketV1,
 } from "./release";
+import { JEV_MODEL_V1, probeJevV1 } from "./jev-probe";
 import { randomSuffixV1 } from "./oauth";
-
-/** Jev's model on Workers AI, which the install's `AI` binding calls. */
-export const JEV_MODEL_V1 = "typesafe/jev";
 
 /** What `/deploy` keeps about an install: names and ids, never a secret. */
 export interface InstallRecordV1 {
@@ -70,6 +68,8 @@ export interface DeployContextV1 {
   readonly fetcher: typeof fetch;
   readonly now: () => Date;
   readonly digestSink?: () => DigestSinkV1;
+  /** Between a probe's attempts; tests pass one that doesn't sleep. */
+  readonly wait?: (ms: number) => Promise<void>;
 }
 
 /** Thrown by a step that isn't finished yet and should be tried again shortly. */
@@ -272,15 +272,26 @@ async function release(
   return install;
 }
 
+/**
+ * Jev answers this account's `AI` binding. Asked again here, after the
+ * release, because the Choose page's reading may be stale; a probe that
+ * couldn't tell is tried again rather than failed.
+ */
 async function workersAi(
   context: DeployContextV1,
   install: InstallRecordV1,
 ): Promise<InstallRecordV1> {
-  if (!(await context.api.aiModelAvailable(install.accountId, JEV_MODEL_V1))) {
+  const jev = await probeJevV1(context.api, install.accountId, {
+    subdomain: async () => install.workersSubdomain,
+    fetcher: context.fetcher,
+    ...(context.wait ? { wait: context.wait } : {}),
+  });
+  if (jev.state === "refused") {
     throw new Error(
-      `Jev (${JEV_MODEL_V1}) isn’t in this account’s Workers AI catalog, so your bots can’t start a Turn. Open Workers AI in Cloudflare once, then try again.`,
+      `Workers AI won’t run Jev (${JEV_MODEL_V1}) for this account, so your bots can’t start a Turn. Cloudflare said: ${jev.reason}`,
     );
   }
+  if (jev.state === "unknown") throw new NotYetV1(jev.reason);
   return install;
 }
 

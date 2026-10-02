@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { accountChecksV1 } from "./checks";
+import { PLAN_PROBE_WORKER_V1, accountChecksV1 } from "./checks";
 import { CloudflareApiV1 } from "./cloudflare-api";
 import {
   NotYetV1,
@@ -14,6 +14,7 @@ import {
   publishTestBundleV1,
   tarGzV1,
 } from "./fake-cloudflare.test-support";
+import { JEV_PROBE_WORKER_V1, probeJevV1, readJevAnswerV1 } from "./jev-probe";
 import { choosePageV1, escapeHtmlV1, progressPageV1 } from "./pages";
 import {
   DEPLOY_STEPS_V1,
@@ -58,6 +59,16 @@ async function contextFor(
     fetcher: cf.fetch as typeof fetch,
     now: () => new Date("2026-09-30T00:00:00Z"),
     digestSink: bufferedDigestSinkV1,
+    wait: async () => {},
+  };
+}
+
+function jevOptions(cf: FakeCloudflareV1, attempts?: number) {
+  return {
+    subdomain: async () => cf.subdomain!,
+    fetcher: cf.fetch as typeof fetch,
+    wait: async () => {},
+    ...(attempts === undefined ? {} : { attempts }),
   };
 }
 
@@ -175,6 +186,7 @@ describe("account checks", () => {
     const checks = await accountChecksV1(
       new CloudflareApiV1("token", cf.fetch),
       cf.accountId,
+      jevOptions(cf),
     );
     expect(checks.map((c) => [c.id, c.state])).toEqual([
       ["workers-paid", "ok"],
@@ -182,9 +194,75 @@ describe("account checks", () => {
       ["workers-ai", "ok"],
       ["zero-trust", "ok"],
     ]);
-    // The plan probe leaves nothing behind.
+    // The plan and Jev probes leave nothing behind.
     expect(cf.scripts.size).toBe(0);
-    expect(cf.deletedScripts).toHaveLength(1);
+    expect(cf.deletedScripts.sort()).toEqual([
+      JEV_PROBE_WORKER_V1,
+      PLAN_PROBE_WORKER_V1,
+    ]);
+  });
+
+  test("Jev is asked through an AI binding, never the model catalog", async () => {
+    // Workers AI lists no Jev in any catalog and the REST run route doesn't
+    // reach it; only a Worker's binding does.
+    const cf = new FakeCloudflareV1();
+    const checks = await accountChecksV1(
+      new CloudflareApiV1("token", cf.fetch),
+      cf.accountId,
+      jevOptions(cf),
+    );
+    expect(checks.find((c) => c.id === "workers-ai")!.state).toBe("ok");
+    expect(cf.calls.some((c) => c.includes("/ai/"))).toBe(false);
+    expect(cf.calls).toContain(
+      `POST /accounts/${cf.accountId}/workers/scripts/${JEV_PROBE_WORKER_V1}/subdomain`,
+    );
+  });
+
+  test("a model Workers AI refuses is a fix that says what Cloudflare said", async () => {
+    const cf = new FakeCloudflareV1();
+    cf.jev = "5018: Account not allowed for private model";
+    const checks = await accountChecksV1(
+      new CloudflareApiV1("token", cf.fetch),
+      cf.accountId,
+      jevOptions(cf),
+    );
+    const ai = checks.find((c) => c.id === "workers-ai")!;
+    expect(ai.state).toBe("fix");
+    expect(ai.detail).toContain("Account not allowed for private model");
+    expect(cf.scripts.has(JEV_PROBE_WORKER_V1)).toBe(false);
+  });
+
+  test("a new workers.dev route is waited for, then counted as couldn't tell", async () => {
+    const cf = new FakeCloudflareV1();
+    cf.probeRouteDelay = 2;
+    const api = new CloudflareApiV1("token", cf.fetch);
+    expect(await probeJevV1(api, cf.accountId, jevOptions(cf))).toEqual({
+      state: "ok",
+    });
+    cf.probeRouteDelay = 10;
+    expect((await probeJevV1(api, cf.accountId, jevOptions(cf, 3))).state).toBe(
+      "unknown",
+    );
+    expect(cf.scripts.has(JEV_PROBE_WORKER_V1)).toBe(false);
+  });
+
+  test("reads the binding's answer: an input refusal still reached Jev", () => {
+    expect(readJevAnswerV1({ ok: true })).toEqual({ state: "ok" });
+    expect(
+      readJevAnswerV1({ ok: false, message: "5006: invalid input" }).state,
+    ).toBe("ok");
+    for (const code of ["5007", "5016", "5018"]) {
+      expect(
+        readJevAnswerV1({ ok: false, message: `${code}: refused` }).state,
+      ).toBe("refused");
+    }
+    expect(
+      readJevAnswerV1({
+        ok: false,
+        message: "3040: Capacity temporarily exceeded",
+      }).state,
+    ).toBe("unknown");
+    expect(readJevAnswerV1(null).state).toBe("unknown");
   });
 
   test("show the fix for a free plan, R2 off and no Zero Trust", async () => {
@@ -195,6 +273,7 @@ describe("account checks", () => {
     const checks = await accountChecksV1(
       new CloudflareApiV1("token", cf.fetch),
       cf.accountId,
+      jevOptions(cf),
     );
     const byId = Object.fromEntries(checks.map((c) => [c.id, c]));
     expect(byId["workers-paid"]!.state).toBe("fix");
@@ -213,6 +292,7 @@ describe("account checks", () => {
     const checks = await accountChecksV1(
       new CloudflareApiV1("token", cf.fetch),
       cf.accountId,
+      jevOptions(cf),
     );
     expect(checks.find((c) => c.id === "zero-trust")!.state).toBe("ok");
   });
@@ -371,13 +451,23 @@ describe("deploy and update", () => {
     ).rejects.toThrow(/Access isn’t in front/);
   });
 
-  test("Jev missing from Workers AI stops the deploy with the fix", async () => {
+  test("Jev refused by Workers AI stops the deploy with Cloudflare's reason", async () => {
     const cf = new FakeCloudflareV1();
-    cf.aiModels = ["@cf/meta/llama-3.1-8b-instruct"];
+    cf.jev = "5007: No such model typesafe/jev";
     await publishTestBundleV1(cf, { version: "0.9.3", appMigrations: ["v1"] });
     await expect(runAll(cf, "0.9.3", newInstall(cf))).rejects.toThrow(
-      /Open Workers AI/,
+      /won’t run Jev.*No such model/,
     );
+  });
+
+  test("a Jev probe that couldn't tell is tried again, not failed", async () => {
+    const cf = new FakeCloudflareV1();
+    cf.jev = "3040: Capacity temporarily exceeded";
+    await publishTestBundleV1(cf, { version: "0.9.3", appMigrations: ["v1"] });
+    const context = await contextFor(cf, "0.9.3");
+    await expect(
+      STEP_RUNNERS_V1["workers-ai"](context, newInstall(cf)),
+    ).rejects.toBeInstanceOf(NotYetV1);
   });
 
   test("a module whose staged bytes aren't the manifest's is refused before upload", async () => {
