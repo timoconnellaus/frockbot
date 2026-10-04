@@ -655,7 +655,7 @@
     let nodded = 0;
     let happy = false;
     form.addEventListener("focusin", (event) => {
-      if (!(event.target instanceof HTMLInputElement)) return;
+      if (!(event.target instanceof HTMLInputElement) || still) return;
       glanceAt(critter, toward(critter, event.target));
       feel(critter, EMOTION.curious, 1600);
     });
@@ -664,7 +664,8 @@
     });
     form.addEventListener("input", (event) => {
       const field = event.target;
-      if (!(field instanceof HTMLInputElement) || still) return;
+      if (!(field instanceof HTMLInputElement) || still || !critter.rig)
+        return;
       const now = performance.now();
       if (now - nodded > 450) {
         nodded = now;
@@ -679,7 +680,9 @@
         }
       } else if (field.type === "email") happy = false;
     });
-    form.addEventListener("submit", () => celebrate(critter));
+    form.addEventListener("submit", () => {
+      if (critter.rig) celebrate(critter);
+    });
   }
 
   // Pointer: eyes follow it, hovering greets, a click or tap pokes.

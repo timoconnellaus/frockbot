@@ -3648,3 +3648,8 @@ html.is-over-critter body {
   position: relative;
   aspect-ratio: 457 / 615;
 }
+@media (max-width: 760px) {
+  .critter.beta-hero-character {
+    display: none;
+  }
+}
