@@ -30,8 +30,15 @@ The code is `apps/marketing/src/deploy/`, served by the marketing Worker under
      Worker Loader binding (only Paid accepts one) and deletes it straight
      after.
    - **R2.** Listing buckets fails with 10042 until R2 is turned on.
-   - **Workers AI.** The account's catalog serves Jev (`typesafe/jev`),
-     which the install's `AI` binding runs and every Turn is supervised by.
+   - **Workers AI.** Jev (`typesafe/jev`), which every Turn is supervised
+     by, answers this account. Jev is served only to a Worker's `AI`
+     binding: the model catalog doesn't list it and the REST `ai/run` route
+     doesn't reach it. So the check puts a Worker with an `AI` binding,
+     `frockbot-jev-check`, on the account's `workers.dev` (making the
+     subdomain the deploy would make, if there is none), asks Jev one small
+     question and deletes the Worker. Only an answer passes: Workers AI
+     refuses an unknown model and a malformed question alike, with
+     `7003: User Input Error`.
    - **Zero Trust.** The Access organization, or the Zero Trust (Gateway)
      account, exists. The fix links to Zero Trust, where the person chooses
      the Free plan.
@@ -66,8 +73,8 @@ The code is `apps/marketing/src/deploy/`, served by the marketing Worker under
         upload keeps them.
       - Ones only an optional Worker needs are left to whoever deploys it.
       - `FROCKBOT_ADMIN_EMAILS`, the deployer's email, every time.
-   4. **Jev and Workers AI.** Looks for Jev in the catalog again, now as the
-      deploy's own step.
+   4. **Jev and Workers AI.** Asks Jev through the same probe again, now as
+      the deploy's own step. A probe that couldn't tell is tried again.
    5. **First check.** `/` must redirect to Access. `/api/identity` must be
       refused by the Worker itself (401, JSON). A new `workers.dev` name is
       retried for up to five minutes.
