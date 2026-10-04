@@ -6,6 +6,7 @@ import {
   publishTestBundleV1,
 } from "./fake-cloudflare.test-support";
 import { CLOUDFLARE_REVOKE_URL_V1 } from "./oauth";
+import { suggestedWorkersSubdomainV1 } from "./plan";
 
 // The object's base class is the runtime's; a stand-in holding `ctx` and `env`
 // is all the object uses of it.
@@ -214,11 +215,27 @@ describe("DeployAccount", () => {
     cf.zeroTrust = false;
     await object.checks(secret, cf.accountId);
     await object.checks(secret, cf.accountId);
-    expect(cf.deletedScripts).toHaveLength(1);
+    // One reading: the plan probe and the Jev probe.
+    expect(cf.deletedScripts).toHaveLength(2);
     cf.zeroTrust = true;
     const again = await object.checks(secret, cf.accountId, true);
-    expect(cf.deletedScripts).toHaveLength(2);
+    expect(cf.deletedScripts).toHaveLength(4);
     expect(again!.every((c) => c.state === "ok")).toBe(true);
+  });
+
+  test("an account with no workers.dev subdomain gets the one its deploy would make, for the Jev probe", async () => {
+    const { cf, object, grant } = world();
+    cf.subdomain = null;
+    const secret = await object.startSession(
+      { id: "user-1", email: "tim@example.com" },
+      [{ id: cf.accountId, name: cf.accountName }],
+      grant,
+    );
+    const checks = await object.checks(secret, cf.accountId);
+    expect(checks!.find((c) => c.id === "workers-ai")!.state).toBe("ok");
+    expect(cf.subdomain as string | null).toBe(
+      suggestedWorkersSubdomainV1(cf.accountName, cf.accountId),
+    );
   });
 
   test("a deploy refuses to start before every check passed", async () => {
@@ -273,8 +290,8 @@ describe("DeployAccount", () => {
     );
     await object.checks(secret, cf.accountId);
     await object.startDeploy(secret, cf.accountId, "tims-frockbot", "1.0.0");
-    // Jev leaves the catalog between the check and the deploy's own look.
-    cf.aiModels = [];
+    // Workers AI stops running Jev between the check and the deploy's own look.
+    cf.jev = "5018: Account not allowed for private model";
     const failed = (await runAlarms(object, storage)) as {
       state: string;
       steps: { id: string; state: string }[];
@@ -285,7 +302,7 @@ describe("DeployAccount", () => {
     );
     const uploads = cf.scripts.get("tims-frockbot")!.uploads;
 
-    cf.aiModels = ["typesafe/jev"];
+    cf.jev = "answers";
     expect((await object.retry(secret)).ok).toBe(true);
     expect(await runAlarms(object, storage)).toMatchObject({ state: "done" });
     // Picked up at Jev: the release wasn't uploaded again.

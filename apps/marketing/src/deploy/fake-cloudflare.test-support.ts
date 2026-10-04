@@ -12,6 +12,7 @@ import {
   type DeployBundleManifestV1,
 } from "../../../cloudflare/deployment-config/bundle.ts";
 import { CLOUDFLARE_API_V1 } from "./cloudflare-api";
+import { JEV_PROBE_HEADER_V1, JEV_PROBE_WORKER_V1 } from "./jev-probe";
 import { RELEASE_REPOSITORY_V1, type StagingBucketV1 } from "./release";
 
 export interface FakeScriptV1 {
@@ -35,7 +36,13 @@ export class FakeCloudflareV1 {
     name: "Tim",
     auth_domain: "tim.cloudflareaccess.com",
   };
-  aiModels = ["typesafe/jev", "@cf/meta/llama-3.1-8b-instruct"];
+  /**
+   * What the account's `AI` binding does when the Jev probe calls Jev: answer,
+   * or throw this message, as Workers AI throws `<code>: <message>`.
+   */
+  jev: "answers" | string = "answers";
+  /** How many probe requests `workers.dev` 404s before the new route answers. */
+  probeRouteDelay = 0;
   buckets = new Set<string>();
   objects = new Map<string, number>();
   indexes = new Map<string, unknown>();
@@ -115,6 +122,7 @@ export class FakeCloudflareV1 {
   private install(url: URL): Response {
     const name = url.hostname.split(".")[0]!;
     const script = this.scripts.get(name);
+    if (name === JEV_PROBE_WORKER_V1) return this.jevProbe(url, script);
     if (this.installAnswers === "down" || !script?.workersDev) {
       return new Response("There is nothing here yet", { status: 404 });
     }
@@ -130,6 +138,30 @@ export class FakeCloudflareV1 {
         location: `https://${this.organization?.auth_domain}/cdn-cgi/access/login/${url.hostname}`,
       },
     });
+  }
+
+  /** The probe Worker, run as its source says, with this account's binding. */
+  private jevProbe(url: URL, script: FakeScriptV1 | undefined): Response {
+    if (!script?.workersDev || this.probeRouteDelay > 0) {
+      this.probeRouteDelay -= 1;
+      return new Response("There is nothing here yet", { status: 404 });
+    }
+    const bindings = script.metadata.bindings as {
+      type: string;
+      name: string;
+      text?: string;
+    }[];
+    const token = bindings.find((b) => b.name === "PROBE_TOKEN")?.text;
+    if (
+      !bindings.some((b) => b.type === "ai") ||
+      url.pathname !== `/${token}`
+    ) {
+      return new Response(null, { status: 404 });
+    }
+    return Response.json(
+      this.jev === "answers" ? { ok: true } : { ok: false, message: this.jev },
+      { headers: { [JEV_PROBE_HEADER_V1]: "1" } },
+    );
   }
 
   private async api(
@@ -338,14 +370,6 @@ export class FakeCloudflareV1 {
       path.match(new RegExp(`^${a}/containers/applications/[^/]+/rollouts$`))
     ) {
       return this.ok({}, 201);
-    }
-    if (path.startsWith(`${a}/ai/models/search`)) {
-      const search = url.searchParams.get("search");
-      return this.ok(
-        this.aiModels
-          .filter((m) => !search || m.includes(search))
-          .map((name) => ({ name })),
-      );
     }
     return this.error(404, 7003, `No route for ${method} ${path}`);
   }

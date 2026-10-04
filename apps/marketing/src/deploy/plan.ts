@@ -5,6 +5,7 @@
  * metadata and which migrations are due: functions over values, so the tests
  * can check every judgement without a Cloudflare account.
  */
+import type { JevProbeV1 } from "./jev-probe";
 
 /**
  * Short enough that `<name>-<role>` fits every resource's name limit (R2's 63
@@ -147,9 +148,9 @@ export function r2CheckV1(
 
 export function workersAiCheckV1(
   accountId: string,
-  available: boolean | undefined,
+  jev: JevProbeV1,
 ): AccountCheckV1 {
-  if (available === true) {
+  if (jev.state === "ok") {
     return {
       id: "workers-ai",
       title: "Workers AI",
@@ -161,11 +162,11 @@ export function workersAiCheckV1(
   return {
     id: "workers-ai",
     title: "Workers AI",
-    state: available === false ? "fix" : "unknown",
+    state: jev.state === "refused" ? "fix" : "unknown",
     detail:
-      available === false
-        ? "Jev isn’t in this account’s Workers AI catalog yet. Open Workers AI once in Cloudflare, then check again."
-        : "We couldn’t reach Workers AI on this account. Check again in a moment.",
+      jev.state === "refused"
+        ? `Workers AI won’t run Jev for this account, and every Turn is supervised by it. Cloudflare said: ${jev.reason}`
+        : "We couldn’t ask Workers AI for Jev on this account yet. Check again in a moment.",
     fixUrl: dashboardUrlV1(accountId, "ai/workers-ai"),
     fixLabel: "Open Workers AI",
   };

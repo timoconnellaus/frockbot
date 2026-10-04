@@ -358,12 +358,12 @@ export class CloudflareApiV1 {
     }
   }
 
-  /** Whether the account's Workers AI catalog serves this model. */
-  async aiModelAvailable(accountId: string, model: string): Promise<boolean> {
-    const found = await this.result<{ name: string }[]>(
-      "GET",
-      `/accounts/${accountId}/ai/models/search?search=${encodeURIComponent(model)}&per_page=20`,
+  /** Puts the Worker on the account's `workers.dev` subdomain. */
+  async enableWorkersDev(accountId: string, name: string): Promise<void> {
+    await this.result(
+      "POST",
+      `/accounts/${accountId}/workers/scripts/${name}/subdomain`,
+      { enabled: true, previews_enabled: false },
     );
-    return found.some((m) => m.name === model);
   }
 }
