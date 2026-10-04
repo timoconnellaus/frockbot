@@ -246,11 +246,14 @@ describe("account checks", () => {
     expect(cf.scripts.has(JEV_PROBE_WORKER_V1)).toBe(false);
   });
 
-  test("reads the binding's answer: an input refusal still reached Jev", () => {
+  test("reads the binding's answer: only an answer counts as reaching Jev", () => {
     expect(readJevAnswerV1({ ok: true })).toEqual({ state: "ok" });
+    // Workers AI says this for an unknown model and a malformed question alike.
     expect(
-      readJevAnswerV1({ ok: false, message: "5006: invalid input" }).state,
-    ).toBe("ok");
+      readJevAnswerV1({ ok: false, message: "7003: User Input Error" }).state,
+    ).toBe("refused");
+    // The binding answered, but not as Jev answers.
+    expect(readJevAnswerV1({ ok: false }).state).toBe("unknown");
     for (const code of ["5007", "5016", "5018"]) {
       expect(
         readJevAnswerV1({ ok: false, message: `${code}: refused` }).state,

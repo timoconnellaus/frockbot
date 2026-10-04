@@ -9,9 +9,9 @@
  * probe it has one fixed name, so a delete that failed leaves a single Worker
  * the next probe overwrites.
  *
- * The call it makes carries no questions. An answer, or a refusal of the input
- * itself, both mean the binding reached Jev; only a refusal of the model says
- * the account can't run it. A refused input spends nothing.
+ * It asks one small real question and counts only an answer. A refusal can't
+ * tell the two cases apart: Workers AI answers an unknown model and a
+ * malformed question alike, with `7003: User Input Error`.
  */
 import { CloudflareApiErrorV1, type CloudflareApiV1 } from "./cloudflare-api";
 import { randomHexV1 } from "./plan";
@@ -25,13 +25,35 @@ export const JEV_MODEL_V1 = "typesafe/jev";
 export const JEV_PROBE_HEADER_V1 = "x-frockbot-jev-probe";
 
 /**
- * Workers AI's codes for a model this account can't run: no such model, a
- * model agreement not yet accepted, and a private model it isn't allowed.
+ * Workers AI's codes for a call that may answer if asked again: timeouts,
+ * rate limits and capacity. Any other coded refusal is the account's answer.
  */
-const MODEL_REFUSED_CODES_V1 = new Set(["5007", "5016", "5018"]);
+const TRANSIENT_CODES_V1 = new Set(["3007", "3008", "3036", "3040"]);
 
-/** Workers AI's code for an input the model refused, which only Jev can say. */
-const INPUT_REFUSED_CODE_V1 = "5006";
+/** One small question in the shape every Jev judge asks. */
+const PROBE_INPUT_V1 = {
+  state: { text: "FrockBot is checking that Jev answers this account." },
+  questions: {
+    answers: {
+      type: "choice",
+      instructions: {
+        target: "The note in `text`",
+        decision: "Is `text` a note about checking that a service answers?",
+        rules: ["Judge only what `text` says."],
+      },
+      criteria: {
+        yes: {
+          include: "A note about checking that a service answers",
+          exclude: "Anything else",
+        },
+        no: {
+          include: "Anything that is not such a note",
+          exclude: "A note about checking that a service answers",
+        },
+      },
+    },
+  },
+};
 
 export type JevProbeV1 =
   | { readonly state: "ok" }
@@ -54,8 +76,15 @@ const PROBE_SOURCE_V1 = `export default {
     }
     const headers = { "${JEV_PROBE_HEADER_V1}": "1" };
     try {
-      await env.AI.run("${JEV_MODEL_V1}", { state: null, questions: {} });
-      return Response.json({ ok: true }, { headers });
+      const answer = await env.AI.run(
+        "${JEV_MODEL_V1}",
+        ${JSON.stringify(PROBE_INPUT_V1)},
+      );
+      const answers = answer?.result?.answers ?? answer?.answers;
+      return Response.json(
+        { ok: typeof answers === "object" && answers !== null },
+        { headers },
+      );
     } catch (error) {
       return Response.json(
         { ok: false, message: String(error?.message ?? error) },
@@ -73,8 +102,7 @@ export function readJevAnswerV1(answer: unknown): JevProbeV1 {
   const message =
     typeof value?.message === "string" ? value.message : "no answer";
   const code = /\b(\d{4}):/.exec(message)?.[1];
-  if (code === INPUT_REFUSED_CODE_V1) return { state: "ok" };
-  if (code && MODEL_REFUSED_CODES_V1.has(code)) {
+  if (code && !TRANSIENT_CODES_V1.has(code)) {
     return { state: "refused", reason: message };
   }
   return { state: "unknown", reason: message };
