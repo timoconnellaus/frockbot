@@ -664,8 +664,7 @@
     });
     form.addEventListener("input", (event) => {
       const field = event.target;
-      if (!(field instanceof HTMLInputElement) || still || !critter.rig)
-        return;
+      if (!(field instanceof HTMLInputElement) || still || !critter.rig) return;
       const now = performance.now();
       if (now - nodded > 450) {
         nodded = now;
