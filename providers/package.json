@@ -34,17 +34,17 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@ai-sdk/openai-compatible": "3.0.55",
-    "@ai-sdk/provider": "4.0.18",
-    "@ai-sdk/provider-utils": "5.0.47",
-    "@earendil-works/pi-ai": "0.87.1",
+    "@ai-sdk/openai-compatible": "3.0.62",
+    "@ai-sdk/provider": "4.0.21",
+    "@ai-sdk/provider-utils": "5.0.53",
+    "@earendil-works/pi-ai": "0.99.2",
     "@frockbot/app": "workspace:*",
     "@frockbot/core": "workspace:*"
   },
   "devDependencies": {
     "@frockbot/app": "workspace:*",
     "@types/bun": "1.4.2",
-    "@types/node": "26.6.2",
+    "@types/node": "26.6.3",
     "typescript": "^7.0.2"
   },
   "files": [
