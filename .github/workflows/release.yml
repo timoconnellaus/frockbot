@@ -113,7 +113,7 @@ jobs:
           bun-version: 1.4.2
 
       - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
@@ -339,7 +339,7 @@ jobs:
             ${previous_manifest:+"$previous_manifest"}
 
       - name: Upload the release assets
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: frockbot-release-assets
           path: ${{ runner.temp }}/release-assets
@@ -433,7 +433,7 @@ jobs:
 
       - name: Set up Java # zizmor: ignore[cache-poisoning] tag-only release job
         if: steps.change.outputs.changed == 'true'
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: 21
@@ -565,7 +565,7 @@ jobs:
 
       - name: Upload the fresh Android APK
         if: steps.full.outputs.apk == 'fresh'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: frockbot-android-apk
           path: ${{ runner.temp }}/frockbot.apk
@@ -615,7 +615,7 @@ jobs:
           fi
 
       - name: Set up Java # zizmor: ignore[cache-poisoning] tag-only release job
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: 21
@@ -666,7 +666,7 @@ jobs:
           test -s "$RUNNER_TEMP/frockbot.apk"
 
       - name: Upload the Android APK
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: frockbot-android-apk
           path: ${{ runner.temp }}/frockbot.apk
@@ -702,7 +702,7 @@ jobs:
           bun-version: 1.4.2
 
       - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
@@ -1209,7 +1209,7 @@ jobs:
           trap - EXIT
 
       - name: Upload notarized disk image
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: frockbot-macos-release
           path: ${{ runner.temp }}/FrockBot-macos.dmg
@@ -1272,13 +1272,13 @@ jobs:
         # Tolerated only in that case: if `macos-release` succeeded the image
         # exists, so a download failure is a real fault and must fail the job.
         continue-on-error: ${{ needs.macos-release.result != 'success' }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: frockbot-macos-release
           path: .release-assets
 
       - name: Download the deploy bundle
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: frockbot-release-assets
           path: .release-assets
@@ -1292,7 +1292,7 @@ jobs:
         # When no fresh APK was cut, a failed Shorebird download still leaves
         # the Release worth creating.
         continue-on-error: ${{ needs.android-apk.result != 'success' && needs.patch-android.outputs.apk != 'fresh' }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: frockbot-android-apk
           path: .release-assets
@@ -1395,7 +1395,7 @@ jobs:
           fi
 
       - name: Download notarized disk image
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: frockbot-macos-release
           path: .release-assets
