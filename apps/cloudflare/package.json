@@ -32,19 +32,19 @@
     "@frockbot/frock-compose": "workspace:*",
     "@frockbot/providers": "workspace:*",
     "@rive-app/flutter-native-wasm": "44.0.0",
-    "agents": "0.24.0",
-    "ai": "^7.0.113",
+    "agents": "0.30.0",
+    "ai": "^7.0.148",
     "ajv": "8.20.0",
     "json-schema-to-ts": "^3.1.1"
   },
   "devDependencies": {
-    "@cloudflare/vitest-plugin": "^1.2.5",
-    "@cloudflare/workers-types": "5.20260924.1",
-    "@playwright/test": "1.63.0",
-    "@types/bun": "1.4.2",
-    "preact": "10",
+    "@cloudflare/vitest-plugin": "^1.4.6",
+    "@cloudflare/workers-types": "5.20261022.1",
+    "@playwright/test": "1.64.1",
+    "@types/bun": "1.4.3",
+    "preact": "11",
     "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2",
-    "vitest": "^4.1.0",
+    "vitest": "^4.1.12",
     "wrangler": "4.129.0"
   },
   "files": [
