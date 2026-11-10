@@ -9,8 +9,8 @@
 /// get wrong, and it costs one component where the row cost three.
 library;
 
+import 'package:a2ui_flutter/a2ui_flutter.dart';
 import 'package:flutter/material.dart';
-import 'package:genui/genui.dart';
 
 import '../../shell/person_avatar.dart';
 import '../../theme/frock_theme.dart';
@@ -19,13 +19,12 @@ import 'core.dart';
 import 'tone.dart';
 
 /// The top of a card: title, an optional quiet line, and the state pill.
-final frockCardHeader = CatalogItem(
+final frockCardHeader = ComponentImplementation(
   name: 'CardHeader',
-  dataSchema: frockSchemaOf('CardHeader'),
-  widgetBuilder: (itemContext) {
-    final data = (itemContext.data as Map).cast<String, Object?>();
-    final theme = Theme.of(itemContext.buildContext);
-    final tone = FrockTone.read(data['tone']);
+  schema: frockSchemaOf('CardHeader'),
+  builder: (context, node, props, buildChild) {
+    final theme = Theme.of(context);
+    final tone = FrockTone.read(props.value('tone'));
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -35,17 +34,15 @@ final frockCardHeader = CatalogItem(
             mainAxisSize: MainAxisSize.min,
             children: [
               FrockBoundText(
-                dataContext: itemContext.dataContext,
-                value: data['title'],
+                value: props['title'],
                 maxLines: 2,
                 style: theme.textTheme.titleSmall,
               ),
-              if (data['subtitle'] != null)
+              if (frockWrittenV1(props['subtitle']))
                 Padding(
                   padding: const EdgeInsets.only(top: 2),
                   child: FrockBoundText(
-                    dataContext: itemContext.dataContext,
-                    value: data['subtitle'],
+                    value: props['subtitle'],
                     maxLines: 2,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
@@ -55,7 +52,7 @@ final frockCardHeader = CatalogItem(
             ],
           ),
         ),
-        if (data['status'] != null) ...[
+        if (frockWrittenV1(props['status'])) ...[
           const SizedBox(width: 10),
           // Half the line, at most: the pill says a state in two or three
           // words, and a header whose pill had eaten the title would be a
@@ -64,13 +61,10 @@ final frockCardHeader = CatalogItem(
             flex: 1,
             child: Align(
               alignment: Alignment.centerRight,
-              child: BoundString(
-                dataContext: itemContext.dataContext,
-                value: data['status'],
-                builder: (context, status) => (status ?? '').isEmpty
-                    ? const SizedBox.shrink()
-                    : FrockStatusPillView(label: status!, tone: tone),
-              ),
+              child: switch (props.string('status') ?? '') {
+                '' => const SizedBox.shrink(),
+                final status => FrockStatusPillView(label: status, tone: tone),
+              },
             ),
           ),
         ],
@@ -80,12 +74,11 @@ final frockCardHeader = CatalogItem(
 );
 
 /// A heading that divides a long card, with a hairline under it.
-final frockSectionHeader = CatalogItem(
+final frockSectionHeader = ComponentImplementation(
   name: 'SectionHeader',
-  dataSchema: frockSchemaOf('SectionHeader'),
-  widgetBuilder: (itemContext) {
-    final data = (itemContext.data as Map).cast<String, Object?>();
-    final theme = Theme.of(itemContext.buildContext);
+  schema: frockSchemaOf('SectionHeader'),
+  builder: (context, node, props, buildChild) {
+    final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.only(top: 6, bottom: 6),
       child: Column(
@@ -96,7 +89,7 @@ final frockSectionHeader = CatalogItem(
             children: [
               Expanded(
                 child: Text(
-                  frockString(data['title']) ?? '',
+                  frockString(props.value('title')) ?? '',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.labelMedium?.copyWith(
@@ -106,11 +99,10 @@ final frockSectionHeader = CatalogItem(
                   ),
                 ),
               ),
-              if (data['caption'] != null)
+              if (frockWrittenV1(props['caption']))
                 Flexible(
                   child: FrockBoundText(
-                    dataContext: itemContext.dataContext,
-                    value: data['caption'],
+                    value: props['caption'],
                     maxLines: 1,
                     align: TextAlign.right,
                     style: theme.textTheme.bodySmall?.copyWith(
@@ -144,13 +136,12 @@ IconData frockCalloutIconV1(FrockTone tone) => switch (tone) {
 };
 
 /// A tinted note beside the thing the card is about.
-final frockCallout = CatalogItem(
+final frockCallout = ComponentImplementation(
   name: 'Callout',
-  dataSchema: frockSchemaOf('Callout'),
-  widgetBuilder: (itemContext) {
-    final data = (itemContext.data as Map).cast<String, Object?>();
-    final theme = Theme.of(itemContext.buildContext);
-    final tone = FrockTone.read(data['tone']);
+  schema: frockSchemaOf('Callout'),
+  builder: (context, node, props, buildChild) {
+    final theme = Theme.of(context);
+    final tone = FrockTone.read(props.value('tone'));
     final colors = frockToneColorsV1(theme, tone);
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
@@ -169,18 +160,16 @@ final frockCallout = CatalogItem(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (data['title'] != null)
+                if (frockWrittenV1(props['title']))
                   FrockBoundText(
-                    dataContext: itemContext.dataContext,
-                    value: data['title'],
+                    value: props['title'],
                     style: theme.textTheme.bodyMedium?.copyWith(
                       fontWeight: FontWeight.w600,
                       color: colors.ink,
                     ),
                   ),
                 FrockBoundText(
-                  dataContext: itemContext.dataContext,
-                  value: data['text'],
+                  value: props['text'],
                   style: theme.textTheme.bodyMedium,
                 ),
               ],
@@ -193,28 +182,26 @@ final frockCallout = CatalogItem(
 );
 
 /// A person or an account on one line.
-final frockIdentityRow = CatalogItem(
+final frockIdentityRow = ComponentImplementation(
   name: 'IdentityRow',
-  dataSchema: frockSchemaOf('IdentityRow'),
-  widgetBuilder: (itemContext) {
-    final data = (itemContext.data as Map).cast<String, Object?>();
-    final theme = Theme.of(itemContext.buildContext);
-    final image = frockString(data['imageUrl']);
+  schema: frockSchemaOf('IdentityRow'),
+  builder: (context, node, props, buildChild) {
+    final theme = Theme.of(context);
+    final image = frockString(props.value('imageUrl'));
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        BoundString(
-          dataContext: itemContext.dataContext,
-          value: data['name'],
-          builder: (context, name) => PersonAvatar(
-            name: frockString(data['initials']) ?? name ?? '',
-            // Anything but https was refused before the card was drawn
-            // (`admitCardV1`), so this is a guard against a record that never
-            // went through the seam rather than a second policy.
-            imageUrl: image != null && image.startsWith('https://')
-                ? image
-                : null,
-          ),
+        PersonAvatar(
+          name:
+              frockString(props.value('initials')) ??
+              props.string('name') ??
+              '',
+          // Anything but https was refused before the card was drawn
+          // (`admitCardV1`), so this is a guard against a record that never
+          // went through the seam rather than a second policy.
+          imageUrl: image != null && image.startsWith('https://')
+              ? image
+              : null,
         ),
         const SizedBox(width: 10),
         Expanded(
@@ -223,17 +210,15 @@ final frockIdentityRow = CatalogItem(
             mainAxisSize: MainAxisSize.min,
             children: [
               FrockBoundText(
-                dataContext: itemContext.dataContext,
-                value: data['name'],
+                value: props['name'],
                 maxLines: 1,
                 style: theme.textTheme.bodyMedium?.copyWith(
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              if (data['detail'] != null)
+              if (frockWrittenV1(props['detail']))
                 FrockBoundText(
-                  dataContext: itemContext.dataContext,
-                  value: data['detail'],
+                  value: props['detail'],
                   maxLines: 1,
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
@@ -248,7 +233,7 @@ final frockIdentityRow = CatalogItem(
 );
 
 /// The family, in the order the catalog declares it.
-final List<CatalogItem> frockStructureItemsV1 = List.unmodifiable([
+final List<ComponentImplementation> frockStructureItemsV1 = List.unmodifiable([
   frockCardHeader,
   frockSectionHeader,
   frockCallout,

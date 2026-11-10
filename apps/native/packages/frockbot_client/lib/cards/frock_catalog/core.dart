@@ -2,9 +2,9 @@
 /// app it offers to connect, the secret it asks for, and what it settles into.
 ///
 /// Seven components, the first family of ADR 0030's catalog. Each is a
-/// `CatalogItem` whose `dataSchema` comes from `schemas.dart` — the schema is
-/// never written twice — and whose widget is ordinary app code in the app's
-/// theme. That is the whole of the protocol's security model on this side: a
+/// `ComponentImplementation` whose `schema` comes from `schemas.dart` — the
+/// schema is never written twice — and whose widget is ordinary app code in
+/// the app's theme. That is the whole of the protocol's security model on this side: a
 /// Card names a component and binds values to it, and what appears on the
 /// screen is code this build compiled in.
 ///
@@ -19,8 +19,10 @@
 /// it, and what is typed into it never reaches the card at all.
 library;
 
+import 'dart:async';
+
+import 'package:a2ui_flutter/a2ui_flutter.dart';
 import 'package:flutter/material.dart';
-import 'package:genui/genui.dart';
 
 import '../../client/transport.dart';
 import '../../connections/icon_tile.dart';
@@ -33,27 +35,20 @@ import 'common.dart';
 import 'tone.dart';
 
 /// A small pill naming the card's state, in the tone's colours.
-final frockStatusPill = CatalogItem(
+final frockStatusPill = ComponentImplementation(
   name: 'StatusPill',
-  dataSchema: frockSchemaOf('StatusPill'),
-  widgetBuilder: (itemContext) {
-    final data = (itemContext.data as Map).cast<String, Object?>();
-    return BoundString(
-      dataContext: itemContext.dataContext,
-      value: data['label'],
-      builder: (context, label) => FrockStatusPillView(
-        label: label ?? '',
-        tone: FrockTone.read(data['tone']),
-      ),
-    );
-  },
+  schema: frockSchemaOf('StatusPill'),
+  builder: (context, node, props, buildChild) => FrockStatusPillView(
+    label: props.string('label') ?? '',
+    tone: FrockTone.read(props.value('tone')),
+  ),
 );
 
-// Every Frock component is flexible in the flex it is in — the rule and its
-// reason live in `frock_catalog.dart` — and for the pill that is what stops it
-// running off the edge of the card on a phone: given a share of the row it can
-// shrink, and the label ellipsizes inside it. Step 5's screenshots caught the
-// other case, a pill laid out at its natural width beside a title that wanted
+// Every Frock component takes a share of the row it is in — the reason is in
+// `frock_catalog.dart` — and for the pill that is what stops it running off
+// the edge of the card on a phone: given a share of the row it can shrink,
+// and the label ellipsizes inside it. Step 5's screenshots caught the other
+// case, a pill laid out at its natural width beside a title that wanted
 // the whole line, and prose in the Skill was as far as prose can get.
 
 /// The pill itself, so the host can draw one outside a surface too.
@@ -93,16 +88,15 @@ class FrockStatusPillView extends StatelessWidget {
 }
 
 /// Labelled values in a column: From, To, Cc, Subject.
-final frockKeyValueRows = CatalogItem(
+final frockKeyValueRows = ComponentImplementation(
   name: 'KeyValueRows',
-  dataSchema: frockSchemaOf('KeyValueRows'),
-  widgetBuilder: (itemContext) {
-    final data = (itemContext.data as Map).cast<String, Object?>();
+  schema: frockSchemaOf('KeyValueRows'),
+  builder: (context, node, props, buildChild) {
     final rows = [
-      for (final row in (data['rows'] as List?) ?? const [])
+      for (final row in props.list('rows'))
         if (row is Map) row.cast<String, Object?>(),
     ];
-    final theme = Theme.of(itemContext.buildContext);
+    final theme = Theme.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -124,11 +118,9 @@ final frockKeyValueRows = CatalogItem(
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: BoundString(
-                    dataContext: itemContext.dataContext,
+                  child: FrockBoundText(
                     value: row['value'],
-                    builder: (context, value) =>
-                        Text(value ?? '', style: theme.textTheme.bodyMedium),
+                    style: theme.textTheme.bodyMedium,
                   ),
                 ),
               ],
@@ -140,19 +132,14 @@ final frockKeyValueRows = CatalogItem(
 );
 
 /// A body of text that starts collapsed. The control says which way it goes.
-final frockCollapsibleText = CatalogItem(
+final frockCollapsibleText = ComponentImplementation(
   name: 'CollapsibleText',
-  dataSchema: frockSchemaOf('CollapsibleText'),
-  widgetBuilder: (itemContext) {
-    final data = (itemContext.data as Map).cast<String, Object?>();
-    final lines = data['collapsedLines'];
-    return BoundString(
-      dataContext: itemContext.dataContext,
-      value: data['text'],
-      builder: (context, text) => FrockCollapsibleTextView(
-        text: text ?? '',
-        collapsedLines: lines is int && lines > 0 && lines <= 40 ? lines : 6,
-      ),
+  schema: frockSchemaOf('CollapsibleText'),
+  builder: (context, node, props, buildChild) {
+    final lines = props.value('collapsedLines');
+    return FrockCollapsibleTextView(
+      text: props.string('text') ?? '',
+      collapsedLines: lines is int && lines > 0 && lines <= 40 ? lines : 6,
     );
   },
 );
@@ -246,17 +233,16 @@ String? _decidedLineV1(String decision) => switch (decision) {
 /// an Approval settles without its surface moving — somebody answered on
 /// another device, or the alarm expired it — and a live-looking button over a
 /// decision that is already recorded is the one thing trust chrome may not do.
-final frockApprovalActions = CatalogItem(
+final frockApprovalActions = ComponentImplementation(
   name: 'ApprovalActions',
-  dataSchema: frockSchemaOf('ApprovalActions'),
-  widgetBuilder: (itemContext) {
-    final data = (itemContext.data as Map).cast<String, Object?>();
-    final theme = Theme.of(itemContext.buildContext);
-    final approvalId = frockString(data['approvalId']) ?? '';
+  schema: frockSchemaOf('ApprovalActions'),
+  builder: (context, node, props, buildChild) {
+    final theme = Theme.of(context);
+    final approvalId = frockString(props.value('approvalId')) ?? '';
     final name = 'approval/$approvalId';
-    final pending = CardPressScope.pendingOf(itemContext.buildContext);
+    final pending = CardPressScope.pendingOf(context);
     final frozen = pending != null;
-    final recorded = CardApprovalsScope.of(itemContext.buildContext)
+    final recorded = CardApprovalsScope.of(context)
         ?.approvalStateV1(approvalId);
     final decided = _decidedLineV1(recorded?.decision ?? 'pending');
     if (decided != null) {
@@ -270,15 +256,16 @@ final frockApprovalActions = CatalogItem(
     bool busyWith(String decision) =>
         (pending != null &&
             pending.name == name &&
-            pending.componentId == itemContext.id &&
+            pending.componentId == node.componentId &&
             pending.context?['decision'] == decision) ||
         (recorded?.deciding ?? false);
-    void decide(String decision) => itemContext.dispatchEvent(
-      UserActionEvent(
-        name: name,
-        sourceComponentId: itemContext.id,
-        context: {'decision': decision},
-      ),
+    void decide(String decision) => unawaited(
+      node.context?.dispatchAction({
+        'event': {
+          'name': name,
+          'context': {'decision': decision},
+        },
+      }),
     );
     // A `Wrap`, not a `Row`: two buttons and their labels are wider than a
     // narrow card can give, and a decision the person cannot reach is worse
@@ -296,7 +283,7 @@ final frockApprovalActions = CatalogItem(
             child: Text(
               busyWith('approved')
                   ? 'Working…'
-                  : frockString(data['approveLabel']) ?? 'Approve',
+                  : frockString(props.value('approveLabel')) ?? 'Approve',
             ),
           ),
         ),
@@ -309,7 +296,7 @@ final frockApprovalActions = CatalogItem(
             child: Text(
               busyWith('denied')
                   ? 'Working…'
-                  : frockString(data['declineLabel']) ?? 'Decline',
+                  : frockString(props.value('declineLabel')) ?? 'Decline',
             ),
           ),
         ),
@@ -330,19 +317,16 @@ final frockApprovalActions = CatalogItem(
 /// Once the account holds a working Connection of this app the button gives
 /// way to a pill saying so, read from the account rather than the Card: the
 /// Card does not move when the person comes back from signing in.
-final frockConnectApp = CatalogItem(
+final frockConnectApp = ComponentImplementation(
   name: 'ConnectApp',
-  dataSchema: frockSchemaOf('ConnectApp'),
-  widgetBuilder: (itemContext) {
-    final data = (itemContext.data as Map).cast<String, Object?>();
-    return FrockConnectAppView(
-      app: frockString(data['app']) ?? '',
-      name: frockString(data['name']),
-      description: frockString(data['description']),
-      packageId: frockString(data['packageId']),
-      connectionTypeId: frockString(data['connectionTypeId']),
-    );
-  },
+  schema: frockSchemaOf('ConnectApp'),
+  builder: (context, node, props, buildChild) => FrockConnectAppView(
+    app: frockString(props.value('app')) ?? '',
+    name: frockString(props.value('name')),
+    description: frockString(props.value('description')),
+    packageId: frockString(props.value('packageId')),
+    connectionTypeId: frockString(props.value('connectionTypeId')),
+  ),
 );
 
 /// The component itself, so a test can draw one without a surface.
@@ -461,17 +445,14 @@ class FrockConnectAppView extends StatelessWidget {
 /// detail, and whether it has been saved. The value is the person's and goes
 /// nowhere the card can see — not an action, not the data model — only to the
 /// host's save route, after which the field is emptied.
-final frockSecretField = CatalogItem(
+final frockSecretField = ComponentImplementation(
   name: 'SecretField',
-  dataSchema: frockSchemaOf('SecretField'),
-  widgetBuilder: (itemContext) {
-    final data = (itemContext.data as Map).cast<String, Object?>();
-    return FrockSecretFieldView(
-      requestId: frockString(data['requestId']) ?? '',
-      payment: data['payment'] == true,
-      saved: data['state'] == 'saved',
-    );
-  },
+  schema: frockSchemaOf('SecretField'),
+  builder: (context, node, props, buildChild) => FrockSecretFieldView(
+    requestId: frockString(props.value('requestId')) ?? '',
+    payment: props.value('payment') == true,
+    saved: props.value('state') == 'saved',
+  ),
 );
 
 /// The component itself, so a test can draw one without a surface.
@@ -642,13 +623,15 @@ class _FrockSecretFieldViewState extends State<FrockSecretFieldView> {
 }
 
 /// The settled state: a title, the pill, and one line saying what happened.
-final frockReceipt = CatalogItem(
+final frockReceipt = ComponentImplementation(
   name: 'Receipt',
-  dataSchema: frockSchemaOf('Receipt'),
-  widgetBuilder: (itemContext) {
-    final data = (itemContext.data as Map).cast<String, Object?>();
-    final theme = Theme.of(itemContext.buildContext);
-    final tone = FrockTone.read(data['tone'], fallback: FrockTone.success);
+  schema: frockSchemaOf('Receipt'),
+  builder: (context, node, props, buildChild) {
+    final theme = Theme.of(context);
+    final tone = FrockTone.read(
+      props.value('tone'),
+      fallback: FrockTone.success,
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -656,38 +639,30 @@ final frockReceipt = CatalogItem(
         Row(
           children: [
             Expanded(
-              child: BoundString(
-                dataContext: itemContext.dataContext,
-                value: data['title'],
-                builder: (context, title) =>
-                    Text(title ?? '', style: theme.textTheme.titleSmall),
+              child: FrockBoundText(
+                value: props['title'],
+                style: theme.textTheme.titleSmall,
               ),
             ),
             const SizedBox(width: 8),
             // The pill gives way before the card's edge does, for the reason
-            // `StatusPill` is implicitly flexible: whatever the model writes
+            // `StatusPill` takes a share of a row: whatever the model writes
             // on it, it stays inside the card.
             Flexible(
-              child: BoundString(
-                dataContext: itemContext.dataContext,
-                value: data['status'],
-                builder: (context, status) =>
-                    FrockStatusPillView(label: status ?? '', tone: tone),
+              child: FrockStatusPillView(
+                label: props.string('status') ?? '',
+                tone: tone,
               ),
             ),
           ],
         ),
-        if (data['summary'] != null)
+        if (frockWrittenV1(props['summary']))
           Padding(
             padding: const EdgeInsets.only(top: 4),
-            child: BoundString(
-              dataContext: itemContext.dataContext,
-              value: data['summary'],
-              builder: (context, summary) => Text(
-                summary ?? '',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
+            child: FrockBoundText(
+              value: props['summary'],
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
           ),
@@ -697,7 +672,7 @@ final frockReceipt = CatalogItem(
 );
 
 /// The family, in the order the catalog declares it.
-final List<CatalogItem> frockCoreItemsV1 = List.unmodifiable([
+final List<ComponentImplementation> frockCoreItemsV1 = List.unmodifiable([
   frockStatusPill,
   frockKeyValueRows,
   frockCollapsibleText,

@@ -1,13 +1,11 @@
 /// Every Frock component inside a `Row`, which is a composition the Skill
-/// invites and `genui` does not constrain.
+/// invites.
 ///
-/// `genui`'s `Row` wraps a child in a `Flexible` only when the model wrote a
-/// `weight` on it or the component declares itself implicitly flexible. A
-/// child it does not wrap is laid out with unbounded width — and a component
-/// with a scroller, an `Expanded` or a stretched `Column` inside it does not
-/// survive that. A Frock component may not be a card that fails to draw
-/// because of where it was put, so every one of them takes a share of the row
-/// it is in, and this is the test that says so for all of them at once.
+/// A component with a scroller, an `Expanded` or a stretched `Column` inside
+/// it does not survive being laid out at unbounded width. A Frock component
+/// may not be a card that fails to draw because of where it was put, so every
+/// one of them has to take a share of the row it is in, and this is the test
+/// that says so for all of them at once.
 library;
 
 import 'package:flutter/material.dart';
@@ -146,17 +144,5 @@ void main() {
       minimalFrockComponents.keys.toSet(),
       frockCatalogSchemasV1.keys.toSet(),
     );
-  });
-
-  test('every Frock component takes a share of the row it is in', () {
-    for (final item in frockCatalogItemsV1) {
-      expect(
-        item.isImplicitlyFlexible,
-        isTrue,
-        reason:
-            '${item.name} would be laid out at unbounded width in a Row, '
-            'which is a composition the Skill invites',
-      );
-    }
   });
 }

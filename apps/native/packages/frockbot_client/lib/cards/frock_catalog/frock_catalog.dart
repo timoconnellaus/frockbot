@@ -1,9 +1,9 @@
 /// The Frock catalog: FrockBot's own A2UI components, drawn by the host.
 ///
 /// One family is one file here, beside the file under `schemas/` that declares
-/// its schemas. Each component is a `CatalogItem` whose `dataSchema` comes
-/// from that declaration — the schema is never written twice — and whose
-/// widget is ordinary app code in the app's theme. That is the whole of the
+/// its schemas. Each component is a `ComponentImplementation` whose `schema`
+/// comes from that declaration — the schema is never written twice — and
+/// whose widget is ordinary app code in the app's theme. That is the whole of the
 /// protocol's security model on this side: a Card names a component and binds
 /// values to it, and what appears on the screen is code this build compiled
 /// in.
@@ -23,7 +23,7 @@
 /// action. Trust chrome is a component only the host draws.
 library;
 
-import 'package:genui/genui.dart';
+import 'package:a2ui_flutter/a2ui_flutter.dart';
 
 import 'core.dart';
 import 'data.dart';
@@ -43,42 +43,18 @@ export 'schemas.dart';
 export 'structure.dart';
 export 'tone.dart';
 
-/// One component, declared to take a share of the flex it is in.
-///
-/// The rule lives here for every component this build registers, Frock or
-/// standard: `catalog.dart` re-registers the standard `Text` through it too,
-/// so a sentence beside a pill in a `Row` wraps rather than pushing the pill
-/// off the edge of the card.
-///
-/// `genui`'s `Row` and `Column` wrap a child in a `Flexible` only when the
-/// model wrote a `weight` on it or the component declares itself implicitly
-/// flexible; a child they do not wrap is laid out at unbounded width. A Frock
-/// component is not a `Text`: it has an `Expanded`, a stretched `Column` or a
-/// scroller inside it, and unbounded width is not a layout it survives. Put
-/// `ImageGallery` beside something in a `Row` — a composition the Skill
-/// invites — and the card would fail to draw at all.
-///
-/// So every one of them is flexible, here rather than 24 times. The fit
-/// `genui` gives an implicit weight is `FlexFit.loose`, which is what makes
-/// this safe in both axes: a `Row` hands the child a width it may use and a
-/// `Column` still lets it be exactly as tall as it wants to be.
-CatalogItem frockFlexibleV1(CatalogItem item) => CatalogItem(
-  name: item.name,
-  dataSchema: item.dataSchema,
-  widgetBuilder: item.widgetBuilder,
-  exampleData: item.exampleData,
-  isImplicitlyFlexible: true,
-);
-
 /// Every Frock component this build draws, family by family.
-final List<CatalogItem> frockCatalogItemsV1 = List.unmodifiable([
-  for (final item in [
-    ...frockCoreItemsV1,
-    ...frockDataItemsV1,
-    ...frockInputItemsV1,
-    ...frockMediaItemsV1,
-    ...frockRichTextItemsV1,
-    ...frockStructureItemsV1,
-  ])
-    frockFlexibleV1(item),
+///
+/// None of them is laid out at unbounded width beside something else: the
+/// standard catalog's `Row` gives every child a bounded share of its width,
+/// which a component holding an `Expanded`, a stretched `Column` or a
+/// scroller needs. Put `ImageGallery` beside something in a `Row` — a
+/// composition the Skill invites — and it still draws.
+final List<ComponentImplementation> frockCatalogItemsV1 = List.unmodifiable([
+  ...frockCoreItemsV1,
+  ...frockDataItemsV1,
+  ...frockInputItemsV1,
+  ...frockMediaItemsV1,
+  ...frockRichTextItemsV1,
+  ...frockStructureItemsV1,
 ]);

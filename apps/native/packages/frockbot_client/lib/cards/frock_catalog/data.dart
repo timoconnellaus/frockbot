@@ -12,21 +12,20 @@ library;
 
 import 'dart:math' show min;
 
+import 'package:a2ui_flutter/a2ui_flutter.dart';
 import 'package:flutter/material.dart';
-import 'package:genui/genui.dart';
 
 import '../../theme/frock_theme.dart';
 import 'common.dart';
 import 'tone.dart';
 
 /// One number, its name, and how it moved.
-final frockMetricTile = CatalogItem(
+final frockMetricTile = ComponentImplementation(
   name: 'MetricTile',
-  dataSchema: frockSchemaOf('MetricTile'),
-  widgetBuilder: (itemContext) {
-    final data = (itemContext.data as Map).cast<String, Object?>();
-    final theme = Theme.of(itemContext.buildContext);
-    final tone = FrockTone.read(data['tone']);
+  schema: frockSchemaOf('MetricTile'),
+  builder: (context, node, props, buildChild) {
+    final theme = Theme.of(context);
+    final tone = FrockTone.read(props.value('tone'));
     final colors = frockToneColorsV1(theme, tone);
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
@@ -45,8 +44,7 @@ final frockMetricTile = CatalogItem(
             children: [
               Flexible(
                 child: FrockBoundText(
-                  dataContext: itemContext.dataContext,
-                  value: data['value'],
+                  value: props['value'],
                   maxLines: 1,
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w600,
@@ -56,34 +54,28 @@ final frockMetricTile = CatalogItem(
                   ),
                 ),
               ),
-              if (data['delta'] != null) ...[
+              if (frockWrittenV1(props['delta'])) ...[
                 const SizedBox(width: 6),
                 Flexible(
-                  child: BoundString(
-                    dataContext: itemContext.dataContext,
-                    value: data['delta'],
-                    builder: (context, delta) =>
-                        FrockDeltaView(delta: delta ?? ''),
-                  ),
+                  child: FrockDeltaView(delta: props.string('delta') ?? ''),
                 ),
               ],
             ],
           ),
           const SizedBox(height: 2),
           Text(
-            frockString(data['label']) ?? '',
+            frockString(props.value('label')) ?? '',
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
-          if (data['caption'] != null)
+          if (frockWrittenV1(props['caption']))
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: FrockBoundText(
-                dataContext: itemContext.dataContext,
-                value: data['caption'],
+                value: props['caption'],
                 maxLines: 1,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
@@ -97,8 +89,8 @@ final frockMetricTile = CatalogItem(
 );
 
 // Two or three tiles in a `Row` is what a `MetricTile` is for, and it takes
-// its share of that row rather than its natural width — the rule every Frock
-// component is registered under (`frock_catalog.dart`).
+// its share of that row rather than its natural width, as every Frock
+// component does (`frock_catalog.dart`).
 
 /// A movement, drawn from the sign the model wrote.
 ///
@@ -140,37 +132,34 @@ class FrockDeltaView extends StatelessWidget {
 }
 
 /// How far through something is.
-final frockProgressBar = CatalogItem(
+final frockProgressBar = ComponentImplementation(
   name: 'ProgressBar',
-  dataSchema: frockSchemaOf('ProgressBar'),
-  widgetBuilder: (itemContext) {
-    final data = (itemContext.data as Map).cast<String, Object?>();
-    final theme = Theme.of(itemContext.buildContext);
-    final tone = FrockTone.read(data['tone'], fallback: FrockTone.ready);
+  schema: frockSchemaOf('ProgressBar'),
+  builder: (context, node, props, buildChild) {
+    final theme = Theme.of(context);
+    final tone = FrockTone.read(props.value('tone'), fallback: FrockTone.ready);
     final colors = frockToneColorsV1(theme, tone);
-    final indeterminate = frockBool(data['indeterminate']);
+    final indeterminate = frockBool(props.value('indeterminate'));
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (data['label'] != null || data['caption'] != null)
+        if (frockWrittenV1(props['label']) || frockWrittenV1(props['caption']))
           Padding(
             padding: const EdgeInsets.only(bottom: 6),
             child: Row(
               children: [
                 Expanded(
                   child: FrockBoundText(
-                    dataContext: itemContext.dataContext,
-                    value: data['label'],
+                    value: props['label'],
                     maxLines: 1,
                     style: theme.textTheme.bodyMedium,
                   ),
                 ),
-                if (data['caption'] != null)
+                if (frockWrittenV1(props['caption']))
                   Flexible(
                     child: FrockBoundText(
-                      dataContext: itemContext.dataContext,
-                      value: data['caption'],
+                      value: props['caption'],
                       maxLines: 1,
                       align: TextAlign.right,
                       style: theme.textTheme.bodySmall?.copyWith(
@@ -183,22 +172,18 @@ final frockProgressBar = CatalogItem(
           ),
         ClipRRect(
           borderRadius: BorderRadius.circular(999),
-          child: BoundNumber(
-            dataContext: itemContext.dataContext,
-            value: data['value'],
-            builder: (context, value) => LinearProgressIndicator(
-              // A proportion outside 0..1 is clamped rather than refused: the
-              // bar is a picture of progress, and a card is not worth losing
-              // over a model that counted past the end.
-              value: indeterminate
-                  ? null
-                  : ((value ?? 0).toDouble()).clamp(0.0, 1.0),
-              minHeight: 6,
-              backgroundColor: theme.colorScheme.onSurface.withValues(
-                alpha: 0.08,
-              ),
-              valueColor: AlwaysStoppedAnimation<Color>(colors.ink),
+          child: LinearProgressIndicator(
+            // A proportion outside 0..1 is clamped rather than refused: the
+            // bar is a picture of progress, and a card is not worth losing
+            // over a model that counted past the end.
+            value: indeterminate
+                ? null
+                : (props.number('value') ?? 0).clamp(0.0, 1.0),
+            minHeight: 6,
+            backgroundColor: theme.colorScheme.onSurface.withValues(
+              alpha: 0.08,
             ),
+            valueColor: AlwaysStoppedAnimation<Color>(colors.ink),
           ),
         ),
       ],
@@ -207,14 +192,13 @@ final frockProgressBar = CatalogItem(
 );
 
 /// Rows in aligned columns.
-final frockDataTable = CatalogItem(
+final frockDataTable = ComponentImplementation(
   name: 'DataTable',
-  dataSchema: frockSchemaOf('DataTable'),
-  widgetBuilder: (itemContext) {
-    final data = (itemContext.data as Map).cast<String, Object?>();
-    final theme = Theme.of(itemContext.buildContext);
-    final columns = frockRows(data['columns'], max: 5);
-    final rows = frockRows(data['rows'], max: 24);
+  schema: frockSchemaOf('DataTable'),
+  builder: (context, node, props, buildChild) {
+    final theme = Theme.of(context);
+    final columns = frockRows(props.value('columns'), max: 5);
+    final rows = frockRows(props.value('rows'), max: 24);
     if (columns.isEmpty) return const SizedBox.shrink();
     final weights = [
       for (final column in columns)
@@ -289,7 +273,6 @@ final frockDataTable = CatalogItem(
                     Padding(
                       padding: EdgeInsets.only(right: index == 0 ? 8 : 0),
                       child: FrockBoundText(
-                        dataContext: itemContext.dataContext,
                         // A row shorter than the header is padded rather than
                         // refused; a longer one loses its tail. Either way the
                         // columns still line up, which is the whole point.
@@ -303,11 +286,11 @@ final frockDataTable = CatalogItem(
               ],
             ),
           ),
-        if (data['caption'] != null)
+        if (props.value('caption') != null)
           Padding(
             padding: const EdgeInsets.only(top: 6),
             child: Text(
-              frockString(data['caption']) ?? '',
+              frockString(props.value('caption')) ?? '',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
@@ -337,13 +320,12 @@ Object? _cellAt(Object? cells, int index) {
 }
 
 /// What happened, in order, down a rail.
-final frockTimeline = CatalogItem(
+final frockTimeline = ComponentImplementation(
   name: 'Timeline',
-  dataSchema: frockSchemaOf('Timeline'),
-  widgetBuilder: (itemContext) {
-    final data = (itemContext.data as Map).cast<String, Object?>();
-    final theme = Theme.of(itemContext.buildContext);
-    final entries = frockRows(data['entries'], max: 20);
+  schema: frockSchemaOf('Timeline'),
+  builder: (context, node, props, buildChild) {
+    final theme = Theme.of(context);
+    final entries = frockRows(props.value('entries'), max: 20);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
@@ -372,7 +354,6 @@ final frockTimeline = CatalogItem(
                           children: [
                             Expanded(
                               child: FrockBoundText(
-                                dataContext: itemContext.dataContext,
                                 value: entries[index]['title'],
                                 style: theme.textTheme.bodyMedium?.copyWith(
                                   fontWeight: FontWeight.w600,
@@ -392,11 +373,10 @@ final frockTimeline = CatalogItem(
                             ],
                           ],
                         ),
-                        if (entries[index]['detail'] != null)
+                        if (frockWrittenV1(entries[index]['detail']))
                           Padding(
                             padding: const EdgeInsets.only(top: 2),
                             child: FrockBoundText(
-                              dataContext: itemContext.dataContext,
                               value: entries[index]['detail'],
                               style: theme.textTheme.bodySmall?.copyWith(
                                 color: theme.colorScheme.onSurfaceVariant,
@@ -453,7 +433,7 @@ class FrockTimelineRail extends StatelessWidget {
 }
 
 /// The family, in the order the catalog declares it.
-final List<CatalogItem> frockDataItemsV1 = List.unmodifiable([
+final List<ComponentImplementation> frockDataItemsV1 = List.unmodifiable([
   frockMetricTile,
   frockProgressBar,
   frockDataTable,

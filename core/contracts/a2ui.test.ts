@@ -48,7 +48,7 @@ describe("the four agent messages", () => {
   });
 
   test("the renderer's v0.9 envelope and its `theme` are stored as 1.0", () => {
-    // genui 0.10.3 writes v0.9 and spells surface properties `theme`. The
+    // The client draws v0.9 and spells surface properties `theme`. The
     // record is 1.0 whichever the client sent.
     expect(
       decodeA2uiAgentMessageV1({

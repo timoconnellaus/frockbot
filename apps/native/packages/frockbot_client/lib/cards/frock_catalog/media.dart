@@ -7,8 +7,8 @@
 /// thing and lives in `actions.md`.
 library;
 
+import 'package:a2ui_flutter/a2ui_flutter.dart';
 import 'package:flutter/material.dart';
-import 'package:genui/genui.dart';
 
 import '../../theme/frock_theme.dart';
 import 'common.dart';
@@ -21,12 +21,11 @@ List<Map<String, Object?>> _images(Object? value) => [
 ];
 
 /// Several pictures in one component.
-final frockImageGallery = CatalogItem(
+final frockImageGallery = ComponentImplementation(
   name: 'ImageGallery',
-  dataSchema: frockSchemaOf('ImageGallery'),
-  widgetBuilder: (itemContext) {
-    final data = (itemContext.data as Map).cast<String, Object?>();
-    return FrockImageGalleryView(images: _images(data['images']));
+  schema: frockSchemaOf('ImageGallery'),
+  builder: (context, node, props, buildChild) {
+    return FrockImageGalleryView(images: _images(props.value('images')));
   },
 );
 
@@ -155,13 +154,12 @@ IconData frockFileIconV1(String? kind) => switch (kind) {
 };
 
 /// A file the card is about.
-final frockFileAttachment = CatalogItem(
+final frockFileAttachment = ComponentImplementation(
   name: 'FileAttachment',
-  dataSchema: frockSchemaOf('FileAttachment'),
-  widgetBuilder: (itemContext) {
-    final data = (itemContext.data as Map).cast<String, Object?>();
-    final theme = Theme.of(itemContext.buildContext);
-    final url = frockString(data['url']);
+  schema: frockSchemaOf('FileAttachment'),
+  builder: (context, node, props, buildChild) {
+    final theme = Theme.of(context);
+    final url = frockString(props.value('url'));
     final openable = url != null && url.startsWith('https://');
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
@@ -173,7 +171,7 @@ final frockFileAttachment = CatalogItem(
       child: Row(
         children: [
           Icon(
-            frockFileIconV1(frockString(data['kind'])),
+            frockFileIconV1(frockString(props.value('kind'))),
             size: 20,
             color: theme.colorScheme.onSurfaceVariant,
           ),
@@ -184,15 +182,14 @@ final frockFileAttachment = CatalogItem(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  frockString(data['name']) ?? '',
+                  frockString(props.value('name')) ?? '',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodyMedium,
                 ),
-                if (data['detail'] != null)
+                if (frockWrittenV1(props['detail']))
                   FrockBoundText(
-                    dataContext: itemContext.dataContext,
-                    value: data['detail'],
+                    value: props['detail'],
                     maxLines: 1,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
@@ -213,17 +210,16 @@ final frockFileAttachment = CatalogItem(
 );
 
 /// One link, with enough of what is behind it to decide by.
-final frockLinkPreview = CatalogItem(
+final frockLinkPreview = ComponentImplementation(
   name: 'LinkPreview',
-  dataSchema: frockSchemaOf('LinkPreview'),
-  widgetBuilder: (itemContext) {
-    final data = (itemContext.data as Map).cast<String, Object?>();
-    final theme = Theme.of(itemContext.buildContext);
-    final url = frockString(data['url']) ?? '';
-    final image = frockString(data['imageUrl']);
+  schema: frockSchemaOf('LinkPreview'),
+  builder: (context, node, props, buildChild) {
+    final theme = Theme.of(context);
+    final url = frockString(props.value('url')) ?? '';
+    final image = frockString(props.value('imageUrl'));
     final site =
         [
-          frockString(data['site']),
+          frockString(props.value('site')),
           Uri.tryParse(url)?.host,
         ].firstWhere((it) => it != null && it.isNotEmpty, orElse: () => null) ??
         'the web';
@@ -269,19 +265,17 @@ final frockLinkPreview = CatalogItem(
                     ),
                   ),
                   FrockBoundText(
-                    dataContext: itemContext.dataContext,
-                    value: data['title'],
+                    value: props['title'],
                     maxLines: 2,
                     style: theme.textTheme.bodyMedium?.copyWith(
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                  if (data['description'] != null)
+                  if (frockWrittenV1(props['description']))
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
                       child: FrockBoundText(
-                        dataContext: itemContext.dataContext,
-                        value: data['description'],
+                        value: props['description'],
                         maxLines: 2,
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
@@ -305,7 +299,7 @@ final frockLinkPreview = CatalogItem(
 );
 
 /// The family, in the order the catalog declares it.
-final List<CatalogItem> frockMediaItemsV1 = List.unmodifiable([
+final List<ComponentImplementation> frockMediaItemsV1 = List.unmodifiable([
   frockImageGallery,
   frockFileAttachment,
   frockLinkPreview,

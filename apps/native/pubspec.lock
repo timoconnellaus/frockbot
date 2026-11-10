@@ -5,10 +5,18 @@ packages:
     dependency: transitive
     description:
       name: a2ui_core
-      sha256: "81cd97d82d58719e68856e901b8e8cae45be201ed7b1f9a0c9ba79226dc87208"
+      sha256: "69e8b0cf911b7d7ed0f7a6e39a8422ce0ca7a4d967bb07046218c294b27fac0e"
       url: "https://pub.dev"
     source: hosted
-    version: "0.1.1"
+    version: "0.6.0"
+  a2ui_flutter:
+    dependency: transitive
+    description:
+      name: a2ui_flutter
+      sha256: "1e18b829e7b696f4ec0752b003a2ee7be588955ba785d745cdb9581ed4c2c709"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.2.0"
   android_file_picker:
     dependency: transitive
     description:
@@ -323,14 +331,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "6.0.0"
-  flutter_markdown_plus:
-    dependency: transitive
-    description:
-      name: flutter_markdown_plus
-      sha256: fce641d6c2106cc495de1cd603f97a4f9d615a97a64011928ded380dbdade935
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.0.12"
   flutter_secure_storage:
     dependency: transitive
     description:
@@ -402,22 +402,6 @@ packages:
     description: flutter
     source: sdk
     version: "0.0.0"
-  genai_primitives:
-    dependency: transitive
-    description:
-      name: genai_primitives
-      sha256: "5a1e8c7ae9caf01aa609f59c54de47b73f51bf1ae95e0f679b7c7ab6948c4d9d"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.2.4"
-  genui:
-    dependency: transitive
-    description:
-      name: genui
-      sha256: e5a744aa9dfb28326fa397a1e445767e69bf7a5b99bda1e640daf6482f46c37e
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.10.3"
   graphs:
     dependency: transitive
     description:
@@ -559,14 +543,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.3.0"
-  markdown:
-    dependency: transitive
-    description:
-      name: markdown
-      sha256: ee85086ad7698b42522c6ad42fe195f1b9898e4d974a1af4576c1a3a176cada9
-      url: "https://pub.dev"
-    source: hosted
-    version: "7.3.1"
   matcher:
     dependency: transitive
     description:
@@ -591,14 +567,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.18.3"
-  mime:
-    dependency: transitive
-    description:
-      name: mime
-      sha256: bd47de35f07e27267e69c8c8b22edf9473bfee170a60d60fcc93730c5144b7f6
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.1.0"
   objective_c:
     dependency: transitive
     description:
@@ -631,6 +599,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.9.1"
+  path_parsing:
+    dependency: transitive
+    description:
+      name: path_parsing
+      sha256: "883402936929eac138ee0a45da5b0f2c80f89913e6dc3bf77eb65b84b409c6ca"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.1.0"
   path_provider:
     dependency: transitive
     description:
@@ -876,14 +852,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.1.4"
-  stream_transform:
-    dependency: transitive
-    description:
-      name: stream_transform
-      sha256: a00e5f18bffc764f923e7dec1038527f7fe7a1791361a7117f0358193f13d53a
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.1.2"
   string_scanner:
     dependency: transitive
     description:
@@ -1068,14 +1036,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.4.0"
-  video_player_win:
-    dependency: transitive
-    description:
-      name: video_player_win
-      sha256: df03760c1498ee0c0efe2688b302c331acf46489e9821761d1adb137148502f1
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.3.0"
   vm_service:
     dependency: transitive
     description:

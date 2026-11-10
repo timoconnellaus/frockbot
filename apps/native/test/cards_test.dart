@@ -146,21 +146,21 @@ void main() {
       for (final name in frockCatalogSchemasV1.keys) {
         expect(cardComponentNamesV1, contains(name));
       }
-      expect(cardCatalogV1.matchesId(frockCatalogIdV1), isTrue);
+      expect(cardCatalogV1.id, frockCatalogIdV1);
       // A surface created under the standard catalog still finds these.
-      expect(
-        cardCatalogV1.matchesId(
-          'https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json',
-        ),
-        isTrue,
+      final standard = cardCatalogsV1.singleWhere(
+        (catalog) =>
+            catalog.id ==
+            'https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json',
       );
+      expect(standard.components.keys.toSet(), cardComponentNamesV1);
     });
 
     test('every Frock component states its schema once, in the Dart', () {
       expect(frockCatalogItemsV1.length, frockCatalogSchemasV1.length);
       for (final item in frockCatalogItemsV1) {
         final declared = frockCatalogSchemasV1[item.name]!;
-        final built = item.dataSchema.value;
+        final built = item.schema.value;
         expect(built['properties'], isA<Map<String, Object?>>());
         for (final property
             in (declared['properties']! as Map<String, Object?>).keys) {
@@ -177,7 +177,11 @@ void main() {
     test('a 1.0 record becomes the three messages v0.9 speaks', () {
       final messages = cardMessagesV1(
         CardView.fromJson(
-          cardJson()..['surfaceProperties'] = {'primaryColor': '#db4b6d'},
+          cardJson()
+            ..['surfaceProperties'] = {
+              'primaryColor': '#db4b6d',
+              'agentDisplayName': 'Frock',
+            },
         ),
       );
       expect(messages.length, 3);
@@ -188,7 +192,8 @@ void main() {
       expect(create['surfaceId'], 'draft-1');
       expect(create['catalogId'], frockCatalogIdV1);
       // 1.0 calls it `surfaceProperties`; the renderer calls it `theme`.
-      expect(create['theme'], {'primaryColor': '#db4b6d'});
+      // The palette is the app's, so a colour does not reach the renderer.
+      expect(create['theme'], {'agentDisplayName': 'Frock'});
       expect(create.containsKey('surfaceProperties'), isFalse);
       // v0.9's createSurface carries no content at all.
       expect(create.containsKey('components'), isFalse);
