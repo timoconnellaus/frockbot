@@ -5,8 +5,8 @@
 /// every Frock component: the Dart that draws it, and the JSON the model is
 /// taught to write. They agree here and nowhere else: the files under
 /// `schemas/` are the source of truth, the widget files build each
-/// `CatalogItem` from them, and `scripts/generate-frock-catalog.ts` wraps them
-/// in the A2UI catalog definition and writes
+/// `ComponentImplementation` from them, and `scripts/generate-frock-catalog.ts`
+/// wraps them in the A2UI catalog definition and writes
 /// `core/protocol-schemas/schema/frock-catalog.json`, which the `typecheck`
 /// gate refuses to let go stale.
 ///
@@ -23,8 +23,8 @@
 /// finds; the list below is in the same order for the same reason, so the two
 /// can never disagree about which component a name belongs to.
 ///
-/// Each entry is the component's own properties, as `CatalogItem.dataSchema`
-/// wants them: no `component` discriminator and no `id`, which A2UI's common
+/// Each entry is the component's own properties, as
+/// `ComponentImplementation.schema` wants them: no `component` discriminator and no `id`, which A2UI's common
 /// types already carry. A value a settled card changes is declared a
 /// `DynamicString`, so the Bot may bind it to the data model by pointer
 /// rather than resend the layout.

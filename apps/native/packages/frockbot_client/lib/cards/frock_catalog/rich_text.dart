@@ -7,9 +7,9 @@
 /// nothing an author writes can become anything but text, a link or a block.
 library;
 
+import 'package:a2ui_flutter/a2ui_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:genui/genui.dart';
 
 import '../../shell/markdown.dart';
 import '../../theme/frock_theme.dart';
@@ -17,38 +17,28 @@ import 'common.dart';
 import 'links.dart';
 
 /// A body of Markdown, in the app's own subset.
-final frockMarkdown = CatalogItem(
+final frockMarkdown = ComponentImplementation(
   name: 'Markdown',
-  dataSchema: frockSchemaOf('Markdown'),
-  widgetBuilder: (itemContext) {
-    final data = (itemContext.data as Map).cast<String, Object?>();
-    final theme = Theme.of(itemContext.buildContext);
-    return BoundString(
-      dataContext: itemContext.dataContext,
-      value: data['text'],
-      builder: (context, text) => ShellMarkdown(
-        text: text ?? '',
-        style: theme.textTheme.bodyMedium,
-        onOpenLink: (url) => frockOpenLinkV1(url),
-      ),
+  schema: frockSchemaOf('Markdown'),
+  builder: (context, node, props, buildChild) {
+    final theme = Theme.of(context);
+    return ShellMarkdown(
+      text: props.string('text') ?? '',
+      style: theme.textTheme.bodyMedium,
+      onOpenLink: (url) => frockOpenLinkV1(url),
     );
   },
 );
 
 /// Code, a command, or a payload, with a control that copies it.
-final frockCodeBlock = CatalogItem(
+final frockCodeBlock = ComponentImplementation(
   name: 'CodeBlock',
-  dataSchema: frockSchemaOf('CodeBlock'),
-  widgetBuilder: (itemContext) {
-    final data = (itemContext.data as Map).cast<String, Object?>();
-    return BoundString(
-      dataContext: itemContext.dataContext,
-      value: data['code'],
-      builder: (context, code) => FrockCodeBlockView(
-        code: code ?? '',
-        language: frockString(data['language']),
-        caption: frockString(data['caption']),
-      ),
+  schema: frockSchemaOf('CodeBlock'),
+  builder: (context, node, props, buildChild) {
+    return FrockCodeBlockView(
+      code: props.string('code') ?? '',
+      language: frockString(props.value('language')),
+      caption: frockString(props.value('caption')),
     );
   },
 );
@@ -146,12 +136,11 @@ class _FrockCodeBlockViewState extends State<FrockCodeBlockView> {
 }
 
 /// Something somebody else wrote, set apart from the card's own words.
-final frockQuote = CatalogItem(
+final frockQuote = ComponentImplementation(
   name: 'Quote',
-  dataSchema: frockSchemaOf('Quote'),
-  widgetBuilder: (itemContext) {
-    final data = (itemContext.data as Map).cast<String, Object?>();
-    final theme = Theme.of(itemContext.buildContext);
+  schema: frockSchemaOf('Quote'),
+  builder: (context, node, props, buildChild) {
+    final theme = Theme.of(context);
     return IntrinsicHeight(
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -164,19 +153,17 @@ final frockQuote = CatalogItem(
               mainAxisSize: MainAxisSize.min,
               children: [
                 FrockBoundText(
-                  dataContext: itemContext.dataContext,
-                  value: data['text'],
+                  value: props['text'],
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                     fontStyle: FontStyle.italic,
                   ),
                 ),
-                if (data['attribution'] != null)
+                if (frockWrittenV1(props['attribution']))
                   Padding(
                     padding: const EdgeInsets.only(top: 4),
                     child: FrockBoundText(
-                      dataContext: itemContext.dataContext,
-                      value: data['attribution'],
+                      value: props['attribution'],
                       maxLines: 1,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,
@@ -193,7 +180,7 @@ final frockQuote = CatalogItem(
 );
 
 /// The family, in the order the catalog declares it.
-final List<CatalogItem> frockRichTextItemsV1 = List.unmodifiable([
+final List<ComponentImplementation> frockRichTextItemsV1 = List.unmodifiable([
   frockMarkdown,
   frockCodeBlock,
   frockQuote,

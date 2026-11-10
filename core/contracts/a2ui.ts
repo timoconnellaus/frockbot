@@ -60,14 +60,14 @@
 // A message past any of them is refused whole, not truncated: a partial
 // surface misrepresents what its author said.
 //
-// One version note. The Flutter renderer the client will draw a Card with —
-// `genui` 0.10.3 on `a2ui_core` 0.1.1 — speaks v0.9: it rejects any envelope
-// whose `version` is not literally `"v0.9"`, and it spells `createSurface`'s
-// surface properties `theme`. The four message names are the same in both. So
-// this seam decodes 1.0, accepts a v0.9 envelope and its `theme` beside it,
-// and stores the 1.0 shape; feeding the renderer what it speaks is the
-// client's translation, not the record's. When `genui` catches up, the
-// tolerance here is what gets deleted, and nothing downstream changes.
+// One version note. The Flutter client draws a Card as v0.9 —
+// `a2ui_flutter`'s v0.9 standard catalog on `a2ui_core` — whose envelope
+// `version` is literally `"v0.9"` and which spells `createSurface`'s surface
+// properties `theme`. The four message names are the same in both. So this
+// seam decodes 1.0, accepts a v0.9 envelope and its `theme` beside it, and
+// stores the 1.0 shape; feeding the renderer what it speaks is the client's
+// translation, not the record's. When the client draws 1.0, the tolerance
+// here is what gets deleted, and nothing downstream changes.
 
 type A2uiScalarV1 = null | boolean | number | string;
 type A2uiDepth1V1 =

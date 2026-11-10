@@ -17,14 +17,15 @@
 /// the presses the renderer will actually raise.
 ///
 /// **Translation.** The record is the *folded* surface: its component set, its
-/// data model, its revision. `genui` 0.10.3 on `a2ui_core` 0.1.1 speaks v0.9,
-/// where `createSurface` carries neither components nor a data model — it sets
-/// up the surface and nothing else — and where the surface's properties are
-/// spelled `theme` and the envelope's version is literally `v0.9`. So one
+/// data model, its revision. The renderer draws it as v0.9 (`a2ui_flutter`'s
+/// v0.9 standard catalog on `a2ui_core`), where `createSurface` carries
+/// neither components nor a data model — it sets up the surface and nothing
+/// else — and where the surface's properties are spelled `theme` and the
+/// envelope's version is literally `v0.9`. So one
 /// record becomes three messages: create the surface under its catalog, put
 /// the whole component set on it, write the whole data model at the root. That
-/// is the only translation the client does, and when the renderer catches up
-/// to 1.0 it is the only thing that changes.
+/// is the only translation the client does, and when the client draws cards
+/// as 1.0 it is the only thing that changes.
 library;
 
 import 'dart:convert';
@@ -171,7 +172,7 @@ List<Map<String, Object?>> cardMessagesV1(
   // anything else is the Frock catalog, which is every component either
   // catalog declares.
   final catalogId =
-      card.catalogId != null && cardCatalogV1.matchesId(card.catalogId!)
+      cardCatalogsV1.any((catalog) => catalog.id == card.catalogId)
       ? card.catalogId!
       : frockCatalogIdV1;
   return [
@@ -181,7 +182,13 @@ List<Map<String, Object?>> cardMessagesV1(
         'surfaceId': card.surfaceId,
         'catalogId': catalogId,
         'sendDataModel': card.sendDataModel,
-        if (card.surfaceProperties != null) 'theme': card.surfaceProperties,
+        // Without its `primaryColor`: the renderer would recolor the standard
+        // components from it, and a card names a tone, never a colour.
+        if (card.surfaceProperties != null)
+          'theme': {
+            for (final entry in card.surfaceProperties!.entries)
+              if (entry.key != 'primaryColor') entry.key: entry.value,
+          },
       },
     },
     {

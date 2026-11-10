@@ -99,9 +99,9 @@ for (const [name, schema] of Object.entries(schemas)) {
   }
 }
 
-// The same shape the standard catalog has, and the same one `genui` builds
-// from a `Catalog` at runtime: each component is the common component fields
-// plus its own, with its name as the discriminator, and nothing else.
+// The same shape the standard catalog has: each component is the common
+// component fields plus its own, with its name as the discriminator, and
+// nothing else.
 const definition = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
   $id: catalogId,

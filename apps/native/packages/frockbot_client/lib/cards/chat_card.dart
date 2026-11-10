@@ -37,12 +37,15 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 
+import 'package:a2ui_core/a2ui_core.dart';
+import 'package:a2ui_flutter/a2ui_flutter.dart';
+import 'package:a2ui_flutter/v0_9/basic_catalog.dart' as v0_9;
 import 'package:flutter/material.dart';
-import 'package:genui/genui.dart';
-import 'package:a2ui_core/a2ui_core.dart' as core;
 
 import '../client/transport.dart';
+import '../shell/markdown.dart';
 import '../theme/frock_theme.dart';
 import '../view/embed.dart';
 import 'catalog.dart';
@@ -93,8 +96,8 @@ class _CardChatCardState extends State<CardChatCard>
   CardsApi? api;
   String? botId;
   Listenable? invalidations;
-  SurfaceController? controller;
-  StreamSubscription<ChatMessage>? interactions;
+  MessageProcessor<ComponentImplementation>? processor;
+  List<Subscription> subscriptions = const [];
   CardView? card;
 
   /// Why the card is not drawn, when it is not.
@@ -200,24 +203,25 @@ class _CardChatCardState extends State<CardChatCard>
   /// out; `press` releases it when its own answer arrives.
   void adopt(CardView answer) {
     epoch++;
-    final live = controller;
+    final live = processor;
     // What the person had put into the old renderer, kept across the rebuild
     // when the durable model has not moved. See `keptDataModel`.
     final kept = keptDataModel(answer);
-    SurfaceController? next;
+    MessageProcessor<ComponentImplementation>? next;
     String? said;
     try {
       admitCardV1(answer);
-      final built = SurfaceController(catalogs: [cardCatalogV1]);
+      final built = MessageProcessor<ComponentImplementation>(
+        catalogs: cardCatalogsV1,
+        validationConfig: ValidationConfig.relaxed,
+      );
       next = built;
-      for (final message in cardMessagesV1(answer, dataModel: kept)) {
-        // The intake is where the renderer validates, and validation resolves
-        // the draft's meta-schema: inside this zone those documents come from
-        // the build, so drawing a card never reaches the network.
-        withLocalCardSchemasV1(
-          () => built.handleMessage(core.A2uiMessage.fromJson(message)),
-        );
-      }
+      // The intake is where the renderer validates, and inside this zone any
+      // schema document it asked for would come from the build, so drawing a
+      // card never reaches the network.
+      withLocalCardSchemasV1(
+        () => built.processMessages(cardMessagesV1(answer, dataModel: kept)),
+      );
     } on CardRefusal catch (refused) {
       said = refused.message;
       next?.dispose();
@@ -229,8 +233,15 @@ class _CardChatCardState extends State<CardChatCard>
       next?.dispose();
       next = null;
     }
-    unawaited(interactions?.cancel());
-    interactions = next?.onSubmit.listen(_interaction);
+    for (final subscription in subscriptions) {
+      subscription.unsubscribe();
+    }
+    subscriptions = [
+      if (next != null) ...[
+        next.model.onAction.subscribe(_action),
+        next.model.onError.subscribe(_error),
+      ],
+    ];
     if (retryCommandId != null && answer.revision != retryRevision) {
       retryCommandId = null;
       retryPress = null;
@@ -240,38 +251,36 @@ class _CardChatCardState extends State<CardChatCard>
       card = answer;
       refusal = said;
       failure = null;
-      controller = next;
+      processor = next;
     });
     live?.dispose();
   }
 
-  /// What the renderer sends back: a press, or its own refusal to draw.
-  void _interaction(ChatMessage message) {
-    for (final part in message.parts.uiInteractionParts) {
-      final Object? decoded;
-      try {
-        decoded = decodeBoundedJson(part.interaction, maxBytes: 64000);
-      } catch (_) {
-        continue;
-      }
-      if (decoded is! Map) continue;
-      final action = decoded['action'];
-      if (action is Map && action['name'] is String) {
-        unawaited(
-          press(
-            CardPress(
-              name: action['name']! as String,
-              componentId: action['sourceComponentId'] as String?,
-              context: (action['context'] as Map?)?.cast<String, Object?>(),
-            ),
-          ),
-        );
-        continue;
-      }
-      final error = decoded['error'];
-      if (error is Map && mounted) {
-        setState(() => refusal = 'This card can’t be drawn by this app.');
-      }
+  /// A press the renderer raised, held to the bound every value this client
+  /// decodes is held to: one past it is not sent.
+  void _action(A2uiRendererAction raised) {
+    final Object? decoded;
+    try {
+      decoded = decodeBoundedJson(jsonEncode(raised.toJson()), maxBytes: 64000);
+    } catch (_) {
+      return;
+    }
+    if (decoded is! Map || decoded['name'] is! String) return;
+    unawaited(
+      press(
+        CardPress(
+          name: decoded['name']! as String,
+          componentId: decoded['sourceComponentId'] as String?,
+          context: (decoded['context'] as Map?)?.cast<String, Object?>(),
+        ),
+      ),
+    );
+  }
+
+  /// The renderer's own refusal to draw.
+  void _error(A2uiRendererError error) {
+    if (mounted) {
+      setState(() => refusal = 'This card can’t be drawn by this app.');
     }
   }
 
@@ -299,17 +308,15 @@ class _CardChatCardState extends State<CardChatCard>
   }
 
   /// The data model as the renderer holds it, which is the one the person has
-  /// been editing: genui writes a control's value into the live surface's data
-  /// model, and nothing writes it back to the record the read decoded. So a
-  /// press that carries "the data model" asks the renderer for it rather than
-  /// re-sending what was read.
+  /// been editing: the renderer writes a control's value into the live
+  /// surface's data model, and nothing writes it back to the record the read
+  /// decoded. So a press that carries "the data model" asks the renderer for
+  /// it rather than re-sending what was read.
   Map<String, Object?>? liveDataModel() {
-    final live = controller;
-    if (live == null) return null;
-    final value = live
-        .contextFor(widget.surfaceId)
-        .dataModel
-        .getValue<Object?>(DataPath.root);
+    final value = processor?.model
+        .getSurface(widget.surfaceId)
+        ?.dataModel
+        .get('/');
     return value is Map ? value.cast<String, Object?>() : null;
   }
 
@@ -443,7 +450,7 @@ class _CardChatCardState extends State<CardChatCard>
         ),
       );
     }
-    final live = controller;
+    final surface = processor?.model.getSurface(widget.surfaceId);
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 4),
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
@@ -456,7 +463,7 @@ class _CardChatCardState extends State<CardChatCard>
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (live == null)
+          if (surface == null)
             const SizedBox(
               height: 72,
               child: Center(child: CircularProgressIndicator()),
@@ -464,7 +471,7 @@ class _CardChatCardState extends State<CardChatCard>
           else
             CardPressScope(
               pending: pending,
-              // A card answering a press is held still: a genui control the
+              // A card answering a press is held still: a standard control the
               // host does not draw itself cannot be disabled one button at a
               // time, and a second press against a revision the first one is
               // about to move would be refused anyway.
@@ -475,8 +482,16 @@ class _CardChatCardState extends State<CardChatCard>
                   duration: FrockTheme.motion(context, FrockTheme.fast),
                   child: CardSecretsScope(
                     secrets: this,
-                    child: Surface(
-                      surfaceContext: live.contextFor(widget.surfaceId),
+                    // A standard `Text` is Markdown in the app's own subset,
+                    // drawn by the widget the transcript draws a Bot's
+                    // messages with.
+                    child: v0_9.A2uiMarkdown(
+                      builder: (context, markdown, style) =>
+                          ShellMarkdown(text: markdown, style: style),
+                      child: A2uiSurface(
+                        key: ObjectKey(surface),
+                        surface: surface,
+                      ),
                     ),
                   ),
                 ),
@@ -504,8 +519,10 @@ class _CardChatCardState extends State<CardChatCard>
   void dispose() {
     epoch++;
     invalidations?.removeListener(_invalidated);
-    unawaited(interactions?.cancel());
-    controller?.dispose();
+    for (final subscription in subscriptions) {
+      subscription.unsubscribe();
+    }
+    processor?.dispose();
     for (final draft in secretDrafts.values) {
       draft.dispose();
     }
